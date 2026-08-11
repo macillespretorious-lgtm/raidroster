@@ -38,7 +38,7 @@ function clean_toon_entry($t, $isAlt) {
     $out = [
         'id'          => substr((string)($t['id'] ?? ''), 0, 64),
         'discordName' => substr(trim($t['discordName'] ?? ''), 0, 100),
-        'discordId'   => preg_replace('/[^0-9]/', '', $t['discordId'] ?? ''),
+        'discordId'   => substr(trim($t['discordId'] ?? ''), 0, 100),
         'class'       => substr(trim($t['class'] ?? ''), 0, 30),
         'mainSpec'    => substr(trim($t['mainSpec'] ?? ''), 0, 30),
         'altSpec'     => substr(trim($t['altSpec'] ?? ''), 0, 30),
