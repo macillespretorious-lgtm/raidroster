@@ -1,0 +1,25 @@
+name: Deploy to 20i
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via 20i git API
+        run: |
+          curl -s -X POST https://api.20i.com/package/3866873/gitManager \
+            -H "Authorization: Bearer $(echo -n '${{ secrets.TWENTYI_API_KEY }}' | base64)" \
+            -H "Content-Type: application/json" \
+            -d '{"id":null,"jsonrpc":"2.0","method":"deployRepositoryV2","params":[{"repositoryId":21875,"deploymentBranch":"main"}]}' \
+            | tee /tmp/deploy-response.json
+          if grep -q '"message"' /tmp/deploy-response.json; then
+            echo "Deploy triggered"
+          else
+            echo "Deploy may have failed:" && cat /tmp/deploy-response.json && exit 1
+          fi
