@@ -110,6 +110,7 @@ function auth_result_page($type, $message = '', $return = '/') {
   <meta charset="utf-8">
   <title>RaidRoster &mdash; Login</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {

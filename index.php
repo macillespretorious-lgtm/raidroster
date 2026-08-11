@@ -11,6 +11,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <title>RaidRoster.net</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Multi-tenant WoW guild raid roster and assignment tool, built around your Discord server.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&display=swap" rel="stylesheet">

@@ -27,6 +27,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <meta charset="utf-8">
   <title><?= h($tenant['name']) ?> &mdash; RaidRoster</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {

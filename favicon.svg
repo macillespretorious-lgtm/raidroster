@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <radialGradient id="medallion" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#3a2a1a"/>
+      <stop offset="100%" stop-color="#160f09"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e8c477"/>
+      <stop offset="100%" stop-color="#8a5a2b"/>
+    </linearGradient>
+    <linearGradient id="bladeA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e6ecf5"/>
+      <stop offset="100%" stop-color="#8b96a8"/>
+    </linearGradient>
+    <linearGradient id="bladeB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f0c987"/>
+      <stop offset="100%" stop-color="#a06a2e"/>
+    </linearGradient>
+    <radialGradient id="ember" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ffcf8a"/>
+      <stop offset="100%" stop-color="#d1451c"/>
+    </radialGradient>
+  </defs>
+
+  <circle cx="60" cy="60" r="53" fill="url(#medallion)" stroke="url(#rim)" stroke-width="3.5"/>
+  <circle cx="60" cy="60" r="45" fill="none" stroke="url(#rim)" stroke-width="1.2" opacity="0.55"/>
+
+  <g transform="rotate(-42 60 60)">
+    <polygon points="60,10 67,64 53,64" fill="url(#bladeA)"/>
+    <rect x="47" y="64" width="26" height="6" rx="1.5" fill="url(#rim)"/>
+    <rect x="55" y="70" width="10" height="21" rx="2" fill="#241a10"/>
+    <circle cx="60" cy="95" r="6" fill="url(#rim)"/>
+  </g>
+  <g transform="rotate(42 60 60)">
+    <polygon points="60,10 67,64 53,64" fill="url(#bladeB)"/>
+    <rect x="47" y="64" width="26" height="6" rx="1.5" fill="url(#rim)"/>
+    <rect x="55" y="70" width="10" height="21" rx="2" fill="#241a10"/>
+    <circle cx="60" cy="95" r="6" fill="url(#rim)"/>
+  </g>
+
+  <polygon points="60,52 68,60 60,68 52,60" fill="url(#ember)" stroke="#3a1206" stroke-width="1"/>
+</svg>
