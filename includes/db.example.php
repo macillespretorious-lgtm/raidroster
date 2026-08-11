@@ -50,11 +50,3 @@ function guild_by_discord_id($discordGuildId) {
     $stmt->execute([$discordGuildId]);
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
-
-function guild_user_role($guildId, $discordUserId) {
-    $pdo = db_connect();
-    $stmt = $pdo->prepare('SELECT role FROM guild_users WHERE guild_id = ? AND discord_user_id = ?');
-    $stmt->execute([$guildId, $discordUserId]);
-    $row = $stmt->fetch(PDO::FETCH_NUM);
-    return $row ? $row[0] : null;
-}

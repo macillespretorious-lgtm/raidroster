@@ -73,6 +73,44 @@ function discord_post($url, $data) {
     return $resp ? json_decode($resp, true) : null;
 }
 
+// Returns a valid Discord access token for the current session, refreshing
+// it first if it's expired. Returns null if there's no token or refresh fails.
+function auth_discord_token() {
+    auth_session_start();
+    $token = $_SESSION['discord_token'] ?? null;
+    if (!$token || empty($token['access_token'])) {
+        return null;
+    }
+
+    if ($token['expires_at'] > time() + 60) {
+        return $token['access_token'];
+    }
+
+    if (empty($token['refresh_token'])) {
+        return null;
+    }
+
+    $tokenData = discord_post('https://discord.com/api/oauth2/token', [
+        'client_id'     => DISCORD_CLIENT_ID,
+        'client_secret' => DISCORD_CLIENT_SECRET,
+        'grant_type'    => 'refresh_token',
+        'refresh_token' => $token['refresh_token'],
+    ]);
+
+    if (!$tokenData || empty($tokenData['access_token'])) {
+        unset($_SESSION['discord_token']);
+        return null;
+    }
+
+    $_SESSION['discord_token'] = [
+        'access_token'  => $tokenData['access_token'],
+        'refresh_token' => $tokenData['refresh_token'] ?? $token['refresh_token'],
+        'expires_at'    => time() + (int)($tokenData['expires_in'] ?? 604800),
+    ];
+
+    return $_SESSION['discord_token']['access_token'];
+}
+
 function discord_get($url, $token) {
     $ctx = stream_context_create(['http' => [
         'method'        => 'GET',

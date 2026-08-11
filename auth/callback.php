@@ -30,6 +30,12 @@ if (!$tokenData || empty($tokenData['access_token'])) {
 
 $accessToken = $tokenData['access_token'];
 
+$_SESSION['discord_token'] = [
+    'access_token'  => $tokenData['access_token'],
+    'refresh_token' => $tokenData['refresh_token'] ?? null,
+    'expires_at'    => time() + (int)($tokenData['expires_in'] ?? 604800),
+];
+
 $user = discord_get('https://discord.com/api/users/@me', $accessToken);
 if (!$user || empty($user['id'])) {
     auth_result_page('error', 'Could not retrieve your Discord user info.', '/');

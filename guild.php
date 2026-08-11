@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/roles.php';
 
 $slug   = $_GET['slug'] ?? '';
 $tenant = guild_by_slug($slug);
@@ -11,12 +12,11 @@ if (!$tenant) {
 
 auth_require_login();
 $user = auth_user();
-$role = guild_user_role($tenant['id'], $user['id']);
+$role = resolve_guild_role($tenant, $user['id']);
 
 if (!$role) {
     http_response_code(403);
-    echo 'You are not a member of this guild.';
-    exit;
+    auth_result_page('error', "You're not a member of this guild's Discord server, or your session has expired — try logging in again.", '/');
 }
 
 function h($s) { return htmlspecialchars($s ?? ''); }
