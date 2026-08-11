@@ -81,6 +81,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+if (!$notice && !$error && ($_GET['bot'] ?? '') === 'added') {
+    $notice = 'Bot added to your server!';
+}
+
 $botInGuild = discord_bot_in_guild($tenant['discord_guild_id']);
 
 $stmt = $pdo->prepare('SELECT discord_role_id, discord_role_name, permission FROM guild_role_permissions WHERE guild_id = ? ORDER BY permission, discord_role_name');
@@ -131,6 +135,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .tag {
       font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
       padding: 3px 9px; border-radius: 999px; font-weight: 700;
+      background: rgba(255,255,255,0.08); color: #a8b4d0;
     }
     .tag.roster_management { background: rgba(88,101,242,0.15); color: #a3adfa; }
     .tag.raid_management   { background: rgba(240,128,48,0.15); color: #f0a878; }
@@ -165,6 +170,12 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .search-form { display: flex; gap: 8px; margin-bottom: 14px; }
     .search-form input { flex: 1; }
     .hint { color: #7f8bad; font-size: 12px; margin-top: 4px; }
+    .role-list { list-style: none; }
+    .role-list li {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: #c7cef2; padding: 6px 0;
+    }
+    .role-list li .tag { flex-shrink: 0; min-width: 108px; text-align: center; }
   </style>
 </head>
 <body>
@@ -183,6 +194,18 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         <a class="btn" href="<?= h(discord_bot_invite_url($tenant['discord_guild_id'])) ?>">Add bot to server</a>
       </div>
     <?php else: ?>
+
+      <h2>How roles work</h2>
+      <div class="card">
+        <p class="hint" style="margin-top:0;">Each tier includes everything the tier below it can do. Every tier except owner is tied to a Discord role and updates automatically if someone's Discord roles change.</p>
+        <ul class="role-list">
+          <li><span class="tag">readonly</span> Any member of the Discord server. View-only, no mapping needed.</li>
+          <li><span class="tag roster_management">roster management</span> Manage toons, rosters, and assignments.</li>
+          <li><span class="tag raid_management">raid management</span> Everything above, plus edit raid templates.</li>
+          <li><span class="tag admin">admin</span> Everything above, plus map Discord roles to the tiers below (mapping the admin tier itself is owner-only).</li>
+          <li><span class="tag owner">owner</span> Everything above, plus add other owners. Not tied to a Discord role — granted directly, below.</li>
+        </ul>
+      </div>
 
       <h2>Role mapping</h2>
       <?php if (!$mappings): ?>

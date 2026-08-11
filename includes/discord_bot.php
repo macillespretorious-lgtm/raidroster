@@ -88,8 +88,11 @@ function discord_bot_search_members($discordGuildId, $query, $limit = 10) {
 }
 
 // Deep link that sends a guild owner/manager straight to Discord's
-// authorize screen to add the bot to their own tenant guild. No OAuth
-// flow through our server needed — Discord enforces Manage Server itself.
+// authorize screen to add the bot to their own tenant guild. Discord
+// enforces Manage Server itself — no OAuth code exchange is needed here,
+// but a registered redirect_uri is required so the browser lands back on
+// our site afterwards instead of a dead-end Discord confirmation page.
+// See auth/bot-callback.php for the landing handler.
 function discord_bot_invite_url($discordGuildId) {
     return 'https://discord.com/oauth2/authorize?' . http_build_query([
         'client_id'             => DISCORD_CLIENT_ID,
@@ -97,5 +100,7 @@ function discord_bot_invite_url($discordGuildId) {
         'permissions'           => '0',
         'guild_id'              => $discordGuildId,
         'disable_guild_select'  => 'true',
+        'response_type'         => 'code',
+        'redirect_uri'          => 'https://raidroster.net/auth/bot-callback.php',
     ]);
 }
