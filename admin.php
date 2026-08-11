@@ -105,6 +105,13 @@ if ($searchQuery !== '' && $isOwner && $botInGuild) {
     $searchResults = discord_bot_search_members($tenant['discord_guild_id'], $searchQuery) ?? [];
 }
 
+$WEBHOOK_DAY_DEFAULTS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Misc'];
+$webhookData = json_decode(guild_load($tenant['id'], 'discord-webhooks', '{}'), true) ?: [];
+$webhookDays = $webhookData['days'] ?? [];
+if (!$webhookDays) {
+    $webhookDays = array_map(fn($n) => ['name' => $n, 'webhook' => ''], $WEBHOOK_DAY_DEFAULTS);
+}
+
 function h($s) { return htmlspecialchars($s ?? ''); }
 ?>
 <!doctype html>
@@ -176,6 +183,51 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       font-size: 13px; color: #c7cef2; padding: 6px 0;
     }
     .role-list li .tag { flex-shrink: 0; min-width: 108px; text-align: center; }
+
+    .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .tab-btn {
+      background: none; border: none; font: inherit; cursor: pointer;
+      color: #7f8bad; font-size: 13px; font-weight: 600; padding: 10px 16px;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .tab-btn:hover { color: #c7cef2; }
+    .tab-btn.active { color: #e8ecff; border-bottom-color: #5865f2; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .day-row {
+      display: flex; align-items: center; gap: 8px; padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .day-row:last-child { border-bottom: none; }
+    .day-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+      background: rgba(255,255,255,0.15);
+    }
+    .day-dot.has-webhook { background: #8fd6a8; }
+    .day-name-input { width: 110px; flex-shrink: 0; }
+    .day-url-input { flex: 1; min-width: 0; }
+    .day-status { font-size: 11px; color: #7f8bad; width: 46px; flex-shrink: 0; text-align: center; }
+    .btn-add-row {
+      background: none; border: 1px dashed rgba(255,255,255,0.2); color: #a8b4d0;
+      border-radius: 8px; padding: 8px 14px; font: inherit; font-size: 13px;
+      cursor: pointer; width: 100%; margin-top: 10px;
+    }
+    .btn-add-row:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
+    .btn-icon {
+      background: none; border: none; color: #7f8bad; cursor: pointer;
+      font-size: 15px; line-height: 1; padding: 4px 6px; flex-shrink: 0;
+    }
+    .btn-icon:hover { color: #e88585; }
+    .btn-icon:disabled { opacity: 0.25; cursor: not-allowed; }
+    .instr-box {
+      background: rgba(88,101,242,0.08); border: 1px solid rgba(88,101,242,0.2);
+      border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #a8b4d0;
+      line-height: 1.6; margin-top: 14px;
+    }
+    .instr-box code {
+      background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; font-size: 11px;
+    }
   </style>
 </head>
 <body>
@@ -187,6 +239,12 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <?php if ($notice): ?><div class="notice"><?= h($notice) ?></div><?php endif; ?>
     <?php if ($error): ?><div class="error"><?= h($error) ?></div><?php endif; ?>
 
+    <div class="tabs">
+      <button type="button" class="tab-btn active" data-tab="roles">Roles</button>
+      <button type="button" class="tab-btn" data-tab="webhooks">Webhooks</button>
+    </div>
+
+    <div class="tab-panel active" id="tab-roles">
     <?php if (!$botInGuild): ?>
       <h2>Bot setup</h2>
       <div class="bot-cta">
@@ -284,6 +342,97 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       <?php endif; ?>
 
     <?php endif; ?>
+    </div>
+
+    <div class="tab-panel" id="tab-webhooks">
+      <h2>Channel webhooks</h2>
+      <div class="card" id="webhook-card">
+        <div id="webhook-rows"></div>
+        <button type="button" class="btn-add-row" id="webhook-add-row">+ Add webhook</button>
+      </div>
+      <div class="instr-box">
+        In Discord, go to <strong>Server Settings &rarr; Integrations &rarr; Webhooks</strong> to create a webhook for a channel, then paste its URL here. Each row's Save button stores that row only.
+      </div>
+    </div>
   </div>
+
+  <script>
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const tabPanels  = { roles: document.getElementById('tab-roles'), webhooks: document.getElementById('tab-webhooks') };
+    tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabButtons.forEach(b => b.classList.remove('active'));
+        Object.values(tabPanels).forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        tabPanels[btn.dataset.tab].classList.add('active');
+        if (btn.dataset.tab === 'webhooks') history.replaceState(null, '', '#webhooks');
+      });
+    });
+    if (location.hash === '#webhooks') {
+      document.querySelector('.tab-btn[data-tab="webhooks"]').click();
+    }
+
+    const SAVE_URL = <?= json_encode('/admin/save-webhooks.php?slug=' . $slug) ?>;
+    let days = <?= json_encode(array_values($webhookDays)) ?>;
+    const defaultCount = <?= count($WEBHOOK_DAY_DEFAULTS) ?>;
+    const rowsEl = document.getElementById('webhook-rows');
+
+    function renderDays() {
+      rowsEl.innerHTML = '';
+      days.forEach((d, i) => {
+        const row = document.createElement('div');
+        row.className = 'day-row';
+        row.innerHTML = `
+          <span class="day-dot ${d.webhook ? 'has-webhook' : ''}"></span>
+          <input type="text" class="day-name-input" value="${escAttr(d.name)}" placeholder="Name">
+          <input type="text" class="day-url-input" value="${escAttr(d.webhook)}" placeholder="https://discord.com/api/webhooks/...">
+          <span class="day-status"></span>
+          <button type="button" class="btn btn-save" style="padding:6px 12px;">Save</button>
+          <button type="button" class="btn-icon btn-remove" ${i < defaultCount ? 'disabled title="Default row"' : 'title="Remove"'}>&times;</button>
+        `;
+        row.querySelector('.btn-save').addEventListener('click', () => saveRow(i, row));
+        row.querySelector('.btn-remove').addEventListener('click', () => removeRow(i));
+        rowsEl.appendChild(row);
+      });
+    }
+
+    function escAttr(s) {
+      return (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    function saveRow(i, row) {
+      days[i] = {
+        name: row.querySelector('.day-name-input').value.trim(),
+        webhook: row.querySelector('.day-url-input').value.trim(),
+      };
+      const status = row.querySelector('.day-status');
+      status.textContent = 'Saving…';
+      persist().then(ok => {
+        status.textContent = ok ? 'Saved' : 'Error';
+        row.querySelector('.day-dot').classList.toggle('has-webhook', !!days[i].webhook);
+        setTimeout(() => { status.textContent = ''; }, 2000);
+      });
+    }
+
+    function removeRow(i) {
+      days.splice(i, 1);
+      persist().then(() => renderDays());
+    }
+
+    document.getElementById('webhook-add-row').addEventListener('click', () => {
+      days.push({ name: '', webhook: '' });
+      renderDays();
+    });
+
+    function persist() {
+      return fetch(SAVE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days }),
+      }).then(r => r.ok).catch(() => false);
+    }
+
+    renderDays();
+  </script>
 </body>
 </html>
