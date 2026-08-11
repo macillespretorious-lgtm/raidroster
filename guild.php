@@ -44,6 +44,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <div class="card">
     <h1><?= h($tenant['name']) ?></h1>
     <p>Signed in as <?= h($user['username']) ?> &middot; role: <?= h($role) ?></p>
+    <?php if (role_at_least($role, 'admin')): ?>
+      <p><a href="/<?= h($tenant['slug']) ?>/admin">Admin settings</a></p>
+    <?php endif; ?>
     <p><a href="/auth/logout.php">Log out</a></p>
   </div>
 </body>
