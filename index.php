@@ -11,18 +11,23 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <title>RaidRoster.net</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Multi-tenant WoW guild raid roster and assignment tool, built around your Discord server.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      min-height: 100vh; background: radial-gradient(ellipse at 50% -10%, #1a2352 0%, #0a0f1e 55%);
+      min-height: 100vh; background: radial-gradient(ellipse at 50% -10%, #2a1f14 0%, #0a0f1e 55%);
       font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
       color: #e8ecff; display: flex; align-items: center; justify-content: center;
       padding: 32px 20px;
     }
     .card { text-align: center; max-width: 480px; width: 100%; }
-    .logo { margin-bottom: 20px; filter: drop-shadow(0 8px 24px rgba(88,101,242,0.35)); }
+    .logo { margin-bottom: 20px; filter: drop-shadow(0 10px 22px rgba(209,69,28,0.35)); }
     .wordmark {
-      font-size: 30px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 6px;
+      font-family: 'Cinzel', serif; font-size: 30px; font-weight: 800;
+      letter-spacing: 0.02em; margin-bottom: 6px; color: #e8c477;
+      text-shadow: 0 0 18px rgba(232,196,119,0.25);
     }
     .wordmark .dim { color: #7f8bad; font-weight: 600; }
     h1 {
@@ -45,21 +50,47 @@ function h($s) { return htmlspecialchars($s ?? ''); }
 </head>
 <body>
   <div class="card">
-    <svg class="logo" width="76" height="76" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg class="logo" width="84" height="84" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <linearGradient id="shield" x1="12" y1="6" x2="108" y2="116" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#8b97ff"/>
-          <stop offset="100%" stop-color="#4752c4"/>
+        <radialGradient id="medallion" cx="35%" cy="30%" r="75%">
+          <stop offset="0%" stop-color="#3a2a1a"/>
+          <stop offset="100%" stop-color="#160f09"/>
+        </radialGradient>
+        <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#e8c477"/>
+          <stop offset="100%" stop-color="#8a5a2b"/>
         </linearGradient>
-        <linearGradient id="gem" x1="48" y1="30" x2="72" y2="90" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#ffe29a"/>
-          <stop offset="100%" stop-color="#f0a830"/>
+        <linearGradient id="bladeA" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#e6ecf5"/>
+          <stop offset="100%" stop-color="#8b96a8"/>
         </linearGradient>
+        <linearGradient id="bladeB" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#f0c987"/>
+          <stop offset="100%" stop-color="#a06a2e"/>
+        </linearGradient>
+        <radialGradient id="ember" cx="35%" cy="30%" r="70%">
+          <stop offset="0%" stop-color="#ffcf8a"/>
+          <stop offset="100%" stop-color="#d1451c"/>
+        </radialGradient>
       </defs>
-      <path d="M60 6 L108 24 V60 C108 92 86 110 60 116 C34 110 12 92 12 60 V24 Z"
-            fill="url(#shield)" stroke="#0a0f1e" stroke-width="3"/>
-      <path d="M60 28 L74 58 L60 92 L46 58 Z" fill="url(#gem)"/>
-      <circle cx="60" cy="58" r="10" fill="#0a0f1e" stroke="url(#gem)" stroke-width="3"/>
+
+      <circle cx="60" cy="60" r="53" fill="url(#medallion)" stroke="url(#rim)" stroke-width="3.5"/>
+      <circle cx="60" cy="60" r="45" fill="none" stroke="url(#rim)" stroke-width="1.2" opacity="0.55"/>
+
+      <g transform="rotate(-42 60 60)">
+        <polygon points="60,10 67,64 53,64" fill="url(#bladeA)"/>
+        <rect x="47" y="64" width="26" height="6" rx="1.5" fill="url(#rim)"/>
+        <rect x="55" y="70" width="10" height="21" rx="2" fill="#241a10"/>
+        <circle cx="60" cy="95" r="6" fill="url(#rim)"/>
+      </g>
+      <g transform="rotate(42 60 60)">
+        <polygon points="60,10 67,64 53,64" fill="url(#bladeB)"/>
+        <rect x="47" y="64" width="26" height="6" rx="1.5" fill="url(#rim)"/>
+        <rect x="55" y="70" width="10" height="21" rx="2" fill="#241a10"/>
+        <circle cx="60" cy="95" r="6" fill="url(#rim)"/>
+      </g>
+
+      <polygon points="60,52 68,60 60,68 52,60" fill="url(#ember)" stroke="#3a1206" stroke-width="1"/>
     </svg>
 
     <div class="wordmark">RaidRoster<span class="dim">.net</span></div>
