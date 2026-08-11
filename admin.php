@@ -374,7 +374,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
 
     const SAVE_URL = <?= json_encode('/admin/save-webhooks.php?slug=' . $slug) ?>;
     let days = <?= json_encode(array_values($webhookDays)) ?>;
-    const defaultCount = <?= count($WEBHOOK_DAY_DEFAULTS) ?>;
     const rowsEl = document.getElementById('webhook-rows');
 
     function renderDays() {
@@ -388,7 +387,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
           <input type="text" class="day-url-input" value="${escAttr(d.webhook)}" placeholder="https://discord.com/api/webhooks/...">
           <span class="day-status"></span>
           <button type="button" class="btn btn-save" style="padding:6px 12px;">Save</button>
-          <button type="button" class="btn-icon btn-remove" ${i < defaultCount ? 'disabled title="Default row"' : 'title="Remove"'}>&times;</button>
+          <button type="button" class="btn-icon btn-remove" title="Remove">&times;</button>
         `;
         row.querySelector('.btn-save').addEventListener('click', () => saveRow(i, row));
         row.querySelector('.btn-remove').addEventListener('click', () => removeRow(i));
