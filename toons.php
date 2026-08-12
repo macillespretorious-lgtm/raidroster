@@ -75,6 +75,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
     .form-row .form-group { margin-bottom: 0; }
+    .form-group input[readonly] { color: #7f8bad; background: #060a14; cursor: not-allowed; }
 
     .lm-wrap { position: relative; }
     .lm-list {
@@ -164,8 +165,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
               <input type="text" id="discordName" placeholder="Discord#1234" autocomplete="off">
             </div>
             <div class="form-group">
-              <label for="discordId">Discord ID <span style="font-size:10px;color:#7f8bad;font-weight:400;text-transform:none">(numeric)</span></label>
-              <input type="text" id="discordId" placeholder="213301151523667970" pattern="[0-9]*" inputmode="numeric">
+              <label for="discordId">Discord ID <span style="font-size:10px;color:#7f8bad;font-weight:400;text-transform:none">(auto-filled)</span></label>
+              <input type="text" id="discordId" placeholder="213301151523667970" readonly>
             </div>
           </div>
 
