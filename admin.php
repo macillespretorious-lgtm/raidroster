@@ -2,6 +2,7 @@
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/roles.php';
 require_once __DIR__ . '/includes/discord_bot.php';
+require_once __DIR__ . '/includes/nav.php';
 
 $slug   = $_GET['slug'] ?? '';
 $tenant = guild_by_slug($slug);
@@ -121,15 +122,14 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <title>Admin &mdash; <?= h($tenant['name']) ?> &mdash; RaidRoster</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <?= nav_asset_link() ?>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       min-height: 100vh; background: #0a0f1e; font-family: system-ui, -apple-system, sans-serif;
-      color: #e8ecff; padding: 48px 24px; display: flex; justify-content: center;
+      color: #e8ecff;
     }
-    .wrap { max-width: 640px; width: 100%; }
-    .back { font-size: 13px; color: #7f8bad; text-decoration: none; }
-    .back:hover { color: #a8b4d0; }
+    .wrap { max-width: 640px; width: 100%; margin: 0 auto; padding: 48px 24px 110px; }
     h1 { font-size: 22px; margin: 10px 0 4px; }
     p.sub { color: #a8b4d0; font-size: 14px; margin-bottom: 28px; }
     h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: #7f8bad; margin: 32px 0 12px; }
@@ -231,8 +231,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   </style>
 </head>
 <body>
+  <?php render_nav_shell($tenant, $user, $role, 'admin'); ?>
   <div class="wrap">
-    <a class="back" href="/<?= h($tenant['slug']) ?>/">&larr; Back to <?= h($tenant['name']) ?></a>
     <h1>Admin settings</h1>
     <p class="sub">Signed in as <?= h($user['username']) ?> &middot; role: <?= h($role) ?></p>
 

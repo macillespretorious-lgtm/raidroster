@@ -1,0 +1,50 @@
+/* Shared bottom-tab nav shell. Sits flush against <body> — page content lives
+   in each page's own padded wrapper, not in body, so this bar stays edge-to-edge. */
+
+.rr-topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 0 20px; height: 56px;
+  background: #111827; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.rr-brand { display: flex; align-items: center; gap: 9px; min-width: 0; text-decoration: none; color: inherit; }
+.rr-crest {
+  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+  background: linear-gradient(135deg, #5865f2, #8791f7);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: #fff;
+}
+.rr-brand-name { font-size: 13.5px; font-weight: 700; color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.rr-user { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.rr-who { text-align: right; line-height: 1.3; }
+.rr-u-name { display: block; font-size: 12px; font-weight: 600; color: #e8ecff; }
+.rr-u-role { display: block; font-size: 10.5px; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; }
+.rr-avatar {
+  width: 26px; height: 26px; border-radius: 50%; background: #171f33;
+  border: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #a8b4d0; flex-shrink: 0;
+}
+.rr-logout { color: #7f8bad; display: flex; align-items: center; padding: 5px; border-radius: 6px; flex-shrink: 0; }
+.rr-logout:hover { color: #e88585; background: rgba(224,85,85,0.1); }
+.rr-logout:focus-visible, .rr-nav-item:focus-visible, .rr-brand:focus-visible {
+  outline: 2px solid #5865f2; outline-offset: 2px;
+}
+
+.rr-bottomnav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex; justify-content: space-around;
+  background: #111827; border-top: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.rr-nav-item {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  max-width: 120px; margin: 0 auto;
+  padding: 9px 4px 8px; font-size: 10.5px; font-weight: 600; color: #7f8bad; text-decoration: none;
+}
+.rr-nav-item:hover { color: #a8b4d0; }
+.rr-nav-item.active { color: #a3adfa; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .rr-nav-item, .rr-logout, .rr-brand { transition: color .15s ease, background-color .15s ease; }
+}

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/roles.php';
+require_once __DIR__ . '/includes/nav.php';
 
 $slug   = $_GET['slug'] ?? '';
 $tenant = guild_by_slug($slug);
@@ -28,29 +29,23 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <title><?= h($tenant['name']) ?> &mdash; RaidRoster</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <?= nav_asset_link() ?>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       min-height: 100vh; background: #0a0f1e; font-family: system-ui, -apple-system, sans-serif;
-      color: #e8ecff; display: flex; align-items: center; justify-content: center;
+      color: #e8ecff;
     }
-    .card { text-align: center; }
-    h1 { font-size: 24px; margin-bottom: 8px; }
-    p { color: #a8b4d0; font-size: 14px; }
-    a { color: #5865f2; }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 40px 24px 100px; }
+    h1 { font-size: 24px; margin-bottom: 6px; }
+    p.sub { color: #a8b4d0; font-size: 14px; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1><?= h($tenant['name']) ?></h1>
-    <p>Signed in as <?= h($user['username']) ?> &middot; role: <?= h($role) ?></p>
-    <?php if (role_at_least($role, 'roster_management')): ?>
-      <p><a href="/<?= h($tenant['slug']) ?>/toons">Toon management</a></p>
-    <?php endif; ?>
-    <?php if (role_at_least($role, 'admin')): ?>
-      <p><a href="/<?= h($tenant['slug']) ?>/admin">Admin settings</a></p>
-    <?php endif; ?>
-    <p><a href="/auth/logout.php">Log out</a></p>
+  <?php render_nav_shell($tenant, $user, $role, 'home'); ?>
+  <div class="wrap">
+    <h1>Welcome back, <?= h($user['username']) ?></h1>
+    <p class="sub"><?= h($tenant['name']) ?> &middot; role: <?= h(str_replace('_', ' ', $role)) ?></p>
   </div>
 </body>
 </html>
