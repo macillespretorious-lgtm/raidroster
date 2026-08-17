@@ -114,6 +114,30 @@ if (!$webhookDays) {
     $webhookDays = array_map(fn($n) => ['name' => $n, 'webhook' => ''], $WEBHOOK_DAY_DEFAULTS);
 }
 
+$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt->execute([$tenant['id']]);
+$raidTemplates = array_map(function ($t) {
+    return [
+        'id'                     => (int)$t['id'],
+        'name'                   => $t['name'],
+        'description'            => $t['description'],
+        'defaultStartTime'       => $t['default_start_time'],
+        'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
+    ];
+}, $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+$stmt = $pdo->prepare('SELECT day_of_week, template_id, start_time_override, active FROM raid_recurring_slots WHERE guild_id = ?');
+$stmt->execute([$tenant['id']]);
+$recurringByDow = [];
+foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+    $recurringByDow[(int)$r['day_of_week']] = [
+        'templateId'        => (int)$r['template_id'],
+        'startTimeOverride' => $r['start_time_override'],
+        'active'            => (bool)$r['active'],
+    ];
+}
+$WEEKDAY_LABELS = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday', 0 => 'Sunday'];
+
 function h($s) { return htmlspecialchars($s ?? ''); }
 ?>
 <!doctype html>
@@ -229,6 +253,36 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .instr-box code {
       background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; font-size: 11px;
     }
+
+    .hidden { display: none !important; }
+    .form-group { margin-bottom: 12px; display: flex; flex-direction: column; gap: 5px; }
+    .form-group label { font-size: 11px; color: #7f8bad; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+    .form-group input {
+      padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px;
+      background: #0a0f1e; color: #e8ecff; font-size: 13px; font: inherit;
+    }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-row .form-group { margin-bottom: 0; }
+    .btn-cancel-tpl { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #a8b4d0; }
+    .btn-cancel-tpl:hover { background: rgba(255,255,255,0.1); }
+
+    .tpl-item { cursor: pointer; }
+    .tpl-item .name { flex: 1; }
+    .tpl-meta { font-size: 12px; color: #7f8bad; }
+    .tpl-actions { display: flex; gap: 6px; }
+
+    .recurring-row {
+      display: flex; align-items: center; gap: 10px; padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap;
+    }
+    .recurring-row:last-child { border-bottom: none; }
+    .recurring-day { width: 90px; flex-shrink: 0; font-size: 13px; font-weight: 600; }
+    .recurring-row select { flex: 1; min-width: 140px; }
+    .recurring-row input[type=time] {
+      background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff;
+      border-radius: 6px; padding: 7px 10px; font-size: 13px; font: inherit; width: 110px;
+    }
+    .recurring-active-label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #a8b4d0; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -243,6 +297,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <div class="tabs">
       <button type="button" class="tab-btn active" data-tab="roles">Roles</button>
       <button type="button" class="tab-btn" data-tab="webhooks">Webhooks</button>
+      <button type="button" class="tab-btn" data-tab="raids">Raids</button>
     </div>
 
     <div class="tab-panel active" id="tab-roles">
@@ -355,22 +410,59 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         In Discord, go to <strong>Server Settings &rarr; Integrations &rarr; Webhooks</strong> to create a webhook for a channel, then paste its URL here. Each row's Save button stores that row only.
       </div>
     </div>
+
+    <div class="tab-panel" id="tab-raids">
+      <h2>Raid templates</h2>
+      <div id="templateList"></div>
+      <div class="card" id="templateFormCard">
+        <div class="form-group">
+          <label for="tplName">Name</label>
+          <input type="text" id="tplName" placeholder="e.g. Molten Core">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tplStart">Default start time</label>
+            <input type="time" id="tplStart">
+          </div>
+          <div class="form-group">
+            <label for="tplDuration">Default duration (min)</label>
+            <input type="number" id="tplDuration" min="0" step="15" placeholder="e.g. 180">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="tplDesc">Description</label>
+          <input type="text" id="tplDesc" placeholder="Optional notes">
+        </div>
+        <div class="form-buttons" style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn" id="tplSaveBtn">Save template</button>
+          <button class="btn btn-cancel-tpl hidden" id="tplCancelEditBtn">Cancel edit</button>
+        </div>
+      </div>
+
+      <h2>Recurring schedule</h2>
+      <div class="card" id="recurringCard">
+        <div id="recurringRows"></div>
+      </div>
+      <div class="instr-box">
+        Map a weekday to a template to auto-populate that day's raid on the calendar as weeks come into view. Toggle a row off to stop generating new instances without deleting past ones.
+      </div>
+    </div>
   </div>
 
   <script>
     const tabButtons = document.querySelectorAll('.tab-btn');
-    const tabPanels  = { roles: document.getElementById('tab-roles'), webhooks: document.getElementById('tab-webhooks') };
+    const tabPanels  = { roles: document.getElementById('tab-roles'), webhooks: document.getElementById('tab-webhooks'), raids: document.getElementById('tab-raids') };
     tabButtons.forEach(btn => {
       btn.addEventListener('click', () => {
         tabButtons.forEach(b => b.classList.remove('active'));
         Object.values(tabPanels).forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         tabPanels[btn.dataset.tab].classList.add('active');
-        if (btn.dataset.tab === 'webhooks') history.replaceState(null, '', '#webhooks');
+        if (btn.dataset.tab !== 'roles') history.replaceState(null, '', '#' + btn.dataset.tab);
       });
     });
-    if (location.hash === '#webhooks') {
-      document.querySelector('.tab-btn[data-tab="webhooks"]').click();
+    if (location.hash === '#webhooks' || location.hash === '#raids') {
+      document.querySelector('.tab-btn[data-tab="' + location.hash.slice(1) + '"]').click();
     }
 
     const SAVE_URL = <?= json_encode('/admin/save-webhooks.php?slug=' . $slug) ?>;
@@ -433,6 +525,134 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     }
 
     renderDays();
+
+    // --- Raids tab: templates + recurring schedule ---
+    const TPL_SAVE_URL   = <?= json_encode('/raids/templates-save.php?slug=' . $slug) ?>;
+    const RECUR_SAVE_URL = <?= json_encode('/raids/recurring-save.php?slug=' . $slug) ?>;
+    let templates = <?= json_encode($raidTemplates) ?>;
+    let recurring = <?= json_encode($recurringByDow, JSON_FORCE_OBJECT) ?>;
+    const WEEKDAYS = <?= json_encode(array_map(fn($k, $v) => ['dow' => $k, 'label' => $v], array_keys($WEEKDAY_LABELS), array_values($WEEKDAY_LABELS))) ?>;
+    let editingTplId = null;
+
+    function escH(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function renderTemplateList() {
+      const el = document.getElementById('templateList');
+      if (!templates.length) { el.innerHTML = '<p class="empty">No templates yet — add one below.</p>'; return; }
+      el.innerHTML = templates.map(t => {
+        const meta = [];
+        if (t.defaultStartTime) meta.push(t.defaultStartTime.slice(0,5));
+        if (t.defaultDurationMinutes) meta.push(t.defaultDurationMinutes + ' min');
+        return `<div class="card row tpl-item">
+          <div class="name" onclick="editTemplate(${t.id})">${escH(t.name)}${meta.length ? ' <span class="tpl-meta">(' + meta.join(', ') + ')</span>' : ''}</div>
+          <div class="tpl-actions">
+            <button class="btn" style="padding:5px 12px;font-size:12px;" onclick="editTemplate(${t.id})">Edit</button>
+            <button class="btn danger" style="padding:5px 12px;font-size:12px;" onclick="deleteTemplate(${t.id})">Delete</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function editTemplate(id) {
+      const t = templates.find(x => x.id === id);
+      if (!t) return;
+      editingTplId = id;
+      document.getElementById('tplName').value = t.name;
+      document.getElementById('tplStart').value = (t.defaultStartTime || '').slice(0, 5);
+      document.getElementById('tplDuration').value = t.defaultDurationMinutes || '';
+      document.getElementById('tplDesc').value = t.description || '';
+      document.getElementById('tplCancelEditBtn').classList.remove('hidden');
+    }
+
+    function resetTemplateForm() {
+      editingTplId = null;
+      document.getElementById('tplName').value = '';
+      document.getElementById('tplStart').value = '';
+      document.getElementById('tplDuration').value = '';
+      document.getElementById('tplDesc').value = '';
+      document.getElementById('tplCancelEditBtn').classList.add('hidden');
+    }
+    document.getElementById('tplCancelEditBtn').addEventListener('click', resetTemplateForm);
+
+    document.getElementById('tplSaveBtn').addEventListener('click', function () {
+      const name = document.getElementById('tplName').value.trim();
+      if (!name) return;
+      const payload = {
+        action: 'save',
+        id: editingTplId,
+        name,
+        defaultStartTime: document.getElementById('tplStart').value || null,
+        defaultDurationMinutes: document.getElementById('tplDuration').value ? parseInt(document.getElementById('tplDuration').value, 10) : null,
+        description: document.getElementById('tplDesc').value.trim() || null,
+      };
+      fetch(TPL_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        .then(r => r.json()).then(d => {
+          if (!d.success) return;
+          const i = templates.findIndex(x => x.id === d.template.id);
+          if (i === -1) templates.push(d.template); else templates[i] = d.template;
+          renderTemplateList();
+          renderRecurringRows();
+          resetTemplateForm();
+        });
+    });
+
+    function deleteTemplate(id) {
+      if (!confirm('Delete this template? Any recurring days using it will stop auto-populating.')) return;
+      fetch(TPL_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }) })
+        .then(r => r.json()).then(d => {
+          if (!d.success) return;
+          templates = templates.filter(t => t.id !== id);
+          for (const dow in recurring) { if (recurring[dow].templateId === id) delete recurring[dow]; }
+          renderTemplateList();
+          renderRecurringRows();
+        });
+    }
+
+    function renderRecurringRows() {
+      const el = document.getElementById('recurringRows');
+      el.innerHTML = WEEKDAYS.map(w => {
+        const slot = recurring[w.dow];
+        const tplOptions = templates.map(t => `<option value="${t.id}" ${slot && slot.templateId === t.id ? 'selected' : ''}>${escH(t.name)}</option>`).join('');
+        return `<div class="recurring-row" data-dow="${w.dow}">
+          <span class="recurring-day">${w.label}</span>
+          <select class="recur-template">
+            <option value="">— None —</option>
+            ${tplOptions}
+          </select>
+          <input type="time" class="recur-time" value="${slot && slot.startTimeOverride ? slot.startTimeOverride.slice(0,5) : ''}" title="Override start time">
+          <label class="recurring-active-label"><input type="checkbox" class="recur-active" ${!slot || slot.active ? 'checked' : ''}> Active</label>
+        </div>`;
+      }).join('');
+      el.querySelectorAll('.recurring-row').forEach(row => {
+        const dow = row.dataset.dow;
+        row.querySelector('.recur-template').addEventListener('change', () => saveRecurringRow(dow, row));
+        row.querySelector('.recur-time').addEventListener('change', () => saveRecurringRow(dow, row));
+        row.querySelector('.recur-active').addEventListener('change', () => saveRecurringRow(dow, row));
+      });
+    }
+
+    function saveRecurringRow(dow, row) {
+      const templateId = row.querySelector('.recur-template').value;
+      if (!templateId) {
+        fetch(RECUR_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', dayOfWeek: parseInt(dow, 10) }) })
+          .then(r => r.json()).then(d => { if (d.success) { delete recurring[dow]; } });
+        return;
+      }
+      const payload = {
+        action: 'save',
+        dayOfWeek: parseInt(dow, 10),
+        templateId: parseInt(templateId, 10),
+        startTimeOverride: row.querySelector('.recur-time').value || null,
+        active: row.querySelector('.recur-active').checked,
+      };
+      fetch(RECUR_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        .then(r => r.json()).then(d => {
+          if (d.success) recurring[dow] = { templateId: payload.templateId, startTimeOverride: payload.startTimeOverride, active: payload.active };
+        });
+    }
+
+    renderTemplateList();
+    renderRecurringRows();
   </script>
 </body>
 </html>

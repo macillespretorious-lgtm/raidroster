@@ -1,0 +1,116 @@
+<?php
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/roles.php';
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+$slug   = $_GET['slug'] ?? '';
+$tenant = guild_by_slug($slug);
+if (!$tenant) {
+    http_response_code(404);
+    echo json_encode(['error' => 'No such guild']);
+    exit;
+}
+
+auth_session_start();
+if (!auth_is_authed()) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Not logged in']);
+    exit;
+}
+
+$user = auth_user();
+$role = resolve_guild_role($tenant, $user['id']);
+if (!role_at_least($role, 'raid_management')) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Forbidden']);
+    exit;
+}
+
+$body   = json_decode(file_get_contents('php://input'), true);
+$action = is_array($body) ? ($body['action'] ?? '') : '';
+$pdo    = db_connect();
+
+function raid_to_json($r) {
+    return [
+        'id'              => (int)$r['id'],
+        'date'            => $r['raid_date'],
+        'startTime'       => $r['start_time'],
+        'durationMinutes' => $r['duration_minutes'] !== null ? (int)$r['duration_minutes'] : null,
+        'templateId'      => $r['template_id'] !== null ? (int)$r['template_id'] : null,
+        'name'            => $r['name'],
+        'description'     => $r['description'],
+        'status'          => $r['status'],
+        'createdVia'      => $r['created_via'],
+    ];
+}
+
+function fetch_raid($pdo, $guildId, $id) {
+    $stmt = $pdo->prepare('SELECT * FROM raids WHERE id = ? AND guild_id = ?');
+    $stmt->execute([$id, $guildId]);
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+if ($action === 'save') {
+    $id     = isset($body['id']) && $body['id'] ? (int)$body['id'] : null;
+    $date   = $body['date'] ?? '';
+    $name   = substr(trim($body['name'] ?? ''), 0, 100);
+    $start  = $body['startTime'] ?? null;
+    $dur    = isset($body['durationMinutes']) && $body['durationMinutes'] !== null ? (int)$body['durationMinutes'] : null;
+    $desc   = isset($body['description']) ? substr(trim($body['description']), 0, 65000) : null;
+    $tmplId = isset($body['templateId']) && $body['templateId'] ? (int)$body['templateId'] : null;
+
+    if ($start !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) $start = null;
+    if ($desc === '') $desc = null;
+
+    if (!$name || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date ?? '')) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid raid submission']);
+        exit;
+    }
+
+    if ($tmplId !== null) {
+        $stmt = $pdo->prepare('SELECT id FROM raid_templates WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$tmplId, $tenant['id']]);
+        if (!$stmt->fetch()) $tmplId = null;
+    }
+
+    if ($id) {
+        $existing = fetch_raid($pdo, $tenant['id'], $id);
+        if (!$existing) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Raid not found']);
+            exit;
+        }
+        $stmt = $pdo->prepare('UPDATE raids SET name = ?, start_time = ?, duration_minutes = ?, description = ? WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$name, $start, $dur, $desc, $id, $tenant['id']]);
+    } else {
+        $stmt = $pdo->prepare(
+            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via)
+             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\')'
+        );
+        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc]);
+        $id = (int)$pdo->lastInsertId();
+    }
+
+    echo json_encode(['success' => true, 'raid' => raid_to_json(fetch_raid($pdo, $tenant['id'], $id))]);
+    exit;
+}
+
+if ($action === 'cancel' || $action === 'restore') {
+    $id = isset($body['id']) ? (int)$body['id'] : 0;
+    $existing = fetch_raid($pdo, $tenant['id'], $id);
+    if (!$existing) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Raid not found']);
+        exit;
+    }
+    $newStatus = $action === 'cancel' ? 'cancelled' : 'scheduled';
+    $stmt = $pdo->prepare('UPDATE raids SET status = ? WHERE id = ? AND guild_id = ?');
+    $stmt->execute([$newStatus, $id, $tenant['id']]);
+    echo json_encode(['success' => true, 'raid' => raid_to_json(fetch_raid($pdo, $tenant['id'], $id))]);
+    exit;
+}
+
+http_response_code(400);
+echo json_encode(['error' => 'Unknown action']);
