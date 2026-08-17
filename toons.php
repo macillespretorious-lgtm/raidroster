@@ -262,7 +262,11 @@ function h($s) { return htmlspecialchars($s ?? ''); }
           <div class="form-row">
             <div class="form-group">
               <label for="toonServer">Server</label>
-              <input type="text" id="toonServer" placeholder="Realm name" autocomplete="off">
+              <select id="toonServer">
+                <option value="PyrewoodVillage" selected>Pyrewood Village</option>
+                <option value="MirageRaceway">Mirage Raceway</option>
+                <option value="NethergardeKeep">Nethergarde Keep</option>
+              </select>
             </div>
             <div class="form-group" id="fullT2Group" style="display:none;justify-content:flex-end;padding-top:22px">
               <div><input type="checkbox" id="fullT2"><label for="fullT2" class="t2-toggle-label">Full T2</label></div>
@@ -363,7 +367,7 @@ function fillFields(obj, isAlt) {
   document.getElementById('mainSpec').value    = obj.mainSpec || '';
   document.getElementById('altSpec').value     = obj.altSpec || '';
   document.getElementById('toonStatus').value  = obj.status || 'Main';
-  document.getElementById('toonServer').value  = obj.server || '';
+  document.getElementById('toonServer').value  = obj.server || 'PyrewoodVillage';
   document.getElementById('fullT2').checked    = obj.fullT2 || false;
   document.getElementById('toonRank').value    = obj.rank || 'raider';
   document.getElementById('rankGroup').style.display = '';
@@ -404,7 +408,7 @@ function newMain() {
   document.getElementById('mainSpec').value = '';
   document.getElementById('altSpec').value = '';
   document.getElementById('toonStatus').value = 'Main';
-  document.getElementById('toonServer').value = '';
+  document.getElementById('toonServer').value = 'PyrewoodVillage';
   document.getElementById('fullT2').checked = false;
   document.getElementById('toonRank').value = 'raider';
   document.getElementById('rankGroup').style.display = '';
@@ -435,7 +439,7 @@ function prepareNewAlt(mainId) {
   document.getElementById('mainSpec').value = '';
   document.getElementById('altSpec').value = '';
   document.getElementById('toonStatus').value = 'Alt';
-  document.getElementById('toonServer').value = '';
+  document.getElementById('toonServer').value = 'PyrewoodVillage';
   document.getElementById('fullT2').checked = false;
   document.getElementById('rankGroup').style.display = 'none';
   if (parent) {
@@ -581,7 +585,7 @@ function promoteAltToMain(mainId, altId) {
   if (!confirm('Promote "' + a.name + '" to main and make "' + t.mainName + '" an alt?')) return;
   const dem = { id: t.id, name: t.mainName, discordName: t.discordName, discordId: t.discordId || '', class: t.class, mainSpec: t.mainSpec, altSpec: t.altSpec || '' };
   const rem = (t.alts || []).filter(x => x.id && x.id !== altId);
-  const promoted = { id: a.id, mainName: a.name, discordName: a.discordName || t.discordName, discordId: a.discordId || t.discordId || '', class: a.class, mainSpec: a.mainSpec, altSpec: a.altSpec || '', status: a.status || 'Main', server: a.server || t.server || '', fullT2: a.fullT2 || false, rank: t.rank || 'raider', alts: [dem, ...rem] };
+  const promoted = { id: a.id, mainName: a.name, discordName: a.discordName || t.discordName, discordId: a.discordId || t.discordId || '', class: a.class, mainSpec: a.mainSpec, altSpec: a.altSpec || '', status: a.status || 'Main', server: a.server || t.server || 'PyrewoodVillage', fullT2: a.fullT2 || false, rank: t.rank || 'raider', alts: [dem, ...rem] };
   toons[idx] = promoted;
   saveToons().then(() => { activeMainId = promoted.id; renderLinkedMainOptions(); renderList(); loadMainIntoForm(promoted); }).catch(() => {});
 }
