@@ -42,5 +42,23 @@ foreach ($days as $d) {
     $clean[] = ['name' => $name, 'webhook' => $webhook];
 }
 
-guild_save($tenant['id'], 'discord-webhooks', json_encode(['days' => $clean]));
+$pdo = db_connect();
+$pdo->beginTransaction();
+try {
+    $stmt = $pdo->prepare('DELETE FROM webhooks WHERE guild_id = ?');
+    $stmt->execute([$tenant['id']]);
+
+    $ins = $pdo->prepare('INSERT INTO webhooks (guild_id, name, webhook_url, sort_order) VALUES (?, ?, ?, ?)');
+    foreach ($clean as $i => $d) {
+        $ins->execute([$tenant['id'], $d['name'], $d['webhook'], $i]);
+    }
+
+    $pdo->commit();
+} catch (Exception $e) {
+    $pdo->rollBack();
+    http_response_code(500);
+    echo json_encode(['error' => 'Save failed']);
+    exit;
+}
+
 echo json_encode(['success' => true]);

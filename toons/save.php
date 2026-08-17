@@ -66,5 +66,42 @@ foreach ($toons as $t) {
     $clean[] = clean_toon_entry($t, false);
 }
 
-guild_save($tenant['id'], 'toons', json_encode($clean));
+$pdo = db_connect();
+$pdo->beginTransaction();
+try {
+    $stmt = $pdo->prepare('DELETE FROM toon_alts WHERE guild_id = ?');
+    $stmt->execute([$tenant['id']]);
+    $stmt = $pdo->prepare('DELETE FROM toons WHERE guild_id = ?');
+    $stmt->execute([$tenant['id']]);
+
+    $insMain = $pdo->prepare(
+        'INSERT INTO toons (id, guild_id, main_name, discord_name, discord_id, class, main_spec, alt_spec, status, server, full_t2, rank)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $insAlt = $pdo->prepare(
+        'INSERT INTO toon_alts (id, main_id, guild_id, name, discord_name, discord_id, class, main_spec, alt_spec, status, server, full_t2)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+
+    foreach ($clean as $t) {
+        $insMain->execute([
+            $t['id'], $tenant['id'], $t['mainName'], $t['discordName'], $t['discordId'],
+            $t['class'], $t['mainSpec'], $t['altSpec'], $t['status'], $t['server'], $t['fullT2'] ? 1 : 0, $t['rank'],
+        ]);
+        foreach ($t['alts'] as $a) {
+            $insAlt->execute([
+                $a['id'], $t['id'], $tenant['id'], $a['name'], $a['discordName'], $a['discordId'],
+                $a['class'], $a['mainSpec'], $a['altSpec'], $a['status'], $a['server'], $a['fullT2'] ? 1 : 0,
+            ]);
+        }
+    }
+
+    $pdo->commit();
+} catch (Exception $e) {
+    $pdo->rollBack();
+    http_response_code(500);
+    echo json_encode(['error' => 'Save failed']);
+    exit;
+}
+
 echo json_encode(['success' => true]);

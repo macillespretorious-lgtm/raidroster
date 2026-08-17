@@ -14,7 +14,45 @@ if (!$tenant) {
 $role = require_role($tenant, 'roster_management');
 $user = auth_user();
 
-$toons = json_decode(guild_load($tenant['id'], 'toons', '[]'), true) ?: [];
+$pdo = db_connect();
+$stmt = $pdo->prepare('SELECT * FROM toons WHERE guild_id = ? ORDER BY main_name');
+$stmt->execute([$tenant['id']]);
+$mains = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$stmt = $pdo->prepare('SELECT * FROM toon_alts WHERE guild_id = ?');
+$stmt->execute([$tenant['id']]);
+$altsByMain = [];
+foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $a) {
+    $altsByMain[$a['main_id']][] = [
+        'id'          => $a['id'],
+        'name'        => $a['name'],
+        'discordName' => $a['discord_name'],
+        'discordId'   => $a['discord_id'],
+        'class'       => $a['class'],
+        'mainSpec'    => $a['main_spec'],
+        'altSpec'     => $a['alt_spec'],
+        'status'      => $a['status'],
+        'server'      => $a['server'],
+        'fullT2'      => (bool)$a['full_t2'],
+    ];
+}
+
+$toons = array_map(function ($t) use ($altsByMain) {
+    return [
+        'id'          => $t['id'],
+        'mainName'    => $t['main_name'],
+        'discordName' => $t['discord_name'],
+        'discordId'   => $t['discord_id'],
+        'class'       => $t['class'],
+        'mainSpec'    => $t['main_spec'],
+        'altSpec'     => $t['alt_spec'],
+        'status'      => $t['status'],
+        'server'      => $t['server'],
+        'fullT2'      => (bool)$t['full_t2'],
+        'rank'        => $t['rank'],
+        'alts'        => $altsByMain[$t['id']] ?? [],
+    ];
+}, $mains);
 
 function h($s) { return htmlspecialchars($s ?? ''); }
 ?>

@@ -107,8 +107,9 @@ if ($searchQuery !== '' && $isOwner && $botInGuild) {
 }
 
 $WEBHOOK_DAY_DEFAULTS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Misc'];
-$webhookData = json_decode(guild_load($tenant['id'], 'discord-webhooks', '{}'), true) ?: [];
-$webhookDays = $webhookData['days'] ?? [];
+$stmt = $pdo->prepare('SELECT name, webhook_url FROM webhooks WHERE guild_id = ? ORDER BY sort_order');
+$stmt->execute([$tenant['id']]);
+$webhookDays = array_map(fn($r) => ['name' => $r['name'], 'webhook' => $r['webhook_url']], $stmt->fetchAll(PDO::FETCH_ASSOC));
 if (!$webhookDays) {
     $webhookDays = array_map(fn($n) => ['name' => $n, 'webhook' => ''], $WEBHOOK_DAY_DEFAULTS);
 }
