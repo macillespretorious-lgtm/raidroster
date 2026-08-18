@@ -34,13 +34,31 @@ function fetch_structure($pdo, $templateId) {
         $stmt2->execute([$sec['id']]);
         $tables = [];
         foreach ($stmt2->fetchAll(PDO::FETCH_ASSOC) as $tb) {
-            $stmt3 = $pdo->prepare('SELECT id, label FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
+            $stmt3 = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
             $stmt3->execute([$tb['id']]);
-            $columns = array_map(fn($c) => ['id' => (int)$c['id'], 'label' => $c['label']], $stmt3->fetchAll(PDO::FETCH_ASSOC));
-            $stmt4 = $pdo->prepare('SELECT id, label FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
+            $columns = array_map(fn($c) => [
+                'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
+                'width' => $c['width'] !== null ? (int)$c['width'] : null,
+                'headerColor' => $c['header_color'],
+                'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
+            ], $stmt3->fetchAll(PDO::FETCH_ASSOC));
+            $stmt4 = $pdo->prepare('SELECT id, label, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
             $stmt4->execute([$tb['id']]);
-            $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label']], $stmt4->fetchAll(PDO::FETCH_ASSOC));
-            $tables[] = ['id' => (int)$tb['id'], 'title' => $tb['title'], 'columns' => $columns, 'rows' => $rows];
+            $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind']], $stmt4->fetchAll(PDO::FETCH_ASSOC));
+            $stmt5 = $pdo->prepare('SELECT id, parent_group_id, title, color FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
+            $stmt5->execute([$tb['id']]);
+            $columnGroups = array_map(fn($g) => [
+                'id' => (int)$g['id'],
+                'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
+                'title' => $g['title'], 'color' => $g['color'],
+            ], $stmt5->fetchAll(PDO::FETCH_ASSOC));
+            $tables[] = [
+                'id' => (int)$tb['id'], 'title' => $tb['title'],
+                'headerColor' => $tb['header_color'],
+                'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+                'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
+                'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
+            ];
         }
         $out[] = ['id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables];
     }
@@ -88,7 +106,23 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .cell-actions .icon-btn { width: 20px; height: 20px; font-size: 10px; }
     .add-row-btn { background: none; border: 1px dashed rgba(255,255,255,0.2); color: #a8b4d0; border-radius: 6px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
     .add-row-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
-    .tbl-actions-row { display: flex; gap: 8px; margin-top: 8px; }
+    .tbl-actions-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+    input[type=color].swatch { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; padding: 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; background: none; cursor: pointer; flex-shrink: 0; }
+    input[type=color].swatch::-webkit-color-swatch-wrapper { padding: 2px; }
+    input[type=color].swatch::-webkit-color-swatch { border: none; border-radius: 3px; }
+    .width-input { width: 52px; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 11px; padding: 4px 5px; border-radius: 5px; }
+    .tbl-sizing { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; }
+    .col-th-inner { display: flex; flex-direction: column; gap: 3px; align-items: center; }
+    .col-th-row2 { display: flex; gap: 3px; align-items: center; }
+    .group-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
+    .group-pill { display: flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .group-pill input.group-title { background: transparent; border: none; color: inherit; font: inherit; font-weight: 700; width: auto; max-width: 110px; }
+    .group-pill .icon-btn { width: 18px; height: 18px; font-size: 10px; background: rgba(0,0,0,0.25); }
+    .add-group-btn { background: none; border: 1px dashed rgba(255,255,255,0.25); color: #a8b4d0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; }
+    .add-group-btn:hover { border-color: rgba(255,255,255,0.5); color: #e8ecff; }
+    td.spacer-cell, th.spacer-th { background: repeating-linear-gradient(135deg, rgba(255,255,255,0.03) 0 6px, transparent 6px 12px); border-style: dashed; }
+    .spacer-label { font-size: 9px; color: #55618a; text-transform: uppercase; letter-spacing: .05em; }
 
     .add-table-form { display: flex; gap: 8px; }
     .add-table-form input { flex: 1; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 6px; }
@@ -134,6 +168,23 @@ const ALLOWED_KINDS = STYLE === 'combined' ? ['roster', 'assignments'] : ['roste
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttr(s) { return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
+function contrastText(hex) {
+  if (!hex) return '#e8ecff';
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#111827' : '#ffffff';
+}
+
+function findTable(id) {
+  for (const sec of sections) for (const tb of sec.tables) if (tb.id === id) return tb;
+  return null;
+}
+function findColumn(id) {
+  for (const sec of sections) for (const tb of sec.tables) for (const c of tb.columns) if (c.id === id) return c;
+  return null;
+}
+
 function call(payload) {
   return fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(r => r.json())
@@ -153,7 +204,8 @@ function render() {
   kindSel.innerHTML = ALLOWED_KINDS.map(k => `<option value="${k}">${KIND_META[k].label}</option>`).join('');
 
   el.querySelectorAll('[data-action]').forEach(node => {
-    node.addEventListener(node.tagName === 'INPUT' ? 'change' : 'click', () => {
+    const evt = (node.tagName === 'INPUT' || node.tagName === 'SELECT') ? 'change' : 'click';
+    node.addEventListener(evt, () => {
       const act = node.dataset.action;
       const id = node.dataset.id ? parseInt(node.dataset.id, 10) : null;
       if (act === 'rename-section') call({ action: 'update_section', id, title: node.value.trim() });
@@ -180,6 +232,21 @@ function render() {
         const label = prompt('Row label:');
         if (label && label.trim()) call({ action: 'add_row', tableId: id, label: label.trim() });
       }
+      if (act === 'add-spacer-col') call({ action: 'add_column', tableId: id, kind: 'spacer', label: '' });
+      if (act === 'add-spacer-row') call({ action: 'add_row', tableId: id, kind: 'spacer', label: '' });
+      if (act === 'table-header-color') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, headerColor: node.value }); }
+      if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: node.value ? parseInt(node.value, 10) : null }); }
+      if (act === 'table-label-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, rowLabelWidth: node.value ? parseInt(node.value, 10) : null }); }
+      if (act === 'col-header-color') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, headerColor: node.value }); }
+      if (act === 'col-width') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: node.value ? parseInt(node.value, 10) : null }); }
+      if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
+      if (act === 'add-group') {
+        const title = prompt('Group header title, e.g. Spider Wing:');
+        if (title && title.trim()) call({ action: 'add_column_group', tableId: id, title: title.trim() });
+      }
+      if (act === 'rename-group') call({ action: 'update_column_group', id, title: node.value.trim() });
+      if (act === 'recolor-group') call({ action: 'update_column_group', id, color: node.value });
+      if (act === 'delete-group') { if (confirm('Delete this group header? Columns stay, they just lose the grouping.')) call({ action: 'delete_column_group', id }); }
     });
   });
 
@@ -194,18 +261,88 @@ function render() {
   });
 }
 
-function renderTable(tb) {
-  const colHeaders = tb.columns.map(c => `<th>
-      <input class="lbl-input" data-action="rename-col" data-id="${c.id}" value="${escAttr(c.label)}">
-      <div class="cell-actions">
-        <button class="icon-btn" data-action="move-col-left" data-id="${c.id}" title="Move left">&larr;</button>
-        <button class="icon-btn" data-action="move-col-right" data-id="${c.id}" title="Move right">&rarr;</button>
-        <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
+function colHeaderCell(c, tb) {
+  if (c.kind === 'spacer') {
+    return `<th class="spacer-th">
+      <div class="col-th-inner">
+        <span class="spacer-label">spacer</span>
+        <div class="cell-actions">
+          <button class="icon-btn" data-action="move-col-left" data-id="${c.id}" title="Move left">&larr;</button>
+          <button class="icon-btn" data-action="move-col-right" data-id="${c.id}" title="Move right">&rarr;</button>
+          <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
+        </div>
       </div>
-    </th>`).join('');
+    </th>`;
+  }
+  const groupOptions = ['<option value="">— No group —</option>']
+    .concat(tb.columnGroups.map(g => `<option value="${g.id}" ${c.groupId === g.id ? 'selected' : ''}>${escAttr(g.title)}</option>`));
+  return `<th>
+      <div class="col-th-inner">
+        <input class="lbl-input" data-action="rename-col" data-id="${c.id}" value="${escAttr(c.label)}">
+        <div class="col-th-row2">
+          <input type="color" class="swatch" data-action="col-header-color" data-id="${c.id}" value="${c.headerColor || '#1a2338'}" title="Header color">
+          <input type="number" class="width-input" data-action="col-width" data-id="${c.id}" value="${c.width || ''}" placeholder="w" min="0" title="Width (px)">
+        </div>
+        <select class="width-input" style="width:100%;" data-action="col-group" data-id="${c.id}" title="Column group">${groupOptions.join('')}</select>
+        <div class="cell-actions">
+          <button class="icon-btn" data-action="move-col-left" data-id="${c.id}" title="Move left">&larr;</button>
+          <button class="icon-btn" data-action="move-col-right" data-id="${c.id}" title="Move right">&rarr;</button>
+          <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
+        </div>
+      </div>
+    </th>`;
+}
+
+function groupHeaderRow(tb) {
+  if (!tb.columnGroups.length) return '';
+  const cells = [`<th rowspan="2"></th>`];
+  let i = 0;
+  while (i < tb.columns.length) {
+    const gid = tb.columns[i].groupId;
+    if (!gid) { cells.push(`<th rowspan="2"></th>`); i++; continue; }
+    let span = 1;
+    while (i + span < tb.columns.length && tb.columns[i + span].groupId === gid) span++;
+    const grp = tb.columnGroups.find(g => g.id === gid);
+    if (grp) {
+      cells.push(`<th colspan="${span}" style="background:${grp.color};color:${contrastText(grp.color)};">${esc(grp.title)}</th>`);
+    } else {
+      cells.push(`<th colspan="${span}"></th>`);
+    }
+    i += span;
+  }
+  return `<tr>${cells.join('')}</tr>`;
+}
+
+function groupStrip(tb) {
+  const pills = tb.columnGroups.map(g => `
+    <div class="group-pill" style="background:${g.color};color:${contrastText(g.color)};">
+      <input class="group-title" data-action="rename-group" data-id="${g.id}" value="${escAttr(g.title)}">
+      <input type="color" class="swatch" data-action="recolor-group" data-id="${g.id}" value="${g.color}" title="Group color">
+      <button class="icon-btn" data-action="delete-group" data-id="${g.id}" title="Delete group">&times;</button>
+    </div>`).join('');
+  return `<div class="group-strip">${pills}<button class="add-group-btn" data-action="add-group" data-id="${tb.id}">+ Group header</button></div>`;
+}
+
+function renderTable(tb) {
+  const colHeaders = tb.columns.map(c => colHeaderCell(c, tb)).join('');
+  const groupRow = groupHeaderRow(tb);
 
   const bodyRows = tb.rows.map(r => {
-    const rowCells = tb.columns.map(() => `<td></td>`).join('');
+    if (r.kind === 'spacer') {
+      const spacerCells = tb.columns.map(() => `<td class="spacer-cell"></td>`).join('');
+      return `<tr>
+        <th class="spacer-th" style="text-align:left;">
+          <span class="spacer-label">spacer</span>
+          <div class="cell-actions">
+            <button class="icon-btn" data-action="move-row-up" data-id="${r.id}" title="Move up">&uarr;</button>
+            <button class="icon-btn" data-action="move-row-down" data-id="${r.id}" title="Move down">&darr;</button>
+            <button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>
+          </div>
+        </th>
+        ${spacerCells}
+      </tr>`;
+    }
+    const rowCells = tb.columns.map(c => c.kind === 'spacer' ? `<td class="spacer-cell"></td>` : `<td></td>`).join('');
     return `<tr>
       <th style="text-align:left;">
         <input class="lbl-input" data-action="rename-row" data-id="${r.id}" value="${escAttr(r.label)}">
@@ -219,22 +356,33 @@ function renderTable(tb) {
     </tr>`;
   }).join('');
 
+  const headerBg = tb.headerColor || '';
+  const headerStyle = headerBg ? `background:${headerBg};` : '';
+  const titleColor = headerBg ? contrastText(headerBg) : '#e8ecff';
+
   return `<div class="tbl-card">
-    <div class="tbl-head">
-      <input class="tbl-title" data-action="rename-table" data-id="${tb.id}" value="${escAttr(tb.title)}">
+    <div class="tbl-head" style="${headerStyle}">
+      <input class="tbl-title" data-action="rename-table" data-id="${tb.id}" value="${escAttr(tb.title)}" style="color:${titleColor};">
+      <input type="color" class="swatch" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
+      <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${tb.defaultColumnWidth || ''}" placeholder="auto" min="0"></div>
+      <div class="tbl-sizing">Label w<input type="number" class="width-input" data-action="table-label-width" data-id="${tb.id}" value="${tb.rowLabelWidth || ''}" placeholder="auto" min="0"></div>
       <button class="icon-btn" data-action="move-table-up" data-id="${tb.id}" title="Move up">&uarr;</button>
       <button class="icon-btn" data-action="move-table-down" data-id="${tb.id}" title="Move down">&darr;</button>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
+    ${groupStrip(tb)}
     <div class="grid-scroll">
       <table class="grid">
-        <tr><th></th>${colHeaders}</tr>
+        ${groupRow}
+        <tr>${groupRow ? '' : '<th></th>'}${colHeaders}</tr>
         ${bodyRows || ''}
       </table>
     </div>
     <div class="tbl-actions-row">
       <button class="add-row-btn" data-action="add-col" data-id="${tb.id}">+ Column</button>
       <button class="add-row-btn" data-action="add-row" data-id="${tb.id}">+ Row</button>
+      <button class="add-row-btn" data-action="add-spacer-col" data-id="${tb.id}">+ Spacer column</button>
+      <button class="add-row-btn" data-action="add-spacer-row" data-id="${tb.id}">+ Spacer row</button>
     </div>
   </div>`;
 }

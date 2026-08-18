@@ -14,32 +14,52 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
         $stmtT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
         $stmtT->execute([$sec['id']]);
         foreach ($stmtT->fetchAll(PDO::FETCH_ASSOC) as $tb) {
-            $insT = $pdo->prepare('INSERT INTO raid_tables (section_id, title, sort_order) VALUES (?, ?, ?)');
-            $insT->execute([$newSectionId, $tb['title'], $tb['sort_order']]);
+            $insT = $pdo->prepare(
+                'INSERT INTO raid_tables (section_id, title, sort_order, header_color, default_column_width, row_label_width)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            $insT->execute([$newSectionId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['default_column_width'], $tb['row_label_width']]);
             $newTableId = (int)$pdo->lastInsertId();
+
+            // Column groups first (columns FK into them), preserving parent_group_id links via an old->new id map.
+            $stmtG = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
+            $stmtG->execute([$tb['id']]);
+            $groupIdMap = [];
+            $insG = $pdo->prepare('INSERT INTO raid_column_groups (table_id, parent_group_id, title, color, sort_order) VALUES (?, ?, ?, ?, ?)');
+            foreach ($stmtG->fetchAll(PDO::FETCH_ASSOC) as $grp) {
+                $insG->execute([$newTableId, $grp['parent_group_id'] ? ($groupIdMap[$grp['parent_group_id']] ?? null) : null, $grp['title'], $grp['color'], $grp['sort_order']]);
+                $groupIdMap[$grp['id']] = (int)$pdo->lastInsertId();
+            }
 
             $stmtC = $pdo->prepare('SELECT * FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
             $stmtC->execute([$tb['id']]);
-            $columnIds = [];
-            $insC = $pdo->prepare('INSERT INTO raid_columns (table_id, label, sort_order) VALUES (?, ?, ?)');
+            $columns = [];
+            $insC = $pdo->prepare(
+                'INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, group_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
             foreach ($stmtC->fetchAll(PDO::FETCH_ASSOC) as $col) {
-                $insC->execute([$newTableId, $col['label'], $col['sort_order']]);
-                $columnIds[] = (int)$pdo->lastInsertId();
+                $newGroupId = $col['group_id'] ? ($groupIdMap[$col['group_id']] ?? null) : null;
+                $insC->execute([$newTableId, $col['label'], $col['sort_order'], $col['kind'], $col['width'], $col['header_color'], $newGroupId]);
+                $columns[] = ['id' => (int)$pdo->lastInsertId(), 'kind' => $col['kind']];
             }
 
             $stmtR = $pdo->prepare('SELECT * FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
             $stmtR->execute([$tb['id']]);
-            $rowIds = [];
-            $insR = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order) VALUES (?, ?, ?)');
+            $rows = [];
+            $insR = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
             foreach ($stmtR->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $insR->execute([$newTableId, $row['label'], $row['sort_order']]);
-                $rowIds[] = (int)$pdo->lastInsertId();
+                $insR->execute([$newTableId, $row['label'], $row['sort_order'], $row['kind']]);
+                $rows[] = ['id' => (int)$pdo->lastInsertId(), 'kind' => $row['kind']];
             }
 
+            // Spacer rows/columns never hold data, so no raid_cells row is created for either side.
             $insCell = $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id) VALUES (?, ?, ?)');
-            foreach ($rowIds as $rid) {
-                foreach ($columnIds as $cid) {
-                    $insCell->execute([$newTableId, $rid, $cid]);
+            foreach ($rows as $r) {
+                if ($r['kind'] === 'spacer') continue;
+                foreach ($columns as $c) {
+                    if ($c['kind'] === 'spacer') continue;
+                    $insCell->execute([$newTableId, $r['id'], $c['id']]);
                 }
             }
         }

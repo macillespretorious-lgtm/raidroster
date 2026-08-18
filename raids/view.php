@@ -36,13 +36,26 @@ function fetch_raid_structure($pdo, $raidId) {
         $stmtT->execute([$sec['id']]);
         $tables = [];
         foreach ($stmtT->fetchAll(PDO::FETCH_ASSOC) as $tb) {
-            $stmtC = $pdo->prepare('SELECT id, label FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
+            $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
             $stmtC->execute([$tb['id']]);
-            $columns = array_map(fn($c) => ['id' => (int)$c['id'], 'label' => $c['label']], $stmtC->fetchAll(PDO::FETCH_ASSOC));
+            $columns = array_map(fn($c) => [
+                'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
+                'width' => $c['width'] !== null ? (int)$c['width'] : null,
+                'headerColor' => $c['header_color'],
+                'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
+            ], $stmtC->fetchAll(PDO::FETCH_ASSOC));
 
-            $stmtR = $pdo->prepare('SELECT id, label FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
+            $stmtR = $pdo->prepare('SELECT id, label, kind FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
             $stmtR->execute([$tb['id']]);
-            $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label']], $stmtR->fetchAll(PDO::FETCH_ASSOC));
+            $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind']], $stmtR->fetchAll(PDO::FETCH_ASSOC));
+
+            $stmtG = $pdo->prepare('SELECT id, parent_group_id, title, color FROM raid_column_groups WHERE table_id = ? ORDER BY sort_order, id');
+            $stmtG->execute([$tb['id']]);
+            $columnGroups = array_map(fn($g) => [
+                'id' => (int)$g['id'],
+                'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
+                'title' => $g['title'], 'color' => $g['color'],
+            ], $stmtG->fetchAll(PDO::FETCH_ASSOC));
 
             $stmtCell = $pdo->prepare(
                 'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.note, t.main_name, t.class
@@ -61,7 +74,13 @@ function fetch_raid_structure($pdo, $raidId) {
                 ];
             }
 
-            $tables[] = ['id' => (int)$tb['id'], 'title' => $tb['title'], 'columns' => $columns, 'rows' => $rows, 'cells' => $cells];
+            $tables[] = [
+                'id' => (int)$tb['id'], 'title' => $tb['title'],
+                'headerColor' => $tb['header_color'],
+                'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+                'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
+                'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
+            ];
         }
         $out[] = ['id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables];
     }
@@ -106,13 +125,18 @@ function fmtTime($t) {
     .section-card { border-radius: 12px; overflow: hidden; margin: 22px 0; border: 1px solid rgba(255,255,255,0.08); }
     .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
     .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: column; gap: 18px; }
-    .tbl-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0; margin-bottom: 8px; }
+    .tbl-title {
+      font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+      color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0;
+    }
     .grid-scroll { overflow-x: auto; }
-    table.grid { border-collapse: collapse; width: 100%; font-size: 12px; }
-    table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 6px 8px; text-align: center; vertical-align: middle; }
-    table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 700; white-space: nowrap; }
+    table.grid { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12.5px; }
+    table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
+    table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
     table.grid th.row-label { text-align: left; white-space: nowrap; }
-    td.cell { min-width: 100px; }
+    table.grid th.group-th { font-size: 13px; letter-spacing: .04em; }
+    td.cell { min-width: 90px; }
+    th.spacer-th, td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
 
     .toon-chip {
       display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 10px;
@@ -162,6 +186,14 @@ const CLASS_COLORS = {
 
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function classColor(cls) { return CLASS_COLORS[(cls || '').toLowerCase()] || '#8892b0'; }
+
+function contrastText(hex) {
+  if (!hex) return '#e8ecff';
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#111827' : '#ffffff';
+}
 
 function chipHtml(cell) {
   if (!cell || !cell.toonId) return '<span class="empty-slot">+</span>';
@@ -237,10 +269,45 @@ function persistCell(cellId, toonId, note) {
   });
 }
 
+function groupHeaderRow(tb) {
+  if (!tb.columnGroups.length) return '';
+  const cells = [`<th rowspan="2"></th>`];
+  let i = 0;
+  while (i < tb.columns.length) {
+    const gid = tb.columns[i].groupId;
+    if (!gid) { cells.push(`<th rowspan="2"></th>`); i++; continue; }
+    let span = 1;
+    while (i + span < tb.columns.length && tb.columns[i + span].groupId === gid) span++;
+    const grp = tb.columnGroups.find(g => g.id === gid);
+    if (grp) {
+      cells.push(`<th class="group-th" colspan="${span}" style="background:${grp.color};color:${contrastText(grp.color)};">${esc(grp.title)}</th>`);
+    } else {
+      cells.push(`<th colspan="${span}"></th>`);
+    }
+    i += span;
+  }
+  return `<tr>${cells.join('')}</tr>`;
+}
+
 function renderTable(tb) {
-  const colHeaders = tb.columns.map(c => `<th>${esc(c.label)}</th>`).join('');
+  const colHeaders = tb.columns.map(c => {
+    if (c.kind === 'spacer') return `<th class="spacer-th"></th>`;
+    const style = c.headerColor ? ` style="background:${c.headerColor};color:${contrastText(c.headerColor)};"` : '';
+    return `<th${style}>${esc(c.label)}</th>`;
+  }).join('');
+
+  const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
+    tb.columns.map(c => {
+      const w = c.width || tb.defaultColumnWidth;
+      return `<col${w ? ` style="width:${w}px;"` : ''}>`;
+    }).join('') + `</colgroup>`;
+
   const bodyRows = tb.rows.map(r => {
+    if (r.kind === 'spacer') {
+      return `<tr><td class="spacer-cell" colspan="${tb.columns.length + 1}"></td></tr>`;
+    }
     const rowCells = tb.columns.map(c => {
+      if (c.kind === 'spacer') return `<td class="spacer-cell"></td>`;
       const cell = tb.cells[r.id + '_' + c.id];
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
@@ -250,10 +317,18 @@ function renderTable(tb) {
     return `<tr><th class="row-label">${esc(r.label)}</th>${rowCells}</tr>`;
   }).join('');
 
+  const groupRow = groupHeaderRow(tb);
+  const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
+
   return `<div>
-    <div class="tbl-title">${esc(tb.title)}</div>
+    <div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>
     <div class="grid-scroll">
-      <table class="grid"><tr><th></th>${colHeaders}</tr>${bodyRows}</table>
+      <table class="grid">
+        ${colgroup}
+        ${groupRow}
+        <tr>${groupRow ? '' : '<th></th>'}${colHeaders}</tr>
+        ${bodyRows}
+      </table>
     </div>
   </div>`;
 }
