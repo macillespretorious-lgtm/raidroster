@@ -98,6 +98,13 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     p.sub { color: #a8b4d0; font-size: 13px; margin-bottom: 24px; }
     .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; font-weight: 700; background: rgba(255,255,255,0.08); color: #a8b4d0; }
 
+    .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .tab-btn { background: none; border: none; font: inherit; cursor: pointer; color: #7f8bad; font-size: 13px; font-weight: 600; padding: 10px 16px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn:hover { color: #c7cef2; }
+    .tab-btn.active { color: #e8ecff; border-bottom-color: #5865f2; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
     .section-card { border-radius: 10px; overflow: hidden; margin-bottom: 18px; border: 1px solid rgba(255,255,255,0.08); }
     .section-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
     .section-head .title-input { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: #fff; font: inherit; font-size: 14px; font-weight: 700; padding: 5px 9px; border-radius: 6px; flex: 1; min-width: 0; }
@@ -158,12 +165,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <h1><?= h($template['name']) ?></h1>
     <p class="sub"><span class="tag"><?= h($template['assignment_style']) ?></span> &middot; structure only &mdash; toon assignments happen per-raid</p>
 
-    <div id="sectionsEl"></div>
-
-    <div class="add-section-bar">
-      <select id="newSectionKind"></select>
-      <button class="btn" id="addSectionBtn">+ Add section</button>
-    </div>
+    <div class="tabs" id="tabsEl"></div>
+    <div id="panelsEl"></div>
   </div>
 
 <script>
@@ -270,16 +273,32 @@ function call(payload) {
     .catch(e => alert(e.message));
 }
 
-function render() {
-  const el = document.getElementById('sectionsEl');
-  if (!sections.length) {
-    el.innerHTML = '<p class="empty">No sections yet — add one below to start building this template.</p>';
-  } else {
-    el.innerHTML = sections.map(sec => renderSection(sec)).join('');
-  }
+let activeTab = ALLOWED_KINDS.includes(location.hash.slice(1)) ? location.hash.slice(1) : ALLOWED_KINDS[0];
 
-  const kindSel = document.getElementById('newSectionKind');
-  kindSel.innerHTML = ALLOWED_KINDS.map(k => `<option value="${k}">${KIND_META[k].label}</option>`).join('');
+function render() {
+  const tabsEl = document.getElementById('tabsEl');
+  tabsEl.innerHTML = ALLOWED_KINDS.map(k => `<button type="button" class="tab-btn ${k === activeTab ? 'active' : ''}" data-tab="${k}">${KIND_META[k].label}</button>`).join('');
+  tabsEl.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeTab = btn.dataset.tab;
+      history.replaceState(null, '', '#' + activeTab);
+      render();
+    });
+  });
+
+  const el = document.getElementById('panelsEl');
+  el.innerHTML = ALLOWED_KINDS.map(k => {
+    const secs = sections.filter(s => s.kind === k);
+    const body = secs.length
+      ? secs.map(sec => renderSection(sec)).join('')
+      : '<p class="empty">No section yet — add one below to start building this tab.</p>';
+    return `<div class="tab-panel ${k === activeTab ? 'active' : ''}" data-panel="${k}">
+      ${body}
+      <div class="add-section-bar">
+        <button class="btn" data-action="add-section-for-kind" data-kind="${k}">+ Add ${KIND_META[k].label} section</button>
+      </div>
+    </div>`;
+  }).join('');
 
   el.querySelectorAll('[data-action]').forEach(node => {
     const evt = (node.tagName === 'INPUT' || node.tagName === 'SELECT') ? 'change' : 'click';
@@ -291,6 +310,7 @@ function render() {
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
       if (act === 'add-table-to-section') call({ action: 'add_table', sectionId: id });
+      if (act === 'add-section-for-kind') { const k = node.dataset.kind; call({ action: 'add_section', templateId: TEMPLATE_ID, kind: k, title: KIND_META[k].label }); }
       if (act === 'add-table-to-group') {
         const title = prompt('Table name, e.g. a boss name:');
         if (title && title.trim()) call({ action: 'add_table', groupId: id, title: title.trim() });
@@ -569,11 +589,6 @@ function renderSection(sec) {
     </div>
   </div>`;
 }
-
-document.getElementById('addSectionBtn').addEventListener('click', () => {
-  const kind = document.getElementById('newSectionKind').value;
-  call({ action: 'add_section', templateId: TEMPLATE_ID, kind, title: KIND_META[kind].label });
-});
 
 render();
 </script>
