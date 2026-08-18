@@ -36,6 +36,7 @@ function template_to_json($t) {
         'id'                     => (int)$t['id'],
         'name'                   => $t['name'],
         'description'            => $t['description'],
+        'assignmentStyle'        => $t['assignment_style'],
         'defaultStartTime'       => $t['default_start_time'],
         'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
     ];
@@ -45,6 +46,7 @@ if ($action === 'save') {
     $id     = isset($body['id']) && $body['id'] ? (int)$body['id'] : null;
     $name   = substr(trim($body['name'] ?? ''), 0, 100);
     $desc   = isset($body['description']) ? substr(trim($body['description']), 0, 65000) : null;
+    $style  = ($body['assignmentStyle'] ?? '') === 'combined' ? 'combined' : 'separate';
     $start  = $body['defaultStartTime'] ?? null;
     $dur    = isset($body['defaultDurationMinutes']) && $body['defaultDurationMinutes'] !== null ? (int)$body['defaultDurationMinutes'] : null;
 
@@ -67,9 +69,11 @@ if ($action === 'save') {
         }
         $stmt = $pdo->prepare('UPDATE raid_templates SET name = ?, description = ?, default_start_time = ?, default_duration_minutes = ? WHERE id = ? AND guild_id = ?');
         $stmt->execute([$name, $desc, $start, $dur, $id, $tenant['id']]);
+        // assignment_style is intentionally not editable once a template exists,
+        // since it determines which section kinds are already in use in its structure.
     } else {
-        $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, default_start_time, default_duration_minutes) VALUES (?, ?, ?, ?, ?)');
-        $stmt->execute([$tenant['id'], $name, $desc, $start, $dur]);
+        $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, assignment_style, default_start_time, default_duration_minutes) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$tenant['id'], $name, $desc, $style, $start, $dur]);
         $id = (int)$pdo->lastInsertId();
     }
 

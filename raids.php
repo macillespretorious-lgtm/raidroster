@@ -2,6 +2,7 @@
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/roles.php';
 require_once __DIR__ . '/includes/nav.php';
+require_once __DIR__ . '/includes/raid_structure.php';
 
 $slug   = $_GET['slug'] ?? '';
 $tenant = guild_by_slug($slug);
@@ -62,6 +63,7 @@ if ($slotsByDow) {
                 $s['name'],
                 $s['description'],
             ]);
+            copy_template_structure_to_raid($pdo, $s['template_id'], (int)$pdo->lastInsertId());
         }
         $cursor->modify('+1 day');
     }
@@ -179,7 +181,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .form-row .form-group { margin-bottom: 0; }
     .form-buttons { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-    button.btn { display: inline-block; padding: 9px 18px; font: inherit; font-size: 13px; font-weight: 600; border-radius: 999px; cursor: pointer; border: none; }
+    button.btn, a.btn { display: inline-block; padding: 9px 18px; font: inherit; font-size: 13px; font-weight: 600; border-radius: 999px; cursor: pointer; border: none; text-decoration: none; }
     .btn-save { background: #5865f2; color: #fff; }
     .btn-save:hover { background: #4752c4; }
     .btn-cancel-modal { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12) !important; color: #a8b4d0; }
@@ -257,6 +259,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
 
         <div class="form-buttons">
           <button class="btn btn-save" id="modalSaveBtn">Save</button>
+          <a class="btn btn-cancel-modal hidden" id="modalViewLink" href="#">View roster &amp; assignments</a>
           <button class="btn btn-cancel-modal" id="modalCloseBtn">Close</button>
           <button class="btn btn-danger hidden" id="modalCancelRaidBtn">Cancel raid</button>
           <button class="btn btn-restore hidden" id="modalRestoreBtn">Restore</button>
@@ -354,6 +357,7 @@ function openNewRaid(date) {
   document.getElementById('modalCancelRaidBtn').classList.add('hidden');
   document.getElementById('modalRestoreBtn').classList.add('hidden');
   document.getElementById('modalSaveBtn').classList.remove('hidden');
+  document.getElementById('modalViewLink').classList.add('hidden');
   populateTemplateSelect();
   setMode('template');
   if (!templates.length) {
@@ -386,6 +390,9 @@ function openRaid(id) {
   document.getElementById('modalSaveBtn').classList.toggle('hidden', cancelled);
   document.getElementById('modalCancelRaidBtn').classList.toggle('hidden', cancelled);
   document.getElementById('modalRestoreBtn').classList.toggle('hidden', !cancelled);
+  const viewLink = document.getElementById('modalViewLink');
+  viewLink.href = '/raids/view.php?slug=' + encodeURIComponent(SLUG) + '&id=' + raid.id;
+  viewLink.classList.remove('hidden');
   clearModalMsg();
   openModal();
 }

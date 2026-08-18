@@ -114,13 +114,14 @@ if (!$webhookDays) {
     $webhookDays = array_map(fn($n) => ['name' => $n, 'webhook' => ''], $WEBHOOK_DAY_DEFAULTS);
 }
 
-$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, assignment_style, default_start_time, default_duration_minutes FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $raidTemplates = array_map(function ($t) {
     return [
         'id'                     => (int)$t['id'],
         'name'                   => $t['name'],
         'description'            => $t['description'],
+        'assignmentStyle'        => $t['assignment_style'],
         'defaultStartTime'       => $t['default_start_time'],
         'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
     ];
@@ -265,6 +266,14 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .form-row .form-group { margin-bottom: 0; }
     .btn-cancel-tpl { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #a8b4d0; }
     .btn-cancel-tpl:hover { background: rgba(255,255,255,0.1); }
+
+    .mode-tabs { display: flex; gap: 4px; }
+    .tab-btn-pill {
+      flex: 1; background: none; border: 1px solid rgba(255,255,255,0.12); color: #7f8bad;
+      font: inherit; font-size: 12px; font-weight: 600; padding: 7px; border-radius: 7px; cursor: pointer;
+    }
+    .tab-btn-pill.active { background: rgba(88,101,242,0.15); border-color: rgba(88,101,242,0.4); color: #a3adfa; }
+    .tab-btn-pill:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .tpl-item { cursor: pointer; }
     .tpl-item .name { flex: 1; }
@@ -433,9 +442,18 @@ function h($s) { return htmlspecialchars($s ?? ''); }
           <label for="tplDesc">Description</label>
           <input type="text" id="tplDesc" placeholder="Optional notes">
         </div>
+        <div class="form-group" id="tplStyleGroup">
+          <label>Assignment layout</label>
+          <div class="mode-tabs" id="tplStyleTabs">
+            <button type="button" class="tab-btn-pill active" data-style="separate">Separate (Tank / Healer / Misc)</button>
+            <button type="button" class="tab-btn-pill" data-style="combined">Combined (one Assignments section)</button>
+          </div>
+          <p class="hint" id="tplStyleHint" style="margin-top:2px;">Locked once the template exists — it determines which section kinds its structure editor allows.</p>
+        </div>
         <div class="form-buttons" style="display:flex;gap:8px;margin-top:10px;">
           <button class="btn" id="tplSaveBtn">Save template</button>
           <button class="btn btn-cancel-tpl hidden" id="tplCancelEditBtn">Cancel edit</button>
+          <a class="btn btn-cancel-tpl hidden" id="tplEditStructureBtn" href="#">Edit structure</a>
         </div>
       </div>
 
@@ -527,14 +545,18 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     renderDays();
 
     // --- Raids tab: templates + recurring schedule ---
+    const SLUG = <?= json_encode($slug) ?>;
     const TPL_SAVE_URL   = <?= json_encode('/raids/templates-save.php?slug=' . $slug) ?>;
     const RECUR_SAVE_URL = <?= json_encode('/raids/recurring-save.php?slug=' . $slug) ?>;
     let templates = <?= json_encode($raidTemplates) ?>;
     let recurring = <?= json_encode($recurringByDow, JSON_FORCE_OBJECT) ?>;
     const WEEKDAYS = <?= json_encode(array_map(fn($k, $v) => ['dow' => $k, 'label' => $v], array_keys($WEEKDAY_LABELS), array_values($WEEKDAY_LABELS))) ?>;
     let editingTplId = null;
+    let selectedStyle = 'separate';
 
     function escH(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    const STYLE_LABEL = { separate: 'Separate', combined: 'Combined' };
 
     function renderTemplateList() {
       const el = document.getElementById('templateList');
@@ -543,14 +565,24 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         const meta = [];
         if (t.defaultStartTime) meta.push(t.defaultStartTime.slice(0,5));
         if (t.defaultDurationMinutes) meta.push(t.defaultDurationMinutes + ' min');
+        meta.push(STYLE_LABEL[t.assignmentStyle] || t.assignmentStyle);
         return `<div class="card row tpl-item">
           <div class="name" onclick="editTemplate(${t.id})">${escH(t.name)}${meta.length ? ' <span class="tpl-meta">(' + meta.join(', ') + ')</span>' : ''}</div>
           <div class="tpl-actions">
+            <a class="btn" style="padding:5px 12px;font-size:12px;" href="/raids/template-edit.php?slug=${encodeURIComponent(SLUG)}&id=${t.id}">Structure</a>
             <button class="btn" style="padding:5px 12px;font-size:12px;" onclick="editTemplate(${t.id})">Edit</button>
             <button class="btn danger" style="padding:5px 12px;font-size:12px;" onclick="deleteTemplate(${t.id})">Delete</button>
           </div>
         </div>`;
       }).join('');
+    }
+
+    function setStyleTabs(style, locked) {
+      selectedStyle = style;
+      document.querySelectorAll('#tplStyleTabs .tab-btn-pill').forEach(b => {
+        b.classList.toggle('active', b.dataset.style === style);
+        b.disabled = locked;
+      });
     }
 
     function editTemplate(id) {
@@ -561,7 +593,11 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       document.getElementById('tplStart').value = (t.defaultStartTime || '').slice(0, 5);
       document.getElementById('tplDuration').value = t.defaultDurationMinutes || '';
       document.getElementById('tplDesc').value = t.description || '';
+      setStyleTabs(t.assignmentStyle, true);
       document.getElementById('tplCancelEditBtn').classList.remove('hidden');
+      const structBtn = document.getElementById('tplEditStructureBtn');
+      structBtn.href = '/raids/template-edit.php?slug=' + encodeURIComponent(SLUG) + '&id=' + id;
+      structBtn.classList.remove('hidden');
     }
 
     function resetTemplateForm() {
@@ -570,9 +606,14 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       document.getElementById('tplStart').value = '';
       document.getElementById('tplDuration').value = '';
       document.getElementById('tplDesc').value = '';
+      setStyleTabs('separate', false);
       document.getElementById('tplCancelEditBtn').classList.add('hidden');
+      document.getElementById('tplEditStructureBtn').classList.add('hidden');
     }
     document.getElementById('tplCancelEditBtn').addEventListener('click', resetTemplateForm);
+    document.querySelectorAll('#tplStyleTabs .tab-btn-pill').forEach(b => {
+      b.addEventListener('click', () => { if (!b.disabled) setStyleTabs(b.dataset.style, false); });
+    });
 
     document.getElementById('tplSaveBtn').addEventListener('click', function () {
       const name = document.getElementById('tplName').value.trim();
@@ -581,6 +622,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         action: 'save',
         id: editingTplId,
         name,
+        assignmentStyle: selectedStyle,
         defaultStartTime: document.getElementById('tplStart').value || null,
         defaultDurationMinutes: document.getElementById('tplDuration').value ? parseInt(document.getElementById('tplDuration').value, 10) : null,
         description: document.getElementById('tplDesc').value.trim() || null,

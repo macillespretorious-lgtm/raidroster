@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
+require_once __DIR__ . '/../includes/raid_structure.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -91,6 +92,9 @@ if ($action === 'save') {
         );
         $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc]);
         $id = (int)$pdo->lastInsertId();
+        if ($tmplId) {
+            copy_template_structure_to_raid($pdo, $tmplId, $id);
+        }
     }
 
     echo json_encode(['success' => true, 'raid' => raid_to_json(fetch_raid($pdo, $tenant['id'], $id))]);
