@@ -27,6 +27,62 @@ if (!$raid) {
 
 $canManage = role_at_least($role, 'raid_management');
 
+function fetch_table_full($pdo, $tb) {
+    $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtC->execute([$tb['id']]);
+    $columns = array_map(fn($c) => [
+        'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
+        'width' => $c['width'] !== null ? (int)$c['width'] : null,
+        'headerColor' => $c['header_color'],
+        'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
+    ], $stmtC->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmtR = $pdo->prepare('SELECT id, label, kind FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtR->execute([$tb['id']]);
+    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind']], $stmtR->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmtG = $pdo->prepare('SELECT * FROM raid_column_groups WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtG->execute([$tb['id']]);
+    $groupRows = $stmtG->fetchAll(PDO::FETCH_ASSOC);
+    $columnGroups = [];
+    foreach ($groupRows as $g) {
+        $stmtGT = $pdo->prepare('SELECT * FROM raid_tables WHERE parent_group_id = ? ORDER BY sort_order, id');
+        $stmtGT->execute([$g['id']]);
+        $childTables = array_map(fn($ctb) => fetch_table_full($pdo, $ctb), $stmtGT->fetchAll(PDO::FETCH_ASSOC));
+        $columnGroups[] = [
+            'id' => (int)$g['id'],
+            'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
+            'title' => $g['title'], 'color' => $g['color'],
+            'tables' => $childTables,
+        ];
+    }
+
+    $stmtCell = $pdo->prepare(
+        'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.note, t.main_name, t.class
+         FROM raid_cells c LEFT JOIN toons t ON t.id = c.toon_id
+         WHERE c.table_id = ?'
+    );
+    $stmtCell->execute([$tb['id']]);
+    $cells = [];
+    foreach ($stmtCell->fetchAll(PDO::FETCH_ASSOC) as $cell) {
+        $cells[$cell['row_id'] . '_' . $cell['column_id']] = [
+            'id'     => (int)$cell['id'],
+            'toonId' => $cell['toon_id'],
+            'name'   => $cell['main_name'],
+            'class'  => $cell['class'],
+            'note'   => $cell['note'],
+        ];
+    }
+
+    return [
+        'id' => (int)$tb['id'], 'title' => $tb['title'],
+        'headerColor' => $tb['header_color'],
+        'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+        'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
+        'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
+    ];
+}
+
 function fetch_raid_structure($pdo, $raidId) {
     $out = [];
     $stmt = $pdo->prepare('SELECT * FROM raid_sections WHERE raid_id = ? ORDER BY sort_order, id');
@@ -34,54 +90,7 @@ function fetch_raid_structure($pdo, $raidId) {
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $sec) {
         $stmtT = $pdo->prepare('SELECT * FROM raid_tables WHERE section_id = ? ORDER BY sort_order, id');
         $stmtT->execute([$sec['id']]);
-        $tables = [];
-        foreach ($stmtT->fetchAll(PDO::FETCH_ASSOC) as $tb) {
-            $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
-            $stmtC->execute([$tb['id']]);
-            $columns = array_map(fn($c) => [
-                'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
-                'width' => $c['width'] !== null ? (int)$c['width'] : null,
-                'headerColor' => $c['header_color'],
-                'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
-            ], $stmtC->fetchAll(PDO::FETCH_ASSOC));
-
-            $stmtR = $pdo->prepare('SELECT id, label, kind FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
-            $stmtR->execute([$tb['id']]);
-            $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind']], $stmtR->fetchAll(PDO::FETCH_ASSOC));
-
-            $stmtG = $pdo->prepare('SELECT id, parent_group_id, title, color FROM raid_column_groups WHERE table_id = ? ORDER BY sort_order, id');
-            $stmtG->execute([$tb['id']]);
-            $columnGroups = array_map(fn($g) => [
-                'id' => (int)$g['id'],
-                'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
-                'title' => $g['title'], 'color' => $g['color'],
-            ], $stmtG->fetchAll(PDO::FETCH_ASSOC));
-
-            $stmtCell = $pdo->prepare(
-                'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.note, t.main_name, t.class
-                 FROM raid_cells c LEFT JOIN toons t ON t.id = c.toon_id
-                 WHERE c.table_id = ?'
-            );
-            $stmtCell->execute([$tb['id']]);
-            $cells = [];
-            foreach ($stmtCell->fetchAll(PDO::FETCH_ASSOC) as $cell) {
-                $cells[$cell['row_id'] . '_' . $cell['column_id']] = [
-                    'id'     => (int)$cell['id'],
-                    'toonId' => $cell['toon_id'],
-                    'name'   => $cell['main_name'],
-                    'class'  => $cell['class'],
-                    'note'   => $cell['note'],
-                ];
-            }
-
-            $tables[] = [
-                'id' => (int)$tb['id'], 'title' => $tb['title'],
-                'headerColor' => $tb['header_color'],
-                'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
-                'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
-                'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
-            ];
-        }
+        $tables = array_map(fn($tb) => fetch_table_full($pdo, $tb), $stmtT->fetchAll(PDO::FETCH_ASSOC));
         $out[] = ['id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables];
     }
     return $out;
@@ -125,11 +134,13 @@ function fmtTime($t) {
     .section-card { border-radius: 12px; overflow: hidden; margin: 22px 0; border: 1px solid rgba(255,255,255,0.08); }
     .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
     .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
+    .tbl-wrap { min-width: 0; max-width: 100%; }
     .tbl-wrap .grid-scroll + .grid-scroll { margin-top: 2px; }
     .tbl-title {
       font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
       color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0;
     }
+    .group-tables { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; margin: 8px 0 4px 4px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,0.15); }
     .grid-scroll { overflow-x: auto; }
     table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
@@ -210,6 +221,14 @@ function rosterOptionsHtml(selectedId) {
   return html;
 }
 
+// Every table anywhere in the tree (top-level or nested inside a group), flattened for lookup.
+function allTables() {
+  const out = [];
+  const walk = tables => { for (const tb of tables) { out.push(tb); for (const g of tb.columnGroups) walk(g.tables); } };
+  for (const sec of sections) walk(sec.tables);
+  return out;
+}
+
 function render() {
   const el = document.getElementById('sectionsEl');
   el.innerHTML = sections.map(renderSection).join('');
@@ -254,8 +273,8 @@ function render() {
 }
 
 function findCell(tableId, rowId, colId) {
-  for (const sec of sections) for (const tb of sec.tables) if (tb.id === tableId) return tb.cells[rowId + '_' + colId] || null;
-  return null;
+  const tb = allTables().find(t => t.id === tableId);
+  return tb ? (tb.cells[rowId + '_' + colId] || null) : null;
 }
 
 function persistCell(cellId, toonId, note) {
@@ -264,7 +283,7 @@ function persistCell(cellId, toonId, note) {
     body: JSON.stringify({ cellId, toonId, note }),
   }).then(r => r.json()).then(d => {
     if (!d.success) { alert(d.error || 'Save failed'); return; }
-    for (const sec of sections) for (const tb of sec.tables) {
+    for (const tb of allTables()) {
       for (const key in tb.cells) if (tb.cells[key].id === cellId) { tb.cells[key] = d.cell; return; }
     }
   });
@@ -360,13 +379,24 @@ function renderColumnBlock(chunkCols, tb) {
     </div>`;
 }
 
-function renderTable(tb) {
-  const blocks = chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
+// position is this table's 1-based index among its section's top-level tables (auto-numbered
+// title); null for tables nested inside a group, which show their real title instead.
+function renderTable(tb, position) {
+  const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
+  const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
+  const titleText = position != null ? `#${position}` : esc(tb.title);
+
+  const nestedGroupsHtml = groupsWithTables.map(g => `
+    <div class="group-tables">
+      ${g.tables.map(ctb => renderTable(ctb, null)).join('')}
+    </div>`).join('');
 
   return `<div class="tbl-wrap">
-    <div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>
+    <div class="tbl-title"${titleStyle}>${titleText}</div>
     ${blocks}
+    ${nestedGroupsHtml}
   </div>`;
 }
 
@@ -375,7 +405,7 @@ function renderSection(sec) {
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};">${meta.icon} ${esc(sec.title)}</div>
     <div class="section-body">
-      ${sec.tables.map(renderTable).join('') || '<p class="empty">No tables in this section.</p>'}
+      ${sec.tables.map((tb, i) => renderTable(tb, i + 1)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }

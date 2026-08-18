@@ -25,6 +25,45 @@ if (!$template) {
     exit;
 }
 
+function fetch_table_full($pdo, $tb) {
+    $stmt3 = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt3->execute([$tb['id']]);
+    $columns = array_map(fn($c) => [
+        'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
+        'width' => $c['width'] !== null ? (int)$c['width'] : null,
+        'headerColor' => $c['header_color'],
+        'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
+    ], $stmt3->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmt4 = $pdo->prepare('SELECT id, label, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt4->execute([$tb['id']]);
+    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind']], $stmt4->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmt5 = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt5->execute([$tb['id']]);
+    $groupRows = $stmt5->fetchAll(PDO::FETCH_ASSOC);
+    $columnGroups = [];
+    foreach ($groupRows as $g) {
+        $stmtGT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE parent_group_id = ? ORDER BY sort_order, id');
+        $stmtGT->execute([$g['id']]);
+        $childTables = array_map(fn($ctb) => fetch_table_full($pdo, $ctb), $stmtGT->fetchAll(PDO::FETCH_ASSOC));
+        $columnGroups[] = [
+            'id' => (int)$g['id'],
+            'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
+            'title' => $g['title'], 'color' => $g['color'],
+            'tables' => $childTables,
+        ];
+    }
+
+    return [
+        'id' => (int)$tb['id'], 'title' => $tb['title'],
+        'headerColor' => $tb['header_color'],
+        'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+        'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
+        'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
+    ];
+}
+
 function fetch_structure($pdo, $templateId) {
     $out = [];
     $stmt = $pdo->prepare('SELECT * FROM raid_template_sections WHERE template_id = ? ORDER BY sort_order, id');
@@ -32,34 +71,7 @@ function fetch_structure($pdo, $templateId) {
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $sec) {
         $stmt2 = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
         $stmt2->execute([$sec['id']]);
-        $tables = [];
-        foreach ($stmt2->fetchAll(PDO::FETCH_ASSOC) as $tb) {
-            $stmt3 = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
-            $stmt3->execute([$tb['id']]);
-            $columns = array_map(fn($c) => [
-                'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
-                'width' => $c['width'] !== null ? (int)$c['width'] : null,
-                'headerColor' => $c['header_color'],
-                'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
-            ], $stmt3->fetchAll(PDO::FETCH_ASSOC));
-            $stmt4 = $pdo->prepare('SELECT id, label, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
-            $stmt4->execute([$tb['id']]);
-            $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind']], $stmt4->fetchAll(PDO::FETCH_ASSOC));
-            $stmt5 = $pdo->prepare('SELECT id, parent_group_id, title, color FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
-            $stmt5->execute([$tb['id']]);
-            $columnGroups = array_map(fn($g) => [
-                'id' => (int)$g['id'],
-                'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
-                'title' => $g['title'], 'color' => $g['color'],
-            ], $stmt5->fetchAll(PDO::FETCH_ASSOC));
-            $tables[] = [
-                'id' => (int)$tb['id'], 'title' => $tb['title'],
-                'headerColor' => $tb['header_color'],
-                'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
-                'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
-                'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
-            ];
-        }
+        $tables = array_map(fn($tb) => fetch_table_full($pdo, $tb), $stmt2->fetchAll(PDO::FETCH_ASSOC));
         $out[] = ['id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables];
     }
     return $out;
@@ -94,9 +106,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .icon-btn:hover { background: rgba(255,255,255,0.22); }
     .icon-btn.danger:hover { background: rgba(224,85,85,0.7); }
 
-    .tbl-card { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; }
+    .tbl-card { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; min-width: 0; max-width: 100%; }
     .tbl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
     .tbl-head input.tbl-title { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; font-weight: 600; padding: 6px 9px; border-radius: 6px; flex: 1; min-width: 0; }
+    .tbl-head .tbl-title-auto { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; opacity: .85; }
     .grid-scroll { overflow-x: auto; }
     .grid-scroll + .grid-scroll { margin-top: 2px; }
     table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12px; }
@@ -122,6 +135,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .group-pill .icon-btn { width: 18px; height: 18px; font-size: 10px; background: rgba(0,0,0,0.25); }
     .add-group-btn { background: none; border: 1px dashed rgba(255,255,255,0.25); color: #a8b4d0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; }
     .add-group-btn:hover { border-color: rgba(255,255,255,0.5); color: #e8ecff; }
+    .group-tables { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 14px; margin: 6px 0 12px 4px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,0.15); }
     td.spacer-cell, th.spacer-th { background: repeating-linear-gradient(135deg, rgba(255,255,255,0.03) 0 6px, transparent 6px 12px); border-style: dashed; }
     .spacer-label { font-size: 9px; color: #55618a; text-transform: uppercase; letter-spacing: .05em; }
 
@@ -129,8 +143,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .drag-handle:active { cursor: grabbing; }
     [data-drop-kind].drag-over { outline: 2px dashed #5865f2; outline-offset: -2px; }
 
-    .add-table-form { display: flex; gap: 8px; flex: 1 1 100%; }
-    .add-table-form input { flex: 1; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 6px; }
     button.btn { display: inline-block; padding: 7px 16px; font: inherit; background: #5865f2; border: none; border-radius: 999px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     button.btn:hover { background: #4752c4; }
 
@@ -142,7 +154,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
 <body>
   <?php render_nav_shell($tenant, $user, $role, 'raids'); ?>
   <div class="wrap">
-    <a class="back" href="/<?= h($slug) ?>/admin#raids">&larr; Back to admin</a>
+    <a class="back" href="/<?= h($slug) ?>/design">&larr; Back to templates</a>
     <h1><?= h($template['name']) ?></h1>
     <p class="sub"><span class="tag"><?= h($template['assignment_style']) ?></span> &middot; structure only &mdash; toon assignments happen per-raid</p>
 
@@ -208,19 +220,30 @@ function colWidthPx(c, tb) {
   return c.width || tb.defaultColumnWidth || null;
 }
 
-function findTable(id) {
-  for (const sec of sections) for (const tb of sec.tables) if (tb.id === id) return tb;
+// Every table anywhere in the tree (top-level or nested inside a group), flattened for lookup.
+function allTables() {
+  const out = [];
+  const walk = tables => { for (const tb of tables) { out.push(tb); for (const g of tb.columnGroups) walk(g.tables); } };
+  for (const sec of sections) walk(sec.tables);
+  return out;
+}
+function findTable(id) { return allTables().find(tb => tb.id === id) || null; }
+function findColumn(id) {
+  for (const tb of allTables()) for (const c of tb.columns) if (c.id === id) return c;
   return null;
 }
-function findColumn(id) {
-  for (const sec of sections) for (const tb of sec.tables) for (const c of tb.columns) if (c.id === id) return c;
+function findGroup(id) {
+  for (const tb of allTables()) for (const g of tb.columnGroups) if (g.id === id) return g;
   return null;
 }
 
 let dragData = null;
 
-function getSiblingList(kind, parentId) {
-  if (kind === 'table') { const sec = sections.find(s => s.id === parentId); return sec ? sec.tables : []; }
+function getSiblingList(kind, parentKind, parentId) {
+  if (kind === 'table') {
+    if (parentKind === 'group') { const g = findGroup(parentId); return g ? g.tables : []; }
+    const sec = sections.find(s => s.id === parentId); return sec ? sec.tables : [];
+  }
   const tb = findTable(parentId);
   if (!tb) return [];
   if (kind === 'column') return tb.columns;
@@ -229,13 +252,15 @@ function getSiblingList(kind, parentId) {
   return [];
 }
 
-function reorderList(kind, parentId, movedId, targetId, before) {
-  const ids = getSiblingList(kind, parentId).map(x => x.id).filter(id => id !== movedId);
+function reorderList(kind, parentKind, parentId, movedId, targetId, before) {
+  const ids = getSiblingList(kind, parentKind, parentId).map(x => x.id).filter(id => id !== movedId);
   let idx = ids.indexOf(targetId);
   if (idx === -1) idx = ids.length - 1;
   const insertAt = before ? idx : idx + 1;
   ids.splice(insertAt, 0, movedId);
-  call({ action: 'reorder', kind, parentId, orderedIds: ids });
+  const payload = { action: 'reorder', kind, parentId, orderedIds: ids };
+  if (kind === 'table') payload.parentKind = parentKind;
+  call(payload);
 }
 
 function call(payload) {
@@ -265,6 +290,11 @@ function render() {
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
+      if (act === 'add-table-to-section') call({ action: 'add_table', sectionId: id });
+      if (act === 'add-table-to-group') {
+        const title = prompt('Table name, e.g. a boss name:');
+        if (title && title.trim()) call({ action: 'add_table', groupId: id, title: title.trim() });
+      }
       if (act === 'rename-table') call({ action: 'update_table', id, title: node.value.trim() });
       if (act === 'delete-table') { if (confirm('Delete this table?')) call({ action: 'delete_table', id }); }
       if (act === 'move-table-up') call({ action: 'move_table', id, direction: 'up' });
@@ -299,7 +329,13 @@ function render() {
       }
       if (act === 'rename-group') call({ action: 'update_column_group', id, title: node.value.trim() });
       if (act === 'recolor-group') call({ action: 'update_column_group', id, color: node.value });
-      if (act === 'delete-group') { if (confirm('Delete this group header? Columns stay, they just lose the grouping.')) call({ action: 'delete_column_group', id }); }
+      if (act === 'delete-group') {
+        const g = findGroup(id);
+        const msg = (g && g.tables.length)
+          ? 'Delete this group AND all its nested tables? This cannot be undone.'
+          : 'Delete this group header? Columns stay, they just lose the grouping.';
+        if (confirm(msg)) call({ action: 'delete_column_group', id });
+      }
     });
   });
 
@@ -309,6 +345,7 @@ function render() {
         kind: handle.dataset.dragKind,
         id: parseInt(handle.dataset.dragId, 10),
         parentId: parseInt(handle.dataset.dragParent, 10),
+        parentKind: handle.dataset.dragParentKind || 'table',
       };
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', String(dragData.id));
@@ -319,10 +356,11 @@ function render() {
     const dropKind = zone.dataset.dropKind;
     const dropId = parseInt(zone.dataset.dropId, 10);
     const dropParent = parseInt(zone.dataset.dropParent, 10);
+    const dropParentKind = zone.dataset.dropParentKind || 'table';
     zone.addEventListener('dragover', e => {
       if (!dragData) return;
       const acceptsColumnOntoGroup = dropKind === 'group' && dragData.kind === 'column' && dragData.parentId === dropParent;
-      const sameKind = dragData.kind === dropKind && dragData.parentId === dropParent;
+      const sameKind = dragData.kind === dropKind;
       if (!acceptsColumnOntoGroup && !sameKind) return;
       e.preventDefault();
       zone.classList.add('drag-over');
@@ -338,23 +376,13 @@ function render() {
         dragData = null;
         return;
       }
-      if (dragData.kind !== dropKind || dragData.parentId !== dropParent || dragData.id === dropId) { dragData = null; return; }
+      if (dragData.kind !== dropKind || dragData.id === dropId) { dragData = null; return; }
       const rect = zone.getBoundingClientRect();
       const before = dropKind === 'row'
         ? (e.clientY - rect.top) < rect.height / 2
         : (e.clientX - rect.left) < rect.width / 2;
-      reorderList(dropKind, dropParent, dragData.id, dropId, before);
+      reorderList(dropKind, dropParentKind, dropParent, dragData.id, dropId, before);
       dragData = null;
-    });
-  });
-
-  el.querySelectorAll('.add-table-form').forEach(form => {
-    form.addEventListener('submit', e => {
-      e.preventDefault();
-      const input = form.querySelector('input');
-      const title = input.value.trim();
-      if (!title) return;
-      call({ action: 'add_table', sectionId: parseInt(form.dataset.sectionId, 10), title }).then(() => { input.value = ''; });
     });
   });
 }
@@ -417,10 +445,11 @@ function groupHeaderRow(cols, columnGroups) {
 function groupStrip(tb) {
   const pills = tb.columnGroups.map(g => `
     <div class="group-pill" data-drop-kind="group" data-drop-id="${g.id}" data-drop-parent="${tb.id}" style="background:${g.color};color:${contrastText(g.color)};">
-      <span class="drag-handle" draggable="true" data-drag-kind="group" data-drag-id="${g.id}" data-drag-parent="${tb.id}" title="Drag to reorder, or drop a column here to assign it" style="color:inherit;opacity:.75;">&#10021;</span>
+      <span class="drag-handle" draggable="true" data-drag-kind="group" data-drag-id="${g.id}" data-drag-parent="${tb.id}" title="Drag to reorder or move to another table, or drop a column here to assign it" style="color:inherit;opacity:.75;">&#10021;</span>
       <input class="group-title" data-action="rename-group" data-id="${g.id}" value="${escAttr(g.title)}">
       <input type="color" class="swatch" data-action="recolor-group" data-id="${g.id}" value="${g.color}" title="Group color">
-      <button class="icon-btn" data-action="delete-group" data-id="${g.id}" title="Delete group">&times;</button>
+      <button class="icon-btn" data-action="add-table-to-group" data-id="${g.id}" title="Add a table to this group">+T</button>
+      <button class="icon-btn danger" data-action="delete-group" data-id="${g.id}" title="Delete group">&times;</button>
     </div>`).join('');
   return `<div class="group-strip">${pills}<button class="add-group-btn" data-action="add-group" data-id="${tb.id}">+ Group header</button></div>`;
 }
@@ -479,17 +508,33 @@ function renderColumnBlock(chunkCols, tb) {
     </div>`;
 }
 
-function renderTable(tb, sectionId) {
-  const blocks = chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
+// parentKind/parentId identify where tb hangs off (a section, top-level, or a group, nested).
+// position is this table's 1-based index among its section's top-level tables, used for the
+// auto-numbered #N label — nested tables keep a real editable title instead.
+function renderTable(tb, parentKind, parentId, position) {
+  const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
+  const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
+
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
 
   const headerBg = tb.headerColor || '';
   const headerStyle = headerBg ? `background:${headerBg};` : '';
   const titleColor = headerBg ? contrastText(headerBg) : '#e8ecff';
 
-  return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${sectionId}">
+  const isNested = parentKind === 'group';
+  const titleHtml = isNested
+    ? `<input class="tbl-title" data-action="rename-table" data-id="${tb.id}" value="${escAttr(tb.title)}" style="color:${titleColor};">`
+    : `<span class="tbl-title-auto" style="color:${titleColor};">#${position}</span>`;
+
+  const nestedGroupsHtml = groupsWithTables.map(g => `
+    <div class="group-tables">
+      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, null)).join('')}
+    </div>`).join('');
+
+  return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}">
     <div class="tbl-head" style="${headerStyle}">
-      <span class="drag-handle" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${sectionId}" title="Drag to reorder/reposition" style="color:${titleColor};opacity:.75;">&#10021;</span>
-      <input class="tbl-title" data-action="rename-table" data-id="${tb.id}" value="${escAttr(tb.title)}" style="color:${titleColor};">
+      <span class="drag-handle" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="color:${titleColor};opacity:.75;">&#10021;</span>
+      ${titleHtml}
       <input type="color" class="swatch" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
       <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${tb.defaultColumnWidth || ''}" placeholder="auto" min="0"></div>
       <div class="tbl-sizing">Label w<input type="number" class="width-input" data-action="table-label-width" data-id="${tb.id}" value="${tb.rowLabelWidth || ''}" placeholder="auto" min="0"></div>
@@ -499,12 +544,13 @@ function renderTable(tb, sectionId) {
     </div>
     ${groupStrip(tb)}
     ${blocks}
-    <div class="tbl-actions-row">
+    ${!isContainerOnly ? `<div class="tbl-actions-row">
       <button class="add-row-btn" data-action="add-col" data-id="${tb.id}">+ Column</button>
       <button class="add-row-btn" data-action="add-row" data-id="${tb.id}">+ Row</button>
       <button class="add-row-btn" data-action="add-spacer-col" data-id="${tb.id}">+ Spacer column</button>
       <button class="add-row-btn" data-action="add-spacer-row" data-id="${tb.id}">+ Spacer row</button>
-    </div>
+    </div>` : ''}
+    ${nestedGroupsHtml}
   </div>`;
 }
 
@@ -518,11 +564,8 @@ function renderSection(sec) {
       <button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>
     </div>
     <div class="section-body">
-      ${sec.tables.map(tb => renderTable(tb, sec.id)).join('') || '<p class="empty">No tables yet.</p>'}
-      <form class="add-table-form" data-section-id="${sec.id}">
-        <input type="text" placeholder="New table name, e.g. Spider Wing">
-        <button class="btn" type="submit">+ Table</button>
-      </form>
+      ${sec.tables.map((tb, i) => renderTable(tb, 'section', sec.id, i + 1)).join('') || '<p class="empty">No tables yet.</p>'}
+      <button class="btn" data-action="add-table-to-section" data-id="${sec.id}">+ Table</button>
     </div>
   </div>`;
 }

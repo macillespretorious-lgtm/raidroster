@@ -58,51 +58,74 @@ function fetch_section_owned($pdo, $guildId, $sectionId) {
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
+// A table's parent is either a section (top-level) or a column-group which itself lives in
+// another table (nested). Walk that chain up to a section to find the owning template,
+// re-validating tenant ownership at the section hop. Depth-capped as a guard against bad data.
+function resolve_table_templateId($pdo, $guildId, $tableId, $depth = 0) {
+    if ($depth > 6) return null;
+    $stmt = $pdo->prepare('SELECT section_id, parent_group_id FROM raid_template_tables WHERE id = ?');
+    $stmt->execute([$tableId]);
+    $tb = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$tb) return null;
+
+    if ($tb['section_id'] !== null) {
+        $sec = fetch_section_owned($pdo, $guildId, (int)$tb['section_id']);
+        return $sec ? (int)$sec['template_id'] : null;
+    }
+
+    if ($tb['parent_group_id'] !== null) {
+        $stmt = $pdo->prepare('SELECT table_id FROM raid_template_column_groups WHERE id = ?');
+        $stmt->execute([$tb['parent_group_id']]);
+        $grp = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$grp) return null;
+        return resolve_table_templateId($pdo, $guildId, (int)$grp['table_id'], $depth + 1);
+    }
+
+    return null;
+}
+
 function fetch_table_owned($pdo, $guildId, $tableId) {
-    $stmt = $pdo->prepare(
-        'SELECT tb.*, t.guild_id FROM raid_template_tables tb
-         JOIN raid_template_sections s ON s.id = tb.section_id
-         JOIN raid_templates t ON t.id = s.template_id
-         WHERE tb.id = ? AND t.guild_id = ?'
-    );
-    $stmt->execute([$tableId, $guildId]);
-    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_tables WHERE id = ?');
+    $stmt->execute([$tableId]);
+    $tb = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$tb) return null;
+    $templateId = resolve_table_templateId($pdo, $guildId, $tableId);
+    if ($templateId === null) return null;
+    $tb['template_id'] = $templateId;
+    return $tb;
 }
 
 function fetch_column_owned($pdo, $guildId, $columnId) {
-    $stmt = $pdo->prepare(
-        'SELECT c.*, t.guild_id FROM raid_template_columns c
-         JOIN raid_template_tables tb ON tb.id = c.table_id
-         JOIN raid_template_sections s ON s.id = tb.section_id
-         JOIN raid_templates t ON t.id = s.template_id
-         WHERE c.id = ? AND t.guild_id = ?'
-    );
-    $stmt->execute([$columnId, $guildId]);
-    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_columns WHERE id = ?');
+    $stmt->execute([$columnId]);
+    $col = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$col) return null;
+    $tb = fetch_table_owned($pdo, $guildId, (int)$col['table_id']);
+    if (!$tb) return null;
+    $col['template_id'] = $tb['template_id'];
+    return $col;
 }
 
 function fetch_row_owned($pdo, $guildId, $rowId) {
-    $stmt = $pdo->prepare(
-        'SELECT r.*, t.guild_id FROM raid_template_rows r
-         JOIN raid_template_tables tb ON tb.id = r.table_id
-         JOIN raid_template_sections s ON s.id = tb.section_id
-         JOIN raid_templates t ON t.id = s.template_id
-         WHERE r.id = ? AND t.guild_id = ?'
-    );
-    $stmt->execute([$rowId, $guildId]);
-    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_rows WHERE id = ?');
+    $stmt->execute([$rowId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return null;
+    $tb = fetch_table_owned($pdo, $guildId, (int)$row['table_id']);
+    if (!$tb) return null;
+    $row['template_id'] = $tb['template_id'];
+    return $row;
 }
 
 function fetch_group_owned($pdo, $guildId, $groupId) {
-    $stmt = $pdo->prepare(
-        'SELECT g.*, t.guild_id FROM raid_template_column_groups g
-         JOIN raid_template_tables tb ON tb.id = g.table_id
-         JOIN raid_template_sections s ON s.id = tb.section_id
-         JOIN raid_templates t ON t.id = s.template_id
-         WHERE g.id = ? AND t.guild_id = ?'
-    );
-    $stmt->execute([$groupId, $guildId]);
-    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE id = ?');
+    $stmt->execute([$groupId]);
+    $grp = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$grp) return null;
+    $templateId = resolve_table_templateId($pdo, $guildId, (int)$grp['table_id']);
+    if ($templateId === null) return null;
+    $grp['template_id'] = $templateId;
+    return $grp;
 }
 
 function next_sort_order($pdo, $table, $fkCol, $fkVal) {
@@ -129,6 +152,7 @@ function move_sibling($pdo, $table, $fkCol, $fkVal, $id, $direction) {
 // Drag-and-drop reordering: client sends the full desired id order for a sibling group,
 // we renumber sort_order to match. Ids not actually belonging to $fkVal are silently
 // dropped rather than trusted, so a stale/tampered order list can't move rows cross-scope.
+// (Reparenting, when needed, is done by the caller before this runs.)
 function reorder_siblings($pdo, $table, $fkCol, $fkVal, $orderedIds) {
     $stmt = $pdo->prepare("SELECT id FROM $table WHERE $fkCol = ?");
     $stmt->execute([$fkVal]);
@@ -143,6 +167,55 @@ function reorder_siblings($pdo, $table, $fkCol, $fkVal, $orderedIds) {
     }
 }
 
+function fetch_table_full($pdo, $tb) {
+    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, width, header_color, group_id FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt->execute([$tb['id']]);
+    $columns = array_map(fn($c) => [
+        'id' => (int)$c['id'],
+        'label' => $c['label'],
+        'kind' => $c['kind'],
+        'width' => $c['width'] !== null ? (int)$c['width'] : null,
+        'headerColor' => $c['header_color'],
+        'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
+    ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt->execute([$tb['id']]);
+    $rows = array_map(fn($r) => [
+        'id' => (int)$r['id'],
+        'label' => $r['label'],
+        'kind' => $r['kind'],
+    ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt->execute([$tb['id']]);
+    $groupRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $columnGroups = [];
+    foreach ($groupRows as $g) {
+        $stmtGT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE parent_group_id = ? ORDER BY sort_order, id');
+        $stmtGT->execute([$g['id']]);
+        $childTables = array_map(fn($ctb) => fetch_table_full($pdo, $ctb), $stmtGT->fetchAll(PDO::FETCH_ASSOC));
+        $columnGroups[] = [
+            'id' => (int)$g['id'],
+            'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
+            'title' => $g['title'],
+            'color' => $g['color'],
+            'tables' => $childTables,
+        ];
+    }
+
+    return [
+        'id' => (int)$tb['id'],
+        'title' => $tb['title'],
+        'headerColor' => $tb['header_color'],
+        'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+        'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
+        'columns' => $columns,
+        'rows' => $rows,
+        'columnGroups' => $columnGroups,
+    ];
+}
+
 function fetch_structure($pdo, $templateId) {
     $out = [];
 
@@ -154,48 +227,7 @@ function fetch_structure($pdo, $templateId) {
         $stmt = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
         $stmt->execute([$sec['id']]);
         $tables = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        $tablesOut = [];
-        foreach ($tables as $tb) {
-            $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, width, header_color, group_id FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
-            $stmt->execute([$tb['id']]);
-            $columns = array_map(fn($c) => [
-                'id' => (int)$c['id'],
-                'label' => $c['label'],
-                'kind' => $c['kind'],
-                'width' => $c['width'] !== null ? (int)$c['width'] : null,
-                'headerColor' => $c['header_color'],
-                'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
-            ], $stmt->fetchAll(PDO::FETCH_ASSOC));
-
-            $stmt = $pdo->prepare('SELECT id, label, sort_order, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
-            $stmt->execute([$tb['id']]);
-            $rows = array_map(fn($r) => [
-                'id' => (int)$r['id'],
-                'label' => $r['label'],
-                'kind' => $r['kind'],
-            ], $stmt->fetchAll(PDO::FETCH_ASSOC));
-
-            $stmt = $pdo->prepare('SELECT id, parent_group_id, title, color, sort_order FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
-            $stmt->execute([$tb['id']]);
-            $columnGroups = array_map(fn($g) => [
-                'id' => (int)$g['id'],
-                'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
-                'title' => $g['title'],
-                'color' => $g['color'],
-            ], $stmt->fetchAll(PDO::FETCH_ASSOC));
-
-            $tablesOut[] = [
-                'id' => (int)$tb['id'],
-                'title' => $tb['title'],
-                'headerColor' => $tb['header_color'],
-                'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
-                'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
-                'columns' => $columns,
-                'rows' => $rows,
-                'columnGroups' => $columnGroups,
-            ];
-        }
+        $tablesOut = array_map(fn($tb) => fetch_table_full($pdo, $tb), $tables);
 
         $out[] = [
             'id' => (int)$sec['id'],
@@ -255,10 +287,23 @@ if ($action === 'move_section') {
 }
 
 if ($action === 'add_table') {
+    $groupId = (int)($body['groupId'] ?? 0);
+
+    if ($groupId) {
+        $grp = fetch_group_owned($pdo, $tenant['id'], $groupId);
+        if (!$grp) fail(404, 'Group not found');
+        $title = substr(trim($body['title'] ?? ''), 0, 100);
+        if (!$title) fail(400, 'Title is required');
+        $order = next_sort_order($pdo, 'raid_template_tables', 'parent_group_id', $grp['id']);
+        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order) VALUES (?, ?, ?)');
+        $stmt->execute([$grp['id'], $title, $order]);
+        respond_structure($pdo, $grp['template_id']);
+    }
+
     $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['sectionId'] ?? 0));
     if (!$sec) fail(404, 'Section not found');
+    // Top-level tables are numbered automatically in the UI, so a title is optional here.
     $title = substr(trim($body['title'] ?? ''), 0, 100);
-    if (!$title) fail(400, 'Title is required');
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
     $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order) VALUES (?, ?, ?)');
     $stmt->execute([$sec['id'], $title, $order]);
@@ -268,32 +313,35 @@ if ($action === 'add_table') {
 if ($action === 'update_table') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
+    $isNested = $tb['parent_group_id'] !== null;
     $title = substr(trim($body['title'] ?? ''), 0, 100);
-    if (!$title) fail(400, 'Title is required');
+    if ($isNested && !$title) fail(400, 'Title is required');
     $headerColor = array_key_exists('headerColor', $body) ? ($body['headerColor'] ?: null) : $tb['header_color'];
     $colWidth    = array_key_exists('defaultColumnWidth', $body) ? ($body['defaultColumnWidth'] !== null && $body['defaultColumnWidth'] !== '' ? (int)$body['defaultColumnWidth'] : null) : $tb['default_column_width'];
     $labelWidth  = array_key_exists('rowLabelWidth', $body) ? ($body['rowLabelWidth'] !== null && $body['rowLabelWidth'] !== '' ? (int)$body['rowLabelWidth'] : null) : $tb['row_label_width'];
     $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, row_label_width = ? WHERE id = ?');
     $stmt->execute([$title, $headerColor, $colWidth, $labelWidth, $tb['id']]);
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $tb['template_id']);
 }
 
 if ($action === 'delete_table') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
+    $templateId = $tb['template_id'];
     $stmt = $pdo->prepare('DELETE FROM raid_template_tables WHERE id = ?');
     $stmt->execute([$tb['id']]);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $templateId);
 }
 
 if ($action === 'move_table') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
-    move_sibling($pdo, 'raid_template_tables', 'section_id', $tb['section_id'], $tb['id'], $body['direction'] ?? '');
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-    respond_structure($pdo, $sec['template_id']);
+    if ($tb['section_id'] !== null) {
+        move_sibling($pdo, 'raid_template_tables', 'section_id', $tb['section_id'], $tb['id'], $body['direction'] ?? '');
+    } else {
+        move_sibling($pdo, 'raid_template_tables', 'parent_group_id', $tb['parent_group_id'], $tb['id'], $body['direction'] ?? '');
+    }
+    respond_structure($pdo, $tb['template_id']);
 }
 
 if ($action === 'add_column' || $action === 'add_row') {
@@ -307,8 +355,7 @@ if ($action === 'add_column' || $action === 'add_row') {
     $order = next_sort_order($pdo, $table, 'table_id', $tb['id']);
     $stmt = $pdo->prepare("INSERT INTO $table (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)");
     $stmt->execute([$tb['id'], $label, $order, $kind]);
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $tb['template_id']);
 }
 
 if ($action === 'update_column' || $action === 'update_row') {
@@ -319,7 +366,6 @@ if ($action === 'update_column' || $action === 'update_row') {
     if (!$item) fail(404, 'Not found');
     $label = substr(trim($body['label'] ?? ''), 0, 60);
     if ($item['kind'] === 'data' && !$label) fail(400, 'Label is required');
-    $table = $isCol ? 'raid_template_columns' : 'raid_template_rows';
 
     if ($isCol) {
         $width = array_key_exists('width', $body) ? ($body['width'] !== null && $body['width'] !== '' ? (int)$body['width'] : null) : $item['width'];
@@ -341,9 +387,7 @@ if ($action === 'update_column' || $action === 'update_row') {
         $stmt->execute([$label, $item['id']]);
     }
 
-    $tb = fetch_table_owned($pdo, $tenant['id'], $item['table_id']);
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $item['template_id']);
 }
 
 if ($action === 'add_column_group') {
@@ -361,8 +405,7 @@ if ($action === 'add_column_group') {
     $order = next_sort_order($pdo, 'raid_template_column_groups', 'table_id', $tb['id']);
     $stmt = $pdo->prepare('INSERT INTO raid_template_column_groups (table_id, parent_group_id, title, color, sort_order) VALUES (?, ?, ?, ?, ?)');
     $stmt->execute([$tb['id'], $parentGroupId, $title, $color, $order]);
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $tb['template_id']);
 }
 
 if ($action === 'update_column_group') {
@@ -376,19 +419,16 @@ if ($action === 'update_column_group') {
     }
     $stmt = $pdo->prepare('UPDATE raid_template_column_groups SET title = ?, color = ? WHERE id = ?');
     $stmt->execute([$title, $color, $grp['id']]);
-    $tb = fetch_table_owned($pdo, $tenant['id'], $grp['table_id']);
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $grp['template_id']);
 }
 
 if ($action === 'delete_column_group') {
     $grp = fetch_group_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$grp) fail(404, 'Group not found');
-    $tb = fetch_table_owned($pdo, $tenant['id'], $grp['table_id']);
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
+    $templateId = $grp['template_id'];
     $stmt = $pdo->prepare('DELETE FROM raid_template_column_groups WHERE id = ?');
     $stmt->execute([$grp['id']]);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $templateId);
 }
 
 if ($action === 'delete_column' || $action === 'delete_row') {
@@ -398,11 +438,10 @@ if ($action === 'delete_column' || $action === 'delete_row') {
         : fetch_row_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$item) fail(404, 'Not found');
     $table = $isCol ? 'raid_template_columns' : 'raid_template_rows';
-    $tb = fetch_table_owned($pdo, $tenant['id'], $item['table_id']);
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
+    $templateId = $item['template_id'];
     $stmt = $pdo->prepare("DELETE FROM $table WHERE id = ?");
     $stmt->execute([$item['id']]);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $templateId);
 }
 
 if ($action === 'move_column' || $action === 'move_row') {
@@ -413,37 +452,78 @@ if ($action === 'move_column' || $action === 'move_row') {
     if (!$item) fail(404, 'Not found');
     $table = $isCol ? 'raid_template_columns' : 'raid_template_rows';
     move_sibling($pdo, $table, 'table_id', $item['table_id'], $item['id'], $body['direction'] ?? '');
-    $tb = fetch_table_owned($pdo, $tenant['id'], $item['table_id']);
-    $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-    respond_structure($pdo, $sec['template_id']);
+    respond_structure($pdo, $item['template_id']);
 }
 
 if ($action === 'reorder') {
     $kind = $body['kind'] ?? '';
     $orderedIds = is_array($body['orderedIds'] ?? null) ? $body['orderedIds'] : [];
+    $parentId = (int)($body['parentId'] ?? 0);
 
     if ($kind === 'table') {
-        $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['parentId'] ?? 0));
-        if (!$sec) fail(404, 'Section not found');
-        reorder_siblings($pdo, 'raid_template_tables', 'section_id', $sec['id'], $orderedIds);
-        respond_structure($pdo, $sec['template_id']);
+        $parentKind = ($body['parentKind'] ?? 'section') === 'group' ? 'group' : 'section';
+
+        if ($parentKind === 'group') {
+            $grp = fetch_group_owned($pdo, $tenant['id'], $parentId);
+            if (!$grp) fail(404, 'Group not found');
+            $fkCol = 'parent_group_id';
+            $fkVal = $grp['id'];
+            $templateId = $grp['template_id'];
+        } else {
+            $sec = fetch_section_owned($pdo, $tenant['id'], $parentId);
+            if (!$sec) fail(404, 'Section not found');
+            $fkCol = 'section_id';
+            $fkVal = $sec['id'];
+            $templateId = $sec['template_id'];
+        }
+
+        $otherCol = $fkCol === 'section_id' ? 'parent_group_id' : 'section_id';
+        foreach ($orderedIds as $id) {
+            $tb = fetch_table_owned($pdo, $tenant['id'], (int)$id);
+            if (!$tb) continue;
+            $currentFkVal = $tb[$fkCol];
+            if ($currentFkVal === null || (int)$currentFkVal !== (int)$fkVal) {
+                $upd = $pdo->prepare("UPDATE raid_template_tables SET $fkCol = ?, $otherCol = NULL WHERE id = ?");
+                $upd->execute([$fkVal, $tb['id']]);
+            }
+        }
+        reorder_siblings($pdo, 'raid_template_tables', $fkCol, $fkVal, $orderedIds);
+        respond_structure($pdo, $templateId);
     }
 
     if ($kind === 'column' || $kind === 'row') {
-        $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['parentId'] ?? 0));
+        $tb = fetch_table_owned($pdo, $tenant['id'], $parentId);
         if (!$tb) fail(404, 'Table not found');
         $table = $kind === 'column' ? 'raid_template_columns' : 'raid_template_rows';
+
+        foreach ($orderedIds as $id) {
+            $item = $kind === 'column'
+                ? fetch_column_owned($pdo, $tenant['id'], (int)$id)
+                : fetch_row_owned($pdo, $tenant['id'], (int)$id);
+            if (!$item) continue;
+            if ((int)$item['table_id'] !== (int)$tb['id']) {
+                $upd = $pdo->prepare("UPDATE $table SET table_id = ? WHERE id = ?");
+                $upd->execute([$tb['id'], $item['id']]);
+            }
+        }
         reorder_siblings($pdo, $table, 'table_id', $tb['id'], $orderedIds);
-        $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-        respond_structure($pdo, $sec['template_id']);
+        respond_structure($pdo, $tb['template_id']);
     }
 
     if ($kind === 'group') {
-        $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['parentId'] ?? 0));
+        $tb = fetch_table_owned($pdo, $tenant['id'], $parentId);
         if (!$tb) fail(404, 'Table not found');
+
+        foreach ($orderedIds as $id) {
+            $grp = fetch_group_owned($pdo, $tenant['id'], (int)$id);
+            if (!$grp) continue;
+            if ((int)$grp['table_id'] !== (int)$tb['id']) {
+                $upd = $pdo->prepare('UPDATE raid_template_column_groups SET table_id = ? WHERE id = ?');
+                $upd->execute([$tb['id'], $grp['id']]);
+            }
+        }
         reorder_siblings($pdo, 'raid_template_column_groups', 'table_id', $tb['id'], $orderedIds);
-        $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
-        respond_structure($pdo, $sec['template_id']);
+        respond_structure($pdo, $tb['template_id']);
     }
 
     fail(400, 'Invalid reorder kind');
