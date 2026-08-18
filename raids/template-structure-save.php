@@ -126,6 +126,23 @@ function move_sibling($pdo, $table, $fkCol, $fkVal, $id, $direction) {
     $upd->execute([$a['sort_order'], $b['id']]);
 }
 
+// Drag-and-drop reordering: client sends the full desired id order for a sibling group,
+// we renumber sort_order to match. Ids not actually belonging to $fkVal are silently
+// dropped rather than trusted, so a stale/tampered order list can't move rows cross-scope.
+function reorder_siblings($pdo, $table, $fkCol, $fkVal, $orderedIds) {
+    $stmt = $pdo->prepare("SELECT id FROM $table WHERE $fkCol = ?");
+    $stmt->execute([$fkVal]);
+    $valid = array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
+    $upd = $pdo->prepare("UPDATE $table SET sort_order = ? WHERE id = ?");
+    $order = 0;
+    foreach ($orderedIds as $id) {
+        $id = (int)$id;
+        if (!in_array($id, $valid, true)) continue;
+        $upd->execute([$order, $id]);
+        $order++;
+    }
+}
+
 function fetch_structure($pdo, $templateId) {
     $out = [];
 
@@ -399,6 +416,37 @@ if ($action === 'move_column' || $action === 'move_row') {
     $tb = fetch_table_owned($pdo, $tenant['id'], $item['table_id']);
     $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
     respond_structure($pdo, $sec['template_id']);
+}
+
+if ($action === 'reorder') {
+    $kind = $body['kind'] ?? '';
+    $orderedIds = is_array($body['orderedIds'] ?? null) ? $body['orderedIds'] : [];
+
+    if ($kind === 'table') {
+        $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['parentId'] ?? 0));
+        if (!$sec) fail(404, 'Section not found');
+        reorder_siblings($pdo, 'raid_template_tables', 'section_id', $sec['id'], $orderedIds);
+        respond_structure($pdo, $sec['template_id']);
+    }
+
+    if ($kind === 'column' || $kind === 'row') {
+        $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['parentId'] ?? 0));
+        if (!$tb) fail(404, 'Table not found');
+        $table = $kind === 'column' ? 'raid_template_columns' : 'raid_template_rows';
+        reorder_siblings($pdo, $table, 'table_id', $tb['id'], $orderedIds);
+        $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
+        respond_structure($pdo, $sec['template_id']);
+    }
+
+    if ($kind === 'group') {
+        $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['parentId'] ?? 0));
+        if (!$tb) fail(404, 'Table not found');
+        reorder_siblings($pdo, 'raid_template_column_groups', 'table_id', $tb['id'], $orderedIds);
+        $sec = fetch_section_owned($pdo, $tenant['id'], $tb['section_id']);
+        respond_structure($pdo, $sec['template_id']);
+    }
+
+    fail(400, 'Invalid reorder kind');
 }
 
 fail(400, 'Unknown action');

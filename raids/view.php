@@ -124,13 +124,14 @@ function fmtTime($t) {
 
     .section-card { border-radius: 12px; overflow: hidden; margin: 22px 0; border: 1px solid rgba(255,255,255,0.08); }
     .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
-    .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: column; gap: 18px; }
+    .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
+    .tbl-wrap .grid-scroll + .grid-scroll { margin-top: 2px; }
     .tbl-title {
       font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
       color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0;
     }
     .grid-scroll { overflow-x: auto; }
-    table.grid { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12.5px; }
+    table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
     table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
     table.grid th.row-label { text-align: left; white-space: nowrap; }
@@ -269,16 +270,46 @@ function persistCell(cellId, toonId, note) {
   });
 }
 
-function groupHeaderRow(tb) {
-  if (!tb.columnGroups.length) return '';
+const MAX_DATA_COLS = 10;
+
+// Tables cap at MAX_DATA_COLS data columns (spacers don't count against it); beyond that
+// they split into stacked column-blocks that each repeat the full row set, rather than
+// growing arbitrarily wide.
+function chunkColumns(columns) {
+  const chunks = [];
+  let current = [];
+  let dataCount = 0;
+  for (const c of columns) {
+    if (c.kind === 'data' && dataCount >= MAX_DATA_COLS) {
+      chunks.push(current);
+      current = [];
+      dataCount = 0;
+    }
+    current.push(c);
+    if (c.kind === 'data') dataCount++;
+  }
+  chunks.push(current);
+  return chunks;
+}
+
+function colWidthPx(c, tb) {
+  if (c.kind === 'spacer') {
+    const base = c.width || tb.defaultColumnWidth || 30;
+    return Math.max(8, Math.round(base / 3));
+  }
+  return c.width || tb.defaultColumnWidth || null;
+}
+
+function groupHeaderRow(cols, columnGroups) {
+  if (!columnGroups.length) return '';
   const cells = [`<th rowspan="2"></th>`];
   let i = 0;
-  while (i < tb.columns.length) {
-    const gid = tb.columns[i].groupId;
+  while (i < cols.length) {
+    const gid = cols[i].groupId;
     if (!gid) { cells.push(`<th rowspan="2"></th>`); i++; continue; }
     let span = 1;
-    while (i + span < tb.columns.length && tb.columns[i + span].groupId === gid) span++;
-    const grp = tb.columnGroups.find(g => g.id === gid);
+    while (i + span < cols.length && cols[i + span].groupId === gid) span++;
+    const grp = columnGroups.find(g => g.id === gid);
     if (grp) {
       cells.push(`<th class="group-th" colspan="${span}" style="background:${grp.color};color:${contrastText(grp.color)};">${esc(grp.title)}</th>`);
     } else {
@@ -289,24 +320,24 @@ function groupHeaderRow(tb) {
   return `<tr>${cells.join('')}</tr>`;
 }
 
-function renderTable(tb) {
-  const colHeaders = tb.columns.map(c => {
+function renderColumnBlock(chunkCols, tb) {
+  const colHeaders = chunkCols.map(c => {
     if (c.kind === 'spacer') return `<th class="spacer-th"></th>`;
     const style = c.headerColor ? ` style="background:${c.headerColor};color:${contrastText(c.headerColor)};"` : '';
     return `<th${style}>${esc(c.label)}</th>`;
   }).join('');
 
   const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
-    tb.columns.map(c => {
-      const w = c.width || tb.defaultColumnWidth;
+    chunkCols.map(c => {
+      const w = colWidthPx(c, tb);
       return `<col${w ? ` style="width:${w}px;"` : ''}>`;
     }).join('') + `</colgroup>`;
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      return `<tr><td class="spacer-cell" colspan="${tb.columns.length + 1}"></td></tr>`;
+      return `<tr><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
     }
-    const rowCells = tb.columns.map(c => {
+    const rowCells = chunkCols.map(c => {
       if (c.kind === 'spacer') return `<td class="spacer-cell"></td>`;
       const cell = tb.cells[r.id + '_' + c.id];
       const cellIdAttr = cell ? cell.id : '';
@@ -317,19 +348,25 @@ function renderTable(tb) {
     return `<tr><th class="row-label">${esc(r.label)}</th>${rowCells}</tr>`;
   }).join('');
 
-  const groupRow = groupHeaderRow(tb);
-  const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
+  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups);
 
-  return `<div>
-    <div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>
-    <div class="grid-scroll">
+  return `<div class="grid-scroll">
       <table class="grid">
         ${colgroup}
         ${groupRow}
         <tr>${groupRow ? '' : '<th></th>'}${colHeaders}</tr>
         ${bodyRows}
       </table>
-    </div>
+    </div>`;
+}
+
+function renderTable(tb) {
+  const blocks = chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
+  const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
+
+  return `<div class="tbl-wrap">
+    <div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>
+    ${blocks}
   </div>`;
 }
 
