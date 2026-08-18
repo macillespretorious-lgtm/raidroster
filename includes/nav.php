@@ -12,6 +12,7 @@ function nav_items_for_role($tenant, $role) {
         ['key' => 'home',  'label' => 'Home',  'href' => "/$slug/",       'min' => 'readonly',          'icon' => 'home'],
         ['key' => 'raids', 'label' => 'Raids', 'href' => "/$slug/raids",  'min' => 'readonly',          'icon' => 'raids'],
         ['key' => 'toons', 'label' => 'Toons', 'href' => "/$slug/toons",  'min' => 'roster_management', 'icon' => 'toons'],
+        ['key' => 'design', 'label' => 'Design', 'href' => "/$slug/design", 'min' => 'admin',            'icon' => 'design'],
         ['key' => 'admin', 'label' => 'Admin', 'href' => "/$slug/admin",  'min' => 'admin',              'icon' => 'admin'],
     ];
     return array_values(array_filter($items, fn($i) => role_at_least($role, $i['min'])));
@@ -23,6 +24,7 @@ function nav_icon_svg($key) {
         'toons' => '<circle cx="9" cy="8" r="3"/><path d="M2.5 20c0-3.5 2.9-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17.3" cy="9.2" r="2.3"/><path d="M15.8 14.3c2.6.4 4.5 2.2 5.2 5.7"/>',
         'admin' => '<line x1="4" y1="6" x2="20" y2="6"/><circle cx="14" cy="6" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="9" cy="12" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="16" cy="18" r="2" fill="currentColor" stroke="none"/>',
         'raids' => '<rect x="3" y="4.5" width="18" height="16" rx="2"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="7.5" y1="2.5" x2="7.5" y2="6.5"/><line x1="16.5" y1="2.5" x2="16.5" y2="6.5"/>',
+        'design' => '<rect x="3" y="3" width="18" height="7" rx="1"/><rect x="3" y="14" width="9" height="7" rx="1"/><rect x="16" y="14" width="5" height="7" rx="1"/>',
     ];
     return $icons[$key] ?? '';
 }
