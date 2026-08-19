@@ -326,16 +326,11 @@ function render() {
       if (act === 'delete-row') call({ action: 'delete_row', id });
       if (act === 'move-row-up') call({ action: 'move_row', id, direction: 'up' });
       if (act === 'move-row-down') call({ action: 'move_row', id, direction: 'down' });
-      if (act === 'add-col') {
-        const label = prompt('Column label:');
-        if (label && label.trim()) call({ action: 'add_column', tableId: id, label: label.trim() });
-      }
-      if (act === 'add-row') {
-        const label = prompt('Row label:');
-        if (label && label.trim()) call({ action: 'add_row', tableId: id, label: label.trim() });
-      }
+      if (act === 'add-col') call({ action: 'add_column', tableId: id, label: '' });
+      if (act === 'add-row') call({ action: 'add_row', tableId: id, label: '' });
       if (act === 'add-spacer-col') call({ action: 'add_column', tableId: id, kind: 'spacer', label: '' });
       if (act === 'add-spacer-row') call({ action: 'add_row', tableId: id, kind: 'spacer', label: '' });
+      if (act === 'toggle-row-header') { const tb = findTable(id); const showing = tb.rowLabelWidth !== 0; call({ action: 'update_table', id, title: tb.title, rowLabelWidth: showing ? 0 : null }); }
       if (act === 'table-header-color') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, headerColor: node.value }); }
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: node.value ? parseInt(node.value, 10) : null }); }
       if (act === 'table-label-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, rowLabelWidth: node.value ? parseInt(node.value, 10) : null }); }
@@ -429,7 +424,7 @@ function colHeaderCell(c, tb, groupsEnabled) {
   return `<th data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
       <div class="col-th-inner">
         ${dragHandle}
-        <input class="lbl-input" data-action="rename-col" data-id="${c.id}" value="${escAttr(c.label)}">
+        <input class="lbl-input" data-action="rename-col" data-id="${c.id}" placeholder="Label" value="${escAttr(c.label)}">
         <div class="col-th-row2">
           <input type="color" class="swatch" data-action="col-header-color" data-id="${c.id}" value="${c.headerColor || '#1a2338'}" title="Header color">
           <input type="number" class="width-input" data-action="col-width" data-id="${c.id}" value="${c.width || ''}" placeholder="w" min="0" title="Width (px)">
@@ -476,7 +471,7 @@ function groupStrip(tb) {
   return `<div class="group-strip">${pills}<button class="add-group-btn" data-action="add-group" data-id="${tb.id}">+ Group header</button></div>`;
 }
 
-function renderRowHeader(r, tb) {
+function renderRowHeader(r, tb, showRowHeader) {
   const dragHandle = `<span class="drag-handle" draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}" title="Drag to reorder">&#10021;</span>`;
   if (r.kind === 'spacer') {
     return `<th class="spacer-th" style="text-align:left;" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
@@ -489,9 +484,12 @@ function renderRowHeader(r, tb) {
       </div>
     </th>`;
   }
+  const labelInput = showRowHeader
+    ? `<input class="lbl-input" data-action="rename-row" data-id="${r.id}" placeholder="Label" value="${escAttr(r.label)}">`
+    : '';
   return `<th style="text-align:left;" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
     ${dragHandle}
-    <input class="lbl-input" data-action="rename-row" data-id="${r.id}" value="${escAttr(r.label)}">
+    ${labelInput}
     <div class="cell-actions">
       <button class="icon-btn" data-action="move-row-up" data-id="${r.id}" title="Move up">&uarr;</button>
       <button class="icon-btn" data-action="move-row-down" data-id="${r.id}" title="Move down">&darr;</button>
@@ -501,17 +499,19 @@ function renderRowHeader(r, tb) {
 }
 
 function renderColumnBlock(chunkCols, tb, groupsEnabled) {
+  const showRowHeader = tb.rowLabelWidth !== 0;
   const colHeaders = chunkCols.map(c => colHeaderCell(c, tb, groupsEnabled)).join('');
   const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups) : '';
 
-  const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
+  const rowHeaderColWidth = showRowHeader ? (tb.rowLabelWidth || 110) : 34;
+  const colgroup = `<colgroup><col style="width:${rowHeaderColWidth}px;">` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
       return `<col${w ? ` style="width:${w}px;"` : ''}>`;
     }).join('') + `</colgroup>`;
 
   const bodyRows = tb.rows.map(r => {
-    const rowHeader = renderRowHeader(r, tb);
+    const rowHeader = renderRowHeader(r, tb, showRowHeader);
     if (r.kind === 'spacer') {
       const spacerCells = chunkCols.map(() => `<td class="spacer-cell"></td>`).join('');
       return `<tr>${rowHeader}${spacerCells}</tr>`;
@@ -556,7 +556,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
       ${titleHtml}
       <input type="color" class="swatch" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
       <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${tb.defaultColumnWidth || ''}" placeholder="auto" min="0"></div>
-      <div class="tbl-sizing">Label w<input type="number" class="width-input" data-action="table-label-width" data-id="${tb.id}" value="${tb.rowLabelWidth || ''}" placeholder="auto" min="0"></div>
+      <div class="tbl-sizing">Label w<input type="number" class="width-input" data-action="table-label-width" data-id="${tb.id}" value="${tb.rowLabelWidth ? tb.rowLabelWidth : ''}" placeholder="auto" min="0"></div>
       <button class="icon-btn" data-action="move-table-up" data-id="${tb.id}" title="Move up">&uarr;</button>
       <button class="icon-btn" data-action="move-table-down" data-id="${tb.id}" title="Move down">&darr;</button>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
@@ -568,6 +568,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
       <button class="add-row-btn" data-action="add-row" data-id="${tb.id}">+ Row</button>
       <button class="add-row-btn" data-action="add-spacer-col" data-id="${tb.id}">+ Spacer column</button>
       <button class="add-row-btn" data-action="add-spacer-row" data-id="${tb.id}">+ Spacer row</button>
+      <button class="add-row-btn" data-action="toggle-row-header" data-id="${tb.id}">${tb.rowLabelWidth !== 0 ? '− Row header column' : '+ Row header column'}</button>
     </div>` : ''}
     ${nestedGroupsHtml}
   </div>`;

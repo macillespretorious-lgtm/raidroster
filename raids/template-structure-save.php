@@ -295,7 +295,8 @@ if ($action === 'add_table') {
         $title = substr(trim($body['title'] ?? ''), 0, 100);
         if (!$title) fail(400, 'Title is required');
         $order = next_sort_order($pdo, 'raid_template_tables', 'parent_group_id', $grp['id']);
-        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order) VALUES (?, ?, ?)');
+        // row_label_width 0 = row header column hidden by default; most tables don't need one.
+        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order, row_label_width) VALUES (?, ?, ?, 0)');
         $stmt->execute([$grp['id'], $title, $order]);
         respond_structure($pdo, $grp['template_id']);
     }
@@ -305,7 +306,7 @@ if ($action === 'add_table') {
     // Top-level tables are numbered automatically in the UI, so a title is optional here.
     $title = substr(trim($body['title'] ?? ''), 0, 100);
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
-    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order) VALUES (?, ?, ?)');
+    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, row_label_width) VALUES (?, ?, ?, 0)');
     $stmt->execute([$sec['id'], $title, $order]);
     respond_structure($pdo, $sec['template_id']);
 }
@@ -350,7 +351,6 @@ if ($action === 'add_column' || $action === 'add_row') {
     if (!$tb) fail(404, 'Table not found');
     $kind = ($body['kind'] ?? 'data') === 'spacer' ? 'spacer' : 'data';
     $label = substr(trim($body['label'] ?? ''), 0, 60);
-    if ($kind === 'data' && !$label) fail(400, 'Label is required');
     $table = $isCol ? 'raid_template_columns' : 'raid_template_rows';
     $order = next_sort_order($pdo, $table, 'table_id', $tb['id']);
     $stmt = $pdo->prepare("INSERT INTO $table (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)");
@@ -365,7 +365,6 @@ if ($action === 'update_column' || $action === 'update_row') {
         : fetch_row_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$item) fail(404, 'Not found');
     $label = substr(trim($body['label'] ?? ''), 0, 60);
-    if ($item['kind'] === 'data' && !$label) fail(400, 'Label is required');
 
     if ($isCol) {
         $width = array_key_exists('width', $body) ? ($body['width'] !== null && $body['width'] !== '' ? (int)$body['width'] : null) : $item['width'];
