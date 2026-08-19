@@ -36,9 +36,9 @@ function fetch_table_full($pdo, $tb) {
         'headerColspan' => (int)$c['header_colspan'],
     ], $stmt3->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt4 = $pdo->prepare('SELECT id, label, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt4 = $pdo->prepare('SELECT id, label, kind, height FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
     $stmt4->execute([$tb['id']]);
-    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind']], $stmt4->fetchAll(PDO::FETCH_ASSOC));
+    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind'], 'height' => $r['height'] !== null ? (int)$r['height'] : null], $stmt4->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt5 = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
     $stmt5->execute([$tb['id']]);
@@ -165,6 +165,17 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .drag-handle:active { cursor: grabbing; }
     [data-drop-kind].drag-over { outline: 2px dashed #5865f2; outline-offset: -2px; }
 
+    .lock-bar { margin: 8px 0 4px; }
+    .lock-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #a8b4d0; cursor: pointer; user-select: none; }
+    .lock-toggle input { display: none; }
+    .lock-switch { width: 34px; height: 19px; border-radius: 999px; background: rgba(255,255,255,0.15); position: relative; transition: background .15s; flex-shrink: 0; }
+    .lock-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #e8ecff; transition: transform .15s; }
+    .lock-toggle input:checked + .lock-switch { background: #4caf6a; }
+    .lock-toggle input:checked + .lock-switch::after { transform: translateX(15px); }
+    .lock-banner { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; background: rgba(240,128,48,0.1); border: 1px solid rgba(240,128,48,0.3); color: #f0a030; font-size: 12px; }
+    .lock-banner button.btn { background: #e05555; padding: 5px 12px; font-size: 11px; }
+    .lock-banner button.btn:hover { background: #c94444; }
+
     button.btn { display: inline-block; padding: 7px 16px; font: inherit; background: #5865f2; border: none; border-radius: 999px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     button.btn:hover { background: #4752c4; }
 
@@ -178,6 +189,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <div class="wrap">
     <a class="back" href="/<?= h($slug) ?>/design">&larr; Back to templates</a>
     <h1><?= h($template['name']) ?></h1>
+    <div class="lock-bar" id="lockBar"></div>
     <p class="sub"><span class="tag"><?= h($template['assignment_style']) ?></span> &middot; structure only &mdash; toon assignments happen per-raid</p>
 
     <div class="tabs" id="tabsEl"></div>
@@ -189,7 +201,85 @@ const SLUG = <?= json_encode($slug) ?>;
 const TEMPLATE_ID = <?= json_encode($templateId) ?>;
 const STYLE = <?= json_encode($template['assignment_style']) ?>;
 const SAVE_URL = <?= json_encode('/raids/template-structure-save.php?slug=' . $slug) ?>;
+const USER_ID = <?= json_encode($user['id']) ?>;
 let sections = <?= json_encode($sections) ?>;
+
+// Editing lock: purely advisory (everyone on this page already passed the admin
+// role check), it exists to warn concurrent admins off each other's edits, not
+// to gate the current user's own actions.
+let lockHeldByMe = false;
+let lockedByOther = null;
+let lockHeartbeatTimer = null;
+
+function lockCall(action) {
+  return fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, templateId: TEMPLATE_ID }) })
+    .then(r => r.json());
+}
+function startHeartbeat() {
+  stopHeartbeat();
+  lockHeartbeatTimer = setInterval(() => {
+    lockCall('lock_heartbeat').then(d => { if (!d.success) { lockHeldByMe = false; stopHeartbeat(); checkLock(); } });
+  }, 30000);
+}
+function stopHeartbeat() {
+  if (lockHeartbeatTimer) { clearInterval(lockHeartbeatTimer); lockHeartbeatTimer = null; }
+}
+window.addEventListener('beforeunload', () => {
+  if (lockHeldByMe) {
+    navigator.sendBeacon(SAVE_URL, new Blob([JSON.stringify({ action: 'lock_release', templateId: TEMPLATE_ID })], { type: 'application/json' }));
+  }
+});
+function checkLock() {
+  return lockCall('lock_status').then(d => {
+    const holder = d.holder;
+    if (holder && holder.discordUserId === USER_ID) {
+      lockHeldByMe = true; lockedByOther = null;
+      if (!lockHeartbeatTimer) startHeartbeat();
+    } else if (holder) {
+      lockedByOther = holder; lockHeldByMe = false;
+    } else {
+      lockedByOther = null; lockHeldByMe = false;
+    }
+    renderLockBar();
+    render();
+  });
+}
+function renderLockBar() {
+  const el = document.getElementById('lockBar');
+  if (lockedByOther) {
+    const since = new Date(lockedByOther.lockedAt.replace(' ', 'T') + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    el.innerHTML = `<div class="lock-banner">
+      Locked by <strong>${esc(lockedByOther.username)}</strong> since ${since} &mdash; view only.
+      <button class="btn" data-action="force-unlock" type="button">Force unlock</button>
+    </div>`;
+    el.querySelector('[data-action="force-unlock"]').addEventListener('click', () => {
+      if (!confirm(`Force unlock? ${lockedByOther.username} may still be editing.`)) return;
+      lockCall('lock_force_release').then(() => checkLock());
+    });
+  } else {
+    el.innerHTML = `<label class="lock-toggle">
+      <input type="checkbox" id="lockToggle" ${lockHeldByMe ? 'checked' : ''}>
+      <span class="lock-switch"></span>
+      ${lockHeldByMe ? 'Editing (locked to you)' : 'Claim edit lock'}
+    </label>`;
+    document.getElementById('lockToggle').addEventListener('change', e => {
+      if (e.target.checked) {
+        lockCall('lock_acquire').then(d => {
+          if (d.success) { lockHeldByMe = true; lockedByOther = null; startHeartbeat(); }
+          else { lockedByOther = d.holder; lockHeldByMe = false; }
+          renderLockBar(); render();
+        });
+      } else {
+        lockCall('lock_release').then(() => { lockHeldByMe = false; stopHeartbeat(); renderLockBar(); render(); });
+      }
+    });
+  }
+}
+function applyLockGate() {
+  if (!lockedByOther) return;
+  document.querySelectorAll('#panelsEl input, #panelsEl select, #panelsEl button').forEach(n => n.disabled = true);
+  document.querySelectorAll('#panelsEl [draggable="true"]').forEach(n => n.setAttribute('draggable', 'false'));
+}
 
 const KIND_META = {
   roster:      { label: 'Roster',            color: '#5865f2' },
@@ -263,6 +353,10 @@ function findColumn(id) {
 }
 function findGroup(id) {
   for (const tb of allTables()) for (const g of tb.columnGroups) if (g.id === id) return g;
+  return null;
+}
+function findRow(id) {
+  for (const tb of allTables()) for (const r of tb.rows) if (r.id === id) return r;
   return null;
 }
 
@@ -351,10 +445,14 @@ function render() {
       if (act === 'add-row') call({ action: 'add_row', tableId: id, label: '' });
       if (act === 'add-spacer-col') call({ action: 'add_column', tableId: id, kind: 'spacer', label: '' });
       if (act === 'add-spacer-row') call({ action: 'add_row', tableId: id, kind: 'spacer', label: '' });
+      if (act === 'spacer-col-width-dec') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: Math.max(20, (c.width || 20) - 20) }); }
+      if (act === 'spacer-col-width-inc') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: (c.width || 20) + 20 }); }
+      if (act === 'spacer-row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
+      if (act === 'spacer-row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
       if (act === 'toggle-row-header') { const tb = findTable(id); const showing = tb.rowLabelWidth !== 0; call({ action: 'update_table', id, title: tb.title, rowLabelWidth: showing ? 0 : null }); }
       if (act === 'table-header-color') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, headerColor: node.value }); }
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
-      if (act === 'table-label-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, rowLabelWidth: node.value ? parseInt(node.value, 10) : null }); }
+      if (act === 'table-label-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, rowLabelWidth: unitsToPx(node.value) }); }
       if (act === 'col-header-color') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, headerColor: node.value }); }
       if (act === 'col-width') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: unitsToPx(node.value) }); }
       if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
@@ -424,6 +522,8 @@ function render() {
       dragData = null;
     });
   });
+
+  applyLockGate();
 }
 
 function colHeaderCell(c, tb, groupsEnabled, span) {
@@ -434,6 +534,10 @@ function colHeaderCell(c, tb, groupsEnabled, span) {
       <div class="col-th-inner">
         ${dragHandle}
         <span class="spacer-label">spacer</span>
+        <div class="cell-actions">
+          <button class="icon-btn" data-action="spacer-col-width-dec" data-id="${c.id}" title="Narrower">&minus;</button>
+          <button class="icon-btn" data-action="spacer-col-width-inc" data-id="${c.id}" title="Wider">+</button>
+        </div>
         <div class="cell-actions">
           <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
         </div>
@@ -507,6 +611,10 @@ function renderRowHeader(r, tb, showRowHeader) {
       <div class="row-th-inner">
         <div class="row-th-top">${dragHandle}${deleteBtn}</div>
         <span class="spacer-label">spacer</span>
+        <div class="cell-actions">
+          <button class="icon-btn" data-action="spacer-row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>
+          <button class="icon-btn" data-action="spacer-row-height-inc" data-id="${r.id}" title="Taller">+</button>
+        </div>
       </div>
     </th>`;
   }
@@ -581,7 +689,7 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
     const rowHeader = renderRowHeader(r, tb, showRowHeader);
     if (r.kind === 'spacer') {
       const spacerCells = chunkCols.map(() => `<td class="spacer-cell"></td>`).join('');
-      return `<tr>${rowHeader}${spacerCells}</tr>`;
+      return `<tr style="height:${r.height || 20}px;">${rowHeader}${spacerCells}</tr>`;
     }
     return `<tr>${rowHeader}${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
   }).join('');
@@ -622,7 +730,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
       ${titleHtml}
       <input type="color" class="swatch" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
       <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="1" title="Default column width in units (1 unit = ${COL_UNIT_PX}px)"></div>
-      <div class="tbl-sizing">Label w<input type="number" class="width-input" data-action="table-label-width" data-id="${tb.id}" value="${tb.rowLabelWidth ? tb.rowLabelWidth : ''}" placeholder="auto" min="0"></div>
+      <div class="tbl-sizing">Label w<input type="number" class="width-input" data-action="table-label-width" data-id="${tb.id}" value="${pxToUnits(tb.rowLabelWidth)}" placeholder="auto" min="0" title="Width in units (1 unit = ${COL_UNIT_PX}px)"></div>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
     ${groupsEnabled ? groupStrip(tb) : ''}
@@ -656,6 +764,7 @@ function renderSection(sec) {
 }
 
 render();
+checkLock();
 </script>
 </body>
 </html>

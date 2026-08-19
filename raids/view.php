@@ -38,9 +38,9 @@ function fetch_table_full($pdo, $tb) {
         'headerColspan' => (int)$c['header_colspan'],
     ], $stmtC->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmtR = $pdo->prepare('SELECT id, label, kind FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtR = $pdo->prepare('SELECT id, label, kind, height FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
     $stmtR->execute([$tb['id']]);
-    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind']], $stmtR->fetchAll(PDO::FETCH_ASSOC));
+    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind'], 'height' => $r['height'] !== null ? (int)$r['height'] : null], $stmtR->fetchAll(PDO::FETCH_ASSOC));
 
     $stmtG = $pdo->prepare('SELECT * FROM raid_column_groups WHERE table_id = ? ORDER BY sort_order, id');
     $stmtG->execute([$tb['id']]);
@@ -168,6 +168,17 @@ function fmtTime($t) {
     select.cell-picker { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.2); color: #e8ecff; font: inherit; font-size: 11px; padding: 3px 5px; border-radius: 5px; max-width: 130px; }
 
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
+
+    .lock-bar { margin: 8px 0 4px; }
+    .lock-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #a8b4d0; cursor: pointer; user-select: none; }
+    .lock-toggle input { display: none; }
+    .lock-switch { width: 34px; height: 19px; border-radius: 999px; background: rgba(255,255,255,0.15); position: relative; transition: background .15s; flex-shrink: 0; }
+    .lock-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #e8ecff; transition: transform .15s; }
+    .lock-toggle input:checked + .lock-switch { background: #4caf6a; }
+    .lock-toggle input:checked + .lock-switch::after { transform: translateX(15px); }
+    .lock-banner { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; background: rgba(240,128,48,0.1); border: 1px solid rgba(240,128,48,0.3); color: #f0a030; font-size: 12px; }
+    .lock-banner button.btn { background: #e05555; padding: 5px 12px; font-size: 11px; border: none; border-radius: 999px; color: #fff; font-weight: 600; cursor: pointer; }
+    .lock-banner button.btn:hover { background: #c94444; }
   </style>
 </head>
 <body>
@@ -175,6 +186,7 @@ function fmtTime($t) {
   <div class="wrap">
     <a class="back" href="/<?= h($slug) ?>/raids">&larr; Back to calendar</a>
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
+    <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -189,8 +201,85 @@ function fmtTime($t) {
 const SLUG = <?= json_encode($slug) ?>;
 const CAN_MANAGE = <?= json_encode($canManage) ?>;
 const CELLS_SAVE_URL = <?= json_encode('/raids/cells-save.php?slug=' . $slug) ?>;
+const LOCK_URL = <?= json_encode('/raids/lock-save.php?slug=' . $slug) ?>;
+const RAID_ID = <?= json_encode($raidId) ?>;
+const USER_ID = <?= json_encode($user['id']) ?>;
 let sections = <?= json_encode($sections) ?>;
 const roster = <?= json_encode($roster) ?>;
+
+// Editing lock: advisory only, warns concurrent raid managers off each
+// other's structural edits. Only relevant to users who can manage the raid.
+let lockHeldByMe = false;
+let lockedByOther = null;
+let lockHeartbeatTimer = null;
+
+function lockCall(action) {
+  return fetch(LOCK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, raidId: RAID_ID }) })
+    .then(r => r.json());
+}
+function startHeartbeat() {
+  stopHeartbeat();
+  lockHeartbeatTimer = setInterval(() => {
+    lockCall('lock_heartbeat').then(d => { if (!d.success) { lockHeldByMe = false; stopHeartbeat(); checkLock(); } });
+  }, 30000);
+}
+function stopHeartbeat() {
+  if (lockHeartbeatTimer) { clearInterval(lockHeartbeatTimer); lockHeartbeatTimer = null; }
+}
+if (CAN_MANAGE) {
+  window.addEventListener('beforeunload', () => {
+    if (lockHeldByMe) {
+      navigator.sendBeacon(LOCK_URL, new Blob([JSON.stringify({ action: 'lock_release', raidId: RAID_ID })], { type: 'application/json' }));
+    }
+  });
+}
+function checkLock() {
+  return lockCall('lock_status').then(d => {
+    const holder = d.holder;
+    if (holder && holder.discordUserId === USER_ID) {
+      lockHeldByMe = true; lockedByOther = null;
+      if (!lockHeartbeatTimer) startHeartbeat();
+    } else if (holder) {
+      lockedByOther = holder; lockHeldByMe = false;
+    } else {
+      lockedByOther = null; lockHeldByMe = false;
+    }
+    renderLockBar();
+    render();
+  });
+}
+function renderLockBar() {
+  const el = document.getElementById('lockBar');
+  if (!el) return;
+  if (lockedByOther) {
+    const since = new Date(lockedByOther.lockedAt.replace(' ', 'T') + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    el.innerHTML = `<div class="lock-banner">
+      Locked by <strong>${esc(lockedByOther.username)}</strong> since ${since} &mdash; view only.
+      <button class="btn" data-action="force-unlock" type="button">Force unlock</button>
+    </div>`;
+    el.querySelector('[data-action="force-unlock"]').addEventListener('click', () => {
+      if (!confirm(`Force unlock? ${lockedByOther.username} may still be editing.`)) return;
+      lockCall('lock_force_release').then(() => checkLock());
+    });
+  } else {
+    el.innerHTML = `<label class="lock-toggle">
+      <input type="checkbox" id="lockToggle" ${lockHeldByMe ? 'checked' : ''}>
+      <span class="lock-switch"></span>
+      ${lockHeldByMe ? 'Editing (locked to you)' : 'Claim edit lock'}
+    </label>`;
+    document.getElementById('lockToggle').addEventListener('change', e => {
+      if (e.target.checked) {
+        lockCall('lock_acquire').then(d => {
+          if (d.success) { lockHeldByMe = true; lockedByOther = null; startHeartbeat(); }
+          else { lockedByOther = d.holder; lockHeldByMe = false; }
+          renderLockBar(); render();
+        });
+      } else {
+        lockCall('lock_release').then(() => { lockHeldByMe = false; stopHeartbeat(); renderLockBar(); render(); });
+      }
+    });
+  }
+}
 
 const KIND_META = {
   roster:      { label: 'Roster',             color: '#4a63e0', icon: '📋' },
@@ -401,7 +490,7 @@ function renderColumnBlock(chunkCols, tb) {
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      return `<tr><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
     }
     return `<tr><th class="row-label">${esc(r.label)}</th>${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
   }).join('');
@@ -447,6 +536,7 @@ function renderSection(sec) {
 }
 
 render();
+if (CAN_MANAGE) checkLock();
 </script>
 </body>
 </html>

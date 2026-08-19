@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
+require_once __DIR__ . '/../includes/edit_lock.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -180,12 +181,13 @@ function fetch_table_full($pdo, $tb) {
         'headerColspan' => (int)$c['header_colspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, height FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
     $stmt->execute([$tb['id']]);
     $rows = array_map(fn($r) => [
         'id' => (int)$r['id'],
         'label' => $r['label'],
         'kind' => $r['kind'],
+        'height' => $r['height'] !== null ? (int)$r['height'] : null,
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
@@ -253,6 +255,39 @@ function fetch_structure($pdo, $templateId) {
 function respond_structure($pdo, $templateId) {
     echo json_encode(['success' => true, 'sections' => fetch_structure($pdo, $templateId)]);
     exit;
+}
+
+// Every action on this endpoint already requires 'admin' (see the role check
+// above), so "any admin can force-unlock" needs no extra check here.
+if ($action === 'lock_status' || $action === 'lock_acquire' || $action === 'lock_heartbeat'
+    || $action === 'lock_release' || $action === 'lock_force_release') {
+    $templateId = (int)($body['templateId'] ?? 0);
+    $template = fetch_template($pdo, $tenant['id'], $templateId);
+    if (!$template) fail(404, 'Template not found');
+
+    if ($action === 'lock_status') {
+        echo json_encode(['success' => true, 'holder' => check_lock($pdo, 'template', $templateId)]);
+        exit;
+    }
+    if ($action === 'lock_acquire') {
+        $result = acquire_lock($pdo, 'template', $templateId, $user['id'], $user['username']);
+        echo json_encode(['success' => $result['ok'], 'holder' => $result['holder'] ?? null]);
+        exit;
+    }
+    if ($action === 'lock_heartbeat') {
+        echo json_encode(['success' => heartbeat_lock($pdo, 'template', $templateId, $user['id'])]);
+        exit;
+    }
+    if ($action === 'lock_release') {
+        release_lock($pdo, 'template', $templateId, $user['id']);
+        echo json_encode(['success' => true]);
+        exit;
+    }
+    if ($action === 'lock_force_release') {
+        force_unlock($pdo, 'template', $templateId);
+        echo json_encode(['success' => true]);
+        exit;
+    }
 }
 
 if ($action === 'add_section') {
@@ -381,8 +416,9 @@ if ($action === 'update_column' || $action === 'update_row') {
         $stmt = $pdo->prepare('UPDATE raid_template_columns SET label = ?, width = ?, header_color = ?, group_id = ? WHERE id = ?');
         $stmt->execute([$label, $width, $headerColor, $groupId, $item['id']]);
     } else {
-        $stmt = $pdo->prepare('UPDATE raid_template_rows SET label = ? WHERE id = ?');
-        $stmt->execute([$label, $item['id']]);
+        $height = array_key_exists('height', $body) ? ($body['height'] !== null && $body['height'] !== '' ? (int)$body['height'] : null) : $item['height'];
+        $stmt = $pdo->prepare('UPDATE raid_template_rows SET label = ?, height = ? WHERE id = ?');
+        $stmt->execute([$label, $height, $item['id']]);
     }
 
     respond_structure($pdo, $item['template_id']);

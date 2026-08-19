@@ -6,7 +6,9 @@ CREATE TABLE guilds (
     slug VARCHAR(64) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
     owner_discord_id VARCHAR(32) NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    logo_path VARCHAR(255) NULL,
+    banner_path VARCHAR(255) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- guild_users only ever stores explicit OWNER grants. Every other permission
@@ -47,4 +49,18 @@ CREATE TABLE kv_store (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_guild_key (guild_id, k),
     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Advisory editing lock for templates/raids (see includes/edit_lock.php).
+-- Purely advisory: does not gate the holder's own writes server-side, only
+-- informs/disables controls for other concurrent editors client-side.
+CREATE TABLE edit_locks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    entity_type ENUM('template', 'raid') NOT NULL,
+    entity_id INT NOT NULL,
+    locked_by_discord_user_id VARCHAR(32) NOT NULL,
+    locked_by_username VARCHAR(255) NOT NULL,
+    locked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    heartbeat_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_entity (entity_type, entity_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
