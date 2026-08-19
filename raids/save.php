@@ -116,5 +116,26 @@ if ($action === 'cancel' || $action === 'restore') {
     exit;
 }
 
+if ($action === 'delete') {
+    $id = isset($body['id']) ? (int)$body['id'] : 0;
+    $existing = fetch_raid($pdo, $tenant['id'], $id);
+    if (!$existing) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Raid not found']);
+        exit;
+    }
+    if ($existing['status'] !== 'cancelled') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Only cancelled raids can be deleted']);
+        exit;
+    }
+    // Structural child tables (raid_sections/tables/columns/rows/column_groups/cells/
+    // cell_merges) all cascade from raids.id via ON DELETE CASCADE FKs (verified live).
+    $stmt = $pdo->prepare('DELETE FROM raids WHERE id = ? AND guild_id = ?');
+    $stmt->execute([$id, $tenant['id']]);
+    echo json_encode(['success' => true]);
+    exit;
+}
+
 http_response_code(400);
 echo json_encode(['error' => 'Unknown action']);

@@ -263,6 +263,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
           <button class="btn btn-cancel-modal" id="modalCloseBtn">Close</button>
           <button class="btn btn-danger hidden" id="modalCancelRaidBtn">Cancel raid</button>
           <button class="btn btn-restore hidden" id="modalRestoreBtn">Restore</button>
+          <button class="btn btn-danger hidden" id="modalDeleteRaidBtn">Delete</button>
         </div>
         <div id="modalMessage" class="form-message hidden"></div>
       </div>
@@ -356,6 +357,7 @@ function openNewRaid(date) {
   document.getElementById('cancelledNote').classList.add('hidden');
   document.getElementById('modalCancelRaidBtn').classList.add('hidden');
   document.getElementById('modalRestoreBtn').classList.add('hidden');
+  document.getElementById('modalDeleteRaidBtn').classList.add('hidden');
   document.getElementById('modalSaveBtn').classList.remove('hidden');
   document.getElementById('modalViewLink').classList.add('hidden');
   populateTemplateSelect();
@@ -390,6 +392,7 @@ function openRaid(id) {
   document.getElementById('modalSaveBtn').classList.toggle('hidden', cancelled);
   document.getElementById('modalCancelRaidBtn').classList.toggle('hidden', cancelled);
   document.getElementById('modalRestoreBtn').classList.toggle('hidden', !cancelled);
+  document.getElementById('modalDeleteRaidBtn').classList.toggle('hidden', !cancelled);
   const viewLink = document.getElementById('modalViewLink');
   viewLink.href = '/raids/view.php?slug=' + encodeURIComponent(SLUG) + '&id=' + raid.id;
   viewLink.classList.remove('hidden');
@@ -439,6 +442,16 @@ document.getElementById('modalCancelRaidBtn').addEventListener('click', function
 document.getElementById('modalRestoreBtn').addEventListener('click', function () {
   if (!modalRaidId) return;
   persist({ action: 'restore', id: modalRaidId }).then(d => { upsertLocal(d.raid); renderCalendar(); closeModal(); }).catch(e => setModalMsg(e.message));
+});
+document.getElementById('modalDeleteRaidBtn').addEventListener('click', function () {
+  if (!modalRaidId) return;
+  if (!confirm('Permanently delete this raid? This cannot be undone.')) return;
+  const id = modalRaidId;
+  persist({ action: 'delete', id }).then(() => {
+    for (const d in raidsByDate) raidsByDate[d] = raidsByDate[d].filter(r => r.id !== id);
+    renderCalendar();
+    closeModal();
+  }).catch(e => setModalMsg(e.message));
 });
 </script>
 </body>
