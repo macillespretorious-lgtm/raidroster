@@ -123,7 +123,7 @@ function fmtTime($t) {
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { min-height: 100vh; background: #0a0f1e; font-family: system-ui, -apple-system, sans-serif; color: #e8ecff; }
-    .wrap { max-width: 980px; margin: 0 auto; padding: 32px 24px 110px; }
+    .wrap { max-width: 100%; margin: 0; padding: 32px 32px 110px; }
     .back { color: #7f8bad; font-size: 12px; text-decoration: none; }
     .back:hover { color: #a3adfa; }
     h1 { font-size: 22px; margin: 10px 0 4px; }
@@ -379,22 +379,19 @@ function renderColumnBlock(chunkCols, tb) {
     </div>`;
 }
 
-// position is this table's 1-based index among its section's top-level tables (auto-numbered
-// title); null for tables nested inside a group, which show their real title instead.
-function renderTable(tb, position) {
+function renderTable(tb) {
   const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
   const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
-  const titleText = position != null ? `#${position}` : esc(tb.title);
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables">
-      ${g.tables.map(ctb => renderTable(ctb, null)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb)).join('')}
     </div>`).join('');
 
   return `<div class="tbl-wrap">
-    <div class="tbl-title"${titleStyle}>${titleText}</div>
+    ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
     ${blocks}
     ${nestedGroupsHtml}
   </div>`;
@@ -405,7 +402,7 @@ function renderSection(sec) {
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};">${meta.icon} ${esc(sec.title)}</div>
     <div class="section-body">
-      ${sec.tables.map((tb, i) => renderTable(tb, i + 1)).join('') || '<p class="empty">No tables in this section.</p>'}
+      ${sec.tables.map(tb => renderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }

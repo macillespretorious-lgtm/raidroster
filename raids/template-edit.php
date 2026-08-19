@@ -91,7 +91,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { min-height: 100vh; background: #0a0f1e; font-family: system-ui, -apple-system, sans-serif; color: #e8ecff; }
-    .wrap { max-width: 900px; margin: 0 auto; padding: 32px 24px 110px; }
+    .wrap { max-width: 100%; margin: 0; padding: 32px 32px 110px; }
     .back { color: #7f8bad; font-size: 12px; text-decoration: none; }
     .back:hover { color: #a3adfa; }
     h1 { font-size: 20px; margin: 10px 0 4px; }
@@ -116,7 +116,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .tbl-card { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; min-width: 0; max-width: 100%; }
     .tbl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
     .tbl-head input.tbl-title { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; font-weight: 600; padding: 6px 9px; border-radius: 6px; flex: 1; min-width: 0; }
-    .tbl-head .tbl-title-auto { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; opacity: .85; }
     .grid-scroll { overflow-x: auto; }
     .grid-scroll + .grid-scroll { margin-top: 2px; }
     table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12px; }
@@ -407,7 +406,7 @@ function render() {
   });
 }
 
-function colHeaderCell(c, tb) {
+function colHeaderCell(c, tb, groupsEnabled) {
   const dragHandle = `<span class="drag-handle" draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}" title="Drag to reorder">&#10021;</span>`;
   if (c.kind === 'spacer') {
     return `<th class="spacer-th" data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
@@ -424,6 +423,9 @@ function colHeaderCell(c, tb) {
   }
   const groupOptions = ['<option value="">— No group —</option>']
     .concat(tb.columnGroups.map(g => `<option value="${g.id}" ${c.groupId === g.id ? 'selected' : ''}>${escAttr(g.title)}</option>`));
+  const groupSelect = groupsEnabled
+    ? `<select class="width-input" style="width:100%;" data-action="col-group" data-id="${c.id}" title="Column group">${groupOptions.join('')}</select>`
+    : '';
   return `<th data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
       <div class="col-th-inner">
         ${dragHandle}
@@ -432,7 +434,7 @@ function colHeaderCell(c, tb) {
           <input type="color" class="swatch" data-action="col-header-color" data-id="${c.id}" value="${c.headerColor || '#1a2338'}" title="Header color">
           <input type="number" class="width-input" data-action="col-width" data-id="${c.id}" value="${c.width || ''}" placeholder="w" min="0" title="Width (px)">
         </div>
-        <select class="width-input" style="width:100%;" data-action="col-group" data-id="${c.id}" title="Column group">${groupOptions.join('')}</select>
+        ${groupSelect}
         <div class="cell-actions">
           <button class="icon-btn" data-action="move-col-left" data-id="${c.id}" title="Move left">&larr;</button>
           <button class="icon-btn" data-action="move-col-right" data-id="${c.id}" title="Move right">&rarr;</button>
@@ -498,9 +500,9 @@ function renderRowHeader(r, tb) {
   </th>`;
 }
 
-function renderColumnBlock(chunkCols, tb) {
-  const colHeaders = chunkCols.map(c => colHeaderCell(c, tb)).join('');
-  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups);
+function renderColumnBlock(chunkCols, tb, groupsEnabled) {
+  const colHeaders = chunkCols.map(c => colHeaderCell(c, tb, groupsEnabled)).join('');
+  const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups) : '';
 
   const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
     chunkCols.map(c => {
@@ -529,26 +531,23 @@ function renderColumnBlock(chunkCols, tb) {
 }
 
 // parentKind/parentId identify where tb hangs off (a section, top-level, or a group, nested).
-// position is this table's 1-based index among its section's top-level tables, used for the
-// auto-numbered #N label — nested tables keep a real editable title instead.
-function renderTable(tb, parentKind, parentId, position) {
-  const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
+// groupsEnabled is false for roster-kind sections, which don't use column-groups/nested
+// boss-tables at all — only tank/healer/misc assignment sections do.
+function renderTable(tb, parentKind, parentId, groupsEnabled) {
+  const groupsWithTables = groupsEnabled ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
 
-  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, groupsEnabled)).join('');
 
   const headerBg = tb.headerColor || '';
   const headerStyle = headerBg ? `background:${headerBg};` : '';
   const titleColor = headerBg ? contrastText(headerBg) : '#e8ecff';
 
-  const isNested = parentKind === 'group';
-  const titleHtml = isNested
-    ? `<input class="tbl-title" data-action="rename-table" data-id="${tb.id}" value="${escAttr(tb.title)}" style="color:${titleColor};">`
-    : `<span class="tbl-title-auto" style="color:${titleColor};">#${position}</span>`;
+  const titleHtml = `<input class="tbl-title" data-action="rename-table" data-id="${tb.id}" placeholder="Table name (optional)" value="${escAttr(tb.title)}" style="color:${titleColor};">`;
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables">
-      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, null)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, groupsEnabled)).join('')}
     </div>`).join('');
 
   return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}">
@@ -562,7 +561,7 @@ function renderTable(tb, parentKind, parentId, position) {
       <button class="icon-btn" data-action="move-table-down" data-id="${tb.id}" title="Move down">&darr;</button>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
-    ${groupStrip(tb)}
+    ${groupsEnabled ? groupStrip(tb) : ''}
     ${blocks}
     ${!isContainerOnly ? `<div class="tbl-actions-row">
       <button class="add-row-btn" data-action="add-col" data-id="${tb.id}">+ Column</button>
@@ -576,6 +575,7 @@ function renderTable(tb, parentKind, parentId, position) {
 
 function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
+  const groupsEnabled = sec.kind !== 'roster';
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};">
       <input class="title-input" data-action="rename-section" data-id="${sec.id}" value="${escAttr(sec.title)}">
@@ -584,7 +584,7 @@ function renderSection(sec) {
       <button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>
     </div>
     <div class="section-body">
-      ${sec.tables.map((tb, i) => renderTable(tb, 'section', sec.id, i + 1)).join('') || '<p class="empty">No tables yet.</p>'}
+      ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled)).join('') || '<p class="empty">No tables yet.</p>'}
       <button class="btn" data-action="add-table-to-section" data-id="${sec.id}">+ Table</button>
     </div>
   </div>`;
