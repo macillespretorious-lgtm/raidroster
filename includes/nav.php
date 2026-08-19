@@ -10,11 +10,16 @@ function nav_asset_link() {
 function nav_items_for_role($tenant, $role) {
     $slug = $tenant['slug'];
     $items = [
-        ['key' => 'home',  'label' => 'Home',  'href' => "/$slug/",       'min' => 'readonly',          'icon' => 'home'],
-        ['key' => 'raids', 'label' => 'Raids', 'href' => "/$slug/raids",  'min' => 'readonly',          'icon' => 'raids'],
-        ['key' => 'toons', 'label' => 'Toons', 'href' => "/$slug/toons",  'min' => 'roster_management', 'icon' => 'toons'],
-        ['key' => 'design', 'label' => 'Design', 'href' => "/$slug/design", 'min' => 'admin',            'icon' => 'design'],
-        ['key' => 'admin', 'label' => 'Admin', 'href' => "/$slug/admin",  'min' => 'admin',              'icon' => 'admin'],
+        ['key' => 'home',  'label' => 'Home',  'href' => "/$slug/",       'min' => 'readonly',          'icon' => 'home',
+         'desc' => 'Your guild\'s dashboard.'],
+        ['key' => 'raids', 'label' => 'Raids', 'href' => "/$slug/raids",  'min' => 'readonly',          'icon' => 'raids',
+         'desc' => 'View the raid calendar, schedule raids, and manage assignments.'],
+        ['key' => 'toons', 'label' => 'Toons', 'href' => "/$slug/toons",  'min' => 'roster_management', 'icon' => 'toons',
+         'desc' => 'Manage the guild\'s roster of characters.'],
+        ['key' => 'design', 'label' => 'Design', 'href' => "/$slug/design", 'min' => 'admin',            'icon' => 'design',
+         'desc' => 'Build reusable raid templates: tables, columns, and rows.'],
+        ['key' => 'admin', 'label' => 'Admin', 'href' => "/$slug/admin",  'min' => 'admin',              'icon' => 'admin',
+         'desc' => 'Manage roles, Discord webhooks, and recurring raid schedules.'],
     ];
     return array_values(array_filter($items, fn($i) => role_at_least($role, $i['min'])));
 }
