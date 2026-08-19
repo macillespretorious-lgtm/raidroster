@@ -44,23 +44,29 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $stmtC = $pdo->prepare('SELECT * FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmtC->execute([$tb['id']]);
     $columns = [];
+    $columnIdMap = [];
     $insC = $pdo->prepare(
-        'INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, group_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, group_id, header_colspan)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     foreach ($stmtC->fetchAll(PDO::FETCH_ASSOC) as $col) {
         $newGroupId = $col['group_id'] ? ($groupIdMap[$col['group_id']] ?? null) : null;
-        $insC->execute([$newTableId, $col['label'], $col['sort_order'], $col['kind'], $col['width'], $col['header_color'], $newGroupId]);
-        $columns[] = ['id' => (int)$pdo->lastInsertId(), 'kind' => $col['kind']];
+        $insC->execute([$newTableId, $col['label'], $col['sort_order'], $col['kind'], $col['width'], $col['header_color'], $newGroupId, $col['header_colspan']]);
+        $newColId = (int)$pdo->lastInsertId();
+        $columns[] = ['id' => $newColId, 'kind' => $col['kind']];
+        $columnIdMap[$col['id']] = $newColId;
     }
 
     $stmtR = $pdo->prepare('SELECT * FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
     $stmtR->execute([$tb['id']]);
     $rows = [];
+    $rowIdMap = [];
     $insR = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
     foreach ($stmtR->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $insR->execute([$newTableId, $row['label'], $row['sort_order'], $row['kind']]);
-        $rows[] = ['id' => (int)$pdo->lastInsertId(), 'kind' => $row['kind']];
+        $newRowId = (int)$pdo->lastInsertId();
+        $rows[] = ['id' => $newRowId, 'kind' => $row['kind']];
+        $rowIdMap[$row['id']] = $newRowId;
     }
 
     // Spacer rows/columns never hold data, so no raid_cells row is created for either side.
@@ -71,6 +77,16 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
             if ($c['kind'] === 'spacer') continue;
             $insCell->execute([$newTableId, $r['id'], $c['id']]);
         }
+    }
+
+    // Cell merges (horizontal colspan within one row) reference specific row/column ids,
+    // so remap them the same way group nesting does above.
+    $stmtM = $pdo->prepare('SELECT * FROM raid_template_cell_merges WHERE table_id = ?');
+    $stmtM->execute([$tb['id']]);
+    $insM = $pdo->prepare('INSERT INTO raid_cell_merges (table_id, row_id, column_id, colspan) VALUES (?, ?, ?, ?)');
+    foreach ($stmtM->fetchAll(PDO::FETCH_ASSOC) as $m) {
+        if (!isset($rowIdMap[$m['row_id']]) || !isset($columnIdMap[$m['column_id']])) continue;
+        $insM->execute([$newTableId, $rowIdMap[$m['row_id']], $columnIdMap[$m['column_id']], $m['colspan']]);
     }
 
     // Nested boss-tables: for each column-group on this table, recurse into any template

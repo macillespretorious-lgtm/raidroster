@@ -26,13 +26,14 @@ if (!$template) {
 }
 
 function fetch_table_full($pdo, $tb) {
-    $stmt3 = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt3 = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id, header_colspan FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmt3->execute([$tb['id']]);
     $columns = array_map(fn($c) => [
         'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
         'width' => $c['width'] !== null ? (int)$c['width'] : null,
         'headerColor' => $c['header_color'],
         'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
+        'headerColspan' => (int)$c['header_colspan'],
     ], $stmt3->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt4 = $pdo->prepare('SELECT id, label, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
@@ -55,12 +56,19 @@ function fetch_table_full($pdo, $tb) {
         ];
     }
 
+    $stmt6 = $pdo->prepare('SELECT row_id, column_id, colspan FROM raid_template_cell_merges WHERE table_id = ?');
+    $stmt6->execute([$tb['id']]);
+    $cellMerges = array_map(fn($m) => [
+        'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
+    ], $stmt6->fetchAll(PDO::FETCH_ASSOC));
+
     return [
         'id' => (int)$tb['id'], 'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
+        'cellMerges' => $cellMerges,
     ];
 }
 
@@ -119,11 +127,15 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .grid-scroll { overflow-x: auto; }
     .grid-scroll + .grid-scroll { margin-top: 2px; }
     table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12px; }
-    table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     table.grid th { background: rgba(255,255,255,0.04); }
-    .lbl-input { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 5px; width: 90px; }
-    .cell-actions { display: flex; gap: 3px; margin-top: 2px; }
+    .lbl-input { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 5px; width: 100%; min-width: 0; box-sizing: border-box; }
+    .cell-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 2px; }
     .cell-actions .icon-btn { width: 20px; height: 20px; font-size: 10px; }
+    td.data-td { position: relative; min-width: 24px; }
+    .cell-merge-actions { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 2px; opacity: 0; pointer-events: none; transition: opacity .15s; }
+    .cell-merge-actions .icon-btn { width: 16px; height: 16px; font-size: 9px; padding: 0; pointer-events: auto; }
+    td.data-td:hover .cell-merge-actions { opacity: 1; }
     .add-row-btn { background: none; border: 1px dashed rgba(255,255,255,0.2); color: #a8b4d0; border-radius: 6px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
     .add-row-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
     .tbl-actions-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
@@ -133,8 +145,12 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     input[type=color].swatch::-webkit-color-swatch { border: none; border-radius: 3px; }
     .width-input { width: 52px; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 11px; padding: 4px 5px; border-radius: 5px; }
     .tbl-sizing { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; }
-    .col-th-inner { display: flex; flex-direction: column; gap: 3px; align-items: center; }
-    .col-th-row2 { display: flex; gap: 3px; align-items: center; }
+    .col-th-inner { display: flex; flex-direction: column; gap: 3px; align-items: center; min-width: 0; }
+    .row-th-inner { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .row-th-top { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
+    .col-th-row2 { display: flex; gap: 3px; align-items: center; width: 100%; min-width: 0; }
+    .col-th-row2 .swatch { flex-shrink: 0; }
+    .col-th-row2 .width-input { flex: 1 1 0; min-width: 0; width: 0; }
     .group-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
     .group-pill { display: flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
     .group-pill input.group-title { background: transparent; border: none; color: inherit; font: inherit; font-weight: 700; width: auto; max-width: 110px; }
@@ -197,6 +213,13 @@ function contrastText(hex) {
 
 const MAX_DATA_COLS = 10;
 
+// Column widths are stored in px, but the width inputs show "units" instead so non-technical
+// admins don't have to think in pixels — 1 unit = 60px, defaulting to 2 units (120px).
+const COL_UNIT_PX = 60;
+const DEFAULT_COL_UNITS = 2;
+function pxToUnits(px) { return px ? Math.round(px / COL_UNIT_PX) : ''; }
+function unitsToPx(units) { return units ? parseInt(units, 10) * COL_UNIT_PX : null; }
+
 function chunkColumns(columns) {
   const chunks = [];
   let current = [];
@@ -219,7 +242,11 @@ function colWidthPx(c, tb) {
     const base = c.width || tb.defaultColumnWidth || 30;
     return Math.max(8, Math.round(base / 3));
   }
-  return c.width || tb.defaultColumnWidth || null;
+  // Always resolve to a real pixel width (never null) so every <col> in the colgroup is
+  // explicit — table-layout:fixed only sums a colspan cell's width from its spanned <col>
+  // widths correctly when all of them are explicit; an "auto" column breaks that sum and
+  // lets merged headers/cells collapse toward a single column's width instead.
+  return c.width || tb.defaultColumnWidth || (DEFAULT_COL_UNITS * COL_UNIT_PX);
 }
 
 // Every table anywhere in the tree (top-level or nested inside a group), flattened for lookup.
@@ -316,27 +343,25 @@ function render() {
       }
       if (act === 'rename-table') call({ action: 'update_table', id, title: node.value.trim() });
       if (act === 'delete-table') { if (confirm('Delete this table?')) call({ action: 'delete_table', id }); }
-      if (act === 'move-table-up') call({ action: 'move_table', id, direction: 'up' });
-      if (act === 'move-table-down') call({ action: 'move_table', id, direction: 'down' });
       if (act === 'rename-col') call({ action: 'update_column', id, label: node.value.trim() });
       if (act === 'delete-col') call({ action: 'delete_column', id });
-      if (act === 'move-col-left') call({ action: 'move_column', id, direction: 'up' });
-      if (act === 'move-col-right') call({ action: 'move_column', id, direction: 'down' });
       if (act === 'rename-row') call({ action: 'update_row', id, label: node.value.trim() });
       if (act === 'delete-row') call({ action: 'delete_row', id });
-      if (act === 'move-row-up') call({ action: 'move_row', id, direction: 'up' });
-      if (act === 'move-row-down') call({ action: 'move_row', id, direction: 'down' });
       if (act === 'add-col') call({ action: 'add_column', tableId: id, label: '' });
       if (act === 'add-row') call({ action: 'add_row', tableId: id, label: '' });
       if (act === 'add-spacer-col') call({ action: 'add_column', tableId: id, kind: 'spacer', label: '' });
       if (act === 'add-spacer-row') call({ action: 'add_row', tableId: id, kind: 'spacer', label: '' });
       if (act === 'toggle-row-header') { const tb = findTable(id); const showing = tb.rowLabelWidth !== 0; call({ action: 'update_table', id, title: tb.title, rowLabelWidth: showing ? 0 : null }); }
       if (act === 'table-header-color') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, headerColor: node.value }); }
-      if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: node.value ? parseInt(node.value, 10) : null }); }
+      if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
       if (act === 'table-label-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, rowLabelWidth: node.value ? parseInt(node.value, 10) : null }); }
       if (act === 'col-header-color') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, headerColor: node.value }); }
-      if (act === 'col-width') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: node.value ? parseInt(node.value, 10) : null }); }
+      if (act === 'col-width') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: unitsToPx(node.value) }); }
       if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
+      if (act === 'merge-header') call({ action: 'merge_header', id });
+      if (act === 'split-header') call({ action: 'split_header', id });
+      if (act === 'merge-cell') call({ action: 'merge_cell', rowId: parseInt(node.dataset.rowId, 10), columnId: parseInt(node.dataset.colId, 10) });
+      if (act === 'split-cell') call({ action: 'split_cell', rowId: parseInt(node.dataset.rowId, 10), columnId: parseInt(node.dataset.colId, 10) });
       if (act === 'add-group') {
         const title = prompt('Group header title, e.g. Spider Wing:');
         if (title && title.trim()) call({ action: 'add_column_group', tableId: id, title: title.trim() });
@@ -401,16 +426,15 @@ function render() {
   });
 }
 
-function colHeaderCell(c, tb, groupsEnabled) {
+function colHeaderCell(c, tb, groupsEnabled, span) {
   const dragHandle = `<span class="drag-handle" draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}" title="Drag to reorder">&#10021;</span>`;
+  const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
   if (c.kind === 'spacer') {
     return `<th class="spacer-th" data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
       <div class="col-th-inner">
         ${dragHandle}
         <span class="spacer-label">spacer</span>
         <div class="cell-actions">
-          <button class="icon-btn" data-action="move-col-left" data-id="${c.id}" title="Move left">&larr;</button>
-          <button class="icon-btn" data-action="move-col-right" data-id="${c.id}" title="Move right">&rarr;</button>
           <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
         </div>
       </div>
@@ -421,18 +445,22 @@ function colHeaderCell(c, tb, groupsEnabled) {
   const groupSelect = groupsEnabled
     ? `<select class="width-input" style="width:100%;" data-action="col-group" data-id="${c.id}" title="Column group">${groupOptions.join('')}</select>`
     : '';
-  return `<th data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
+  const mergeBtn = `<button class="icon-btn" data-action="merge-header" data-id="${c.id}" title="Merge header with next column">&harr;</button>`;
+  const splitBtn = c.headerColspan > 1
+    ? `<button class="icon-btn" data-action="split-header" data-id="${c.id}" title="Unmerge header">&#8622;</button>`
+    : '';
+  return `<th${colspanAttr} data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
       <div class="col-th-inner">
         ${dragHandle}
         <input class="lbl-input" data-action="rename-col" data-id="${c.id}" placeholder="Label" value="${escAttr(c.label)}">
         <div class="col-th-row2">
           <input type="color" class="swatch" data-action="col-header-color" data-id="${c.id}" value="${c.headerColor || '#1a2338'}" title="Header color">
-          <input type="number" class="width-input" data-action="col-width" data-id="${c.id}" value="${c.width || ''}" placeholder="w" min="0" title="Width (px)">
+          <input type="number" class="width-input" data-action="col-width" data-id="${c.id}" value="${pxToUnits(c.width)}" placeholder="${DEFAULT_COL_UNITS}" min="1" title="Width in units (1 unit = ${COL_UNIT_PX}px)">
         </div>
         ${groupSelect}
         <div class="cell-actions">
-          <button class="icon-btn" data-action="move-col-left" data-id="${c.id}" title="Move left">&larr;</button>
-          <button class="icon-btn" data-action="move-col-right" data-id="${c.id}" title="Move right">&rarr;</button>
+          ${mergeBtn}
+          ${splitBtn}
           <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
         </div>
       </div>
@@ -473,37 +501,76 @@ function groupStrip(tb) {
 
 function renderRowHeader(r, tb, showRowHeader) {
   const dragHandle = `<span class="drag-handle" draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}" title="Drag to reorder">&#10021;</span>`;
+  const deleteBtn = `<button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>`;
   if (r.kind === 'spacer') {
-    return `<th class="spacer-th" style="text-align:left;" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
-      ${dragHandle}
-      <span class="spacer-label">spacer</span>
-      <div class="cell-actions">
-        <button class="icon-btn" data-action="move-row-up" data-id="${r.id}" title="Move up">&uarr;</button>
-        <button class="icon-btn" data-action="move-row-down" data-id="${r.id}" title="Move down">&darr;</button>
-        <button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>
+    return `<th class="spacer-th" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
+      <div class="row-th-inner">
+        <div class="row-th-top">${dragHandle}${deleteBtn}</div>
+        <span class="spacer-label">spacer</span>
       </div>
     </th>`;
   }
   const labelInput = showRowHeader
     ? `<input class="lbl-input" data-action="rename-row" data-id="${r.id}" placeholder="Label" value="${escAttr(r.label)}">`
     : '';
-  return `<th style="text-align:left;" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
-    ${dragHandle}
-    ${labelInput}
-    <div class="cell-actions">
-      <button class="icon-btn" data-action="move-row-up" data-id="${r.id}" title="Move up">&uarr;</button>
-      <button class="icon-btn" data-action="move-row-down" data-id="${r.id}" title="Move down">&darr;</button>
-      <button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>
+  return `<th data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
+    <div class="row-th-inner">
+      <div class="row-th-top">${dragHandle}${deleteBtn}</div>
+      ${labelInput}
     </div>
   </th>`;
 }
 
+// Header colspans are stored per-column and consumed left-to-right: a column with
+// headerColspan > 1 renders one <th> spanning N columns, and the next N-1 columns are
+// skipped entirely (purely positional — no bookkeeping needed when columns move/delete).
+function headerCellsForChunk(chunkCols, tb, groupsEnabled) {
+  const out = [];
+  let i = 0;
+  while (i < chunkCols.length) {
+    const c = chunkCols[i];
+    const span = c.kind === 'spacer' ? 1 : Math.min(c.headerColspan || 1, chunkCols.length - i);
+    out.push(colHeaderCell(c, tb, groupsEnabled, span));
+    i += span;
+  }
+  return out.join('');
+}
+
+// Same walk-and-consume pattern as headers, but per-row: cellMerges is a (rowId, columnId)
+// -> colspan lookup, independent of header merges.
+function bodyCellsForRow(r, chunkCols, tb) {
+  const mergeByCol = {};
+  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+  const out = [];
+  let i = 0;
+  while (i < chunkCols.length) {
+    const c = chunkCols[i];
+    if (c.kind === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
+    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const splitBtn = span > 1
+      ? `<button class="icon-btn" data-action="split-cell" data-row-id="${r.id}" data-col-id="${c.id}" title="Unmerge cell">&#8622;</button>`
+      : '';
+    out.push(`<td${colspanAttr} class="data-td">
+      <div class="cell-merge-actions">
+        <button class="icon-btn" data-action="merge-cell" data-row-id="${r.id}" data-col-id="${c.id}" title="Merge with next column">&harr;</button>
+        ${splitBtn}
+      </div>
+    </td>`);
+    i += span;
+  }
+  return out.join('');
+}
+
 function renderColumnBlock(chunkCols, tb, groupsEnabled) {
   const showRowHeader = tb.rowLabelWidth !== 0;
-  const colHeaders = chunkCols.map(c => colHeaderCell(c, tb, groupsEnabled)).join('');
+  const colHeaders = headerCellsForChunk(chunkCols, tb, groupsEnabled);
   const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups) : '';
 
-  const rowHeaderColWidth = showRowHeader ? (tb.rowLabelWidth || 110) : 34;
+  // 84px keeps this collapsed to a slim rail while still fitting the row-action buttons
+  // (3 x 20px + gaps) on one line — narrower and they wrap onto stacked rows, which forces
+  // the whole body row taller since a <tr>'s height is driven by its tallest cell.
+  const rowHeaderColWidth = showRowHeader ? (tb.rowLabelWidth || 110) : 84;
   const colgroup = `<colgroup><col style="width:${rowHeaderColWidth}px;">` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
@@ -516,8 +583,7 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
       const spacerCells = chunkCols.map(() => `<td class="spacer-cell"></td>`).join('');
       return `<tr>${rowHeader}${spacerCells}</tr>`;
     }
-    const rowCells = chunkCols.map(c => c.kind === 'spacer' ? `<td class="spacer-cell"></td>` : `<td></td>`).join('');
-    return `<tr>${rowHeader}${rowCells}</tr>`;
+    return `<tr>${rowHeader}${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
@@ -555,10 +621,8 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
       <span class="drag-handle" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
       <input type="color" class="swatch" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
-      <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${tb.defaultColumnWidth || ''}" placeholder="auto" min="0"></div>
+      <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="1" title="Default column width in units (1 unit = ${COL_UNIT_PX}px)"></div>
       <div class="tbl-sizing">Label w<input type="number" class="width-input" data-action="table-label-width" data-id="${tb.id}" value="${tb.rowLabelWidth ? tb.rowLabelWidth : ''}" placeholder="auto" min="0"></div>
-      <button class="icon-btn" data-action="move-table-up" data-id="${tb.id}" title="Move up">&uarr;</button>
-      <button class="icon-btn" data-action="move-table-down" data-id="${tb.id}" title="Move down">&darr;</button>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
     ${groupsEnabled ? groupStrip(tb) : ''}

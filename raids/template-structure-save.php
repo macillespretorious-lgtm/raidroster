@@ -168,7 +168,7 @@ function reorder_siblings($pdo, $table, $fkCol, $fkVal, $orderedIds) {
 }
 
 function fetch_table_full($pdo, $tb) {
-    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, width, header_color, group_id FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, width, header_color, group_id, header_colspan FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmt->execute([$tb['id']]);
     $columns = array_map(fn($c) => [
         'id' => (int)$c['id'],
@@ -177,6 +177,7 @@ function fetch_table_full($pdo, $tb) {
         'width' => $c['width'] !== null ? (int)$c['width'] : null,
         'headerColor' => $c['header_color'],
         'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
+        'headerColspan' => (int)$c['header_colspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt = $pdo->prepare('SELECT id, label, sort_order, kind FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
@@ -204,6 +205,14 @@ function fetch_table_full($pdo, $tb) {
         ];
     }
 
+    $stmt = $pdo->prepare('SELECT row_id, column_id, colspan FROM raid_template_cell_merges WHERE table_id = ?');
+    $stmt->execute([$tb['id']]);
+    $cellMerges = array_map(fn($m) => [
+        'rowId' => (int)$m['row_id'],
+        'columnId' => (int)$m['column_id'],
+        'colspan' => (int)$m['colspan'],
+    ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+
     return [
         'id' => (int)$tb['id'],
         'title' => $tb['title'],
@@ -213,6 +222,7 @@ function fetch_table_full($pdo, $tb) {
         'columns' => $columns,
         'rows' => $rows,
         'columnGroups' => $columnGroups,
+        'cellMerges' => $cellMerges,
     ];
 }
 
@@ -334,17 +344,6 @@ if ($action === 'delete_table') {
     respond_structure($pdo, $templateId);
 }
 
-if ($action === 'move_table') {
-    $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
-    if (!$tb) fail(404, 'Table not found');
-    if ($tb['section_id'] !== null) {
-        move_sibling($pdo, 'raid_template_tables', 'section_id', $tb['section_id'], $tb['id'], $body['direction'] ?? '');
-    } else {
-        move_sibling($pdo, 'raid_template_tables', 'parent_group_id', $tb['parent_group_id'], $tb['id'], $body['direction'] ?? '');
-    }
-    respond_structure($pdo, $tb['template_id']);
-}
-
 if ($action === 'add_column' || $action === 'add_row') {
     $isCol = $action === 'add_column';
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['tableId'] ?? 0));
@@ -387,6 +386,52 @@ if ($action === 'update_column' || $action === 'update_row') {
     }
 
     respond_structure($pdo, $item['template_id']);
+}
+
+if ($action === 'merge_header' || $action === 'split_header') {
+    $col = fetch_column_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
+    if (!$col) fail(404, 'Column not found');
+
+    if ($action === 'split_header') {
+        $stmt = $pdo->prepare('UPDATE raid_template_columns SET header_colspan = 1 WHERE id = ?');
+        $stmt->execute([$col['id']]);
+    } else {
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM raid_template_columns WHERE table_id = ? AND sort_order >= ?');
+        $stmt->execute([$col['table_id'], $col['sort_order']]);
+        $maxSpan = (int)$stmt->fetchColumn();
+        $newSpan = min($maxSpan, (int)$col['header_colspan'] + 1);
+        $stmt = $pdo->prepare('UPDATE raid_template_columns SET header_colspan = ? WHERE id = ?');
+        $stmt->execute([$newSpan, $col['id']]);
+    }
+
+    respond_structure($pdo, $col['template_id']);
+}
+
+if ($action === 'merge_cell' || $action === 'split_cell') {
+    $col = fetch_column_owned($pdo, $tenant['id'], (int)($body['columnId'] ?? 0));
+    $row = fetch_row_owned($pdo, $tenant['id'], (int)($body['rowId'] ?? 0));
+    if (!$col || !$row) fail(404, 'Not found');
+    if ((int)$col['table_id'] !== (int)$row['table_id']) fail(400, 'Row/column must belong to the same table');
+
+    if ($action === 'split_cell') {
+        $stmt = $pdo->prepare('DELETE FROM raid_template_cell_merges WHERE row_id = ? AND column_id = ?');
+        $stmt->execute([$row['id'], $col['id']]);
+    } else {
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM raid_template_columns WHERE table_id = ? AND sort_order >= ?');
+        $stmt->execute([$col['table_id'], $col['sort_order']]);
+        $maxSpan = (int)$stmt->fetchColumn();
+
+        $stmt = $pdo->prepare('SELECT colspan FROM raid_template_cell_merges WHERE row_id = ? AND column_id = ?');
+        $stmt->execute([$row['id'], $col['id']]);
+        $current = (int)($stmt->fetchColumn() ?: 1);
+        $newSpan = min($maxSpan, $current + 1);
+
+        $stmt = $pdo->prepare('INSERT INTO raid_template_cell_merges (table_id, row_id, column_id, colspan) VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE colspan = VALUES(colspan)');
+        $stmt->execute([$col['table_id'], $row['id'], $col['id'], $newSpan]);
+    }
+
+    respond_structure($pdo, $col['template_id']);
 }
 
 if ($action === 'add_column_group') {
@@ -441,17 +486,6 @@ if ($action === 'delete_column' || $action === 'delete_row') {
     $stmt = $pdo->prepare("DELETE FROM $table WHERE id = ?");
     $stmt->execute([$item['id']]);
     respond_structure($pdo, $templateId);
-}
-
-if ($action === 'move_column' || $action === 'move_row') {
-    $isCol = $action === 'move_column';
-    $item = $isCol
-        ? fetch_column_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0))
-        : fetch_row_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
-    if (!$item) fail(404, 'Not found');
-    $table = $isCol ? 'raid_template_columns' : 'raid_template_rows';
-    move_sibling($pdo, $table, 'table_id', $item['table_id'], $item['id'], $body['direction'] ?? '');
-    respond_structure($pdo, $item['template_id']);
 }
 
 if ($action === 'reorder') {

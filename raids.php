@@ -138,7 +138,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
     .cal-cell {
       background: #111827; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
-      min-height: 92px; padding: 8px; display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+      min-height: 92px; min-width: 0; padding: 8px; display: flex; flex-direction: column; gap: 4px; cursor: pointer;
     }
     .cal-cell:hover { border-color: rgba(88,101,242,0.4); }
     .cal-cell.today { border-color: #5865f2; box-shadow: inset 0 0 0 1px #5865f2; }

@@ -28,13 +28,14 @@ if (!$raid) {
 $canManage = role_at_least($role, 'raid_management');
 
 function fetch_table_full($pdo, $tb) {
-    $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id, header_colspan FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmtC->execute([$tb['id']]);
     $columns = array_map(fn($c) => [
         'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
         'width' => $c['width'] !== null ? (int)$c['width'] : null,
         'headerColor' => $c['header_color'],
         'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
+        'headerColspan' => (int)$c['header_colspan'],
     ], $stmtC->fetchAll(PDO::FETCH_ASSOC));
 
     $stmtR = $pdo->prepare('SELECT id, label, kind FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
@@ -74,12 +75,19 @@ function fetch_table_full($pdo, $tb) {
         ];
     }
 
+    $stmtM = $pdo->prepare('SELECT row_id, column_id, colspan FROM raid_cell_merges WHERE table_id = ?');
+    $stmtM->execute([$tb['id']]);
+    $cellMerges = array_map(fn($m) => [
+        'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
+    ], $stmtM->fetchAll(PDO::FETCH_ASSOC));
+
     return [
         'id' => (int)$tb['id'], 'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
+        'cellMerges' => $cellMerges,
     ];
 }
 
@@ -316,7 +324,10 @@ function colWidthPx(c, tb) {
     const base = c.width || tb.defaultColumnWidth || 30;
     return Math.max(8, Math.round(base / 3));
   }
-  return c.width || tb.defaultColumnWidth || null;
+  // Always resolve to a real pixel width (never null) so every <col> in the colgroup is
+  // explicit — table-layout:fixed only sums a colspan cell's width from its spanned <col>
+  // widths correctly when all of them are explicit.
+  return c.width || tb.defaultColumnWidth || 120; // 2 units at 60px/unit, matches the editor's default
 }
 
 function groupHeaderRow(cols, columnGroups) {
@@ -339,12 +350,48 @@ function groupHeaderRow(cols, columnGroups) {
   return `<tr>${cells.join('')}</tr>`;
 }
 
-function renderColumnBlock(chunkCols, tb) {
-  const colHeaders = chunkCols.map(c => {
-    if (c.kind === 'spacer') return `<th class="spacer-th"></th>`;
+// Header colspans are stored per-column and consumed left-to-right, same convention as
+// the template editor: a column with headerColspan > 1 renders one <th> spanning N
+// columns and the next N-1 columns are skipped.
+function headerCellsForChunk(chunkCols) {
+  const out = [];
+  let i = 0;
+  while (i < chunkCols.length) {
+    const c = chunkCols[i];
+    if (c.kind === 'spacer') { out.push(`<th class="spacer-th"></th>`); i++; continue; }
+    const span = Math.min(c.headerColspan || 1, chunkCols.length - i);
+    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     const style = c.headerColor ? ` style="background:${c.headerColor};color:${contrastText(c.headerColor)};"` : '';
-    return `<th${style}>${esc(c.label)}</th>`;
-  }).join('');
+    out.push(`<th${colspanAttr}${style}>${esc(c.label)}</th>`);
+    i += span;
+  }
+  return out.join('');
+}
+
+// Same walk-and-consume pattern for body cells: tb.cellMerges is a (rowId, columnId) ->
+// colspan lookup, independent of header merges. The covered columns get no <td> at all.
+function bodyCellsForRow(r, chunkCols, tb) {
+  const mergeByCol = {};
+  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+  const out = [];
+  let i = 0;
+  while (i < chunkCols.length) {
+    const c = chunkCols[i];
+    if (c.kind === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
+    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const cell = tb.cells[r.id + '_' + c.id];
+    const cellIdAttr = cell ? cell.id : '';
+    const editableCls = CAN_MANAGE ? ' editable' : '';
+    const noteBtn = CAN_MANAGE ? `<button type="button" class="note-btn" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="background:none;border:none;color:#55607a;cursor:pointer;font-size:9px;vertical-align:top;">✎</button>` : '';
+    out.push(`<td${colspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}">${chipHtml(cell)}${noteBtn}</td>`);
+    i += span;
+  }
+  return out.join('');
+}
+
+function renderColumnBlock(chunkCols, tb) {
+  const colHeaders = headerCellsForChunk(chunkCols);
 
   const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
     chunkCols.map(c => {
@@ -356,15 +403,7 @@ function renderColumnBlock(chunkCols, tb) {
     if (r.kind === 'spacer') {
       return `<tr><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
     }
-    const rowCells = chunkCols.map(c => {
-      if (c.kind === 'spacer') return `<td class="spacer-cell"></td>`;
-      const cell = tb.cells[r.id + '_' + c.id];
-      const cellIdAttr = cell ? cell.id : '';
-      const editableCls = CAN_MANAGE ? ' editable' : '';
-      const noteBtn = CAN_MANAGE ? `<button type="button" class="note-btn" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="background:none;border:none;color:#55607a;cursor:pointer;font-size:9px;vertical-align:top;">✎</button>` : '';
-      return `<td class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}">${chipHtml(cell)}${noteBtn}</td>`;
-    }).join('');
-    return `<tr><th class="row-label">${esc(r.label)}</th>${rowCells}</tr>`;
+    return `<tr><th class="row-label">${esc(r.label)}</th>${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
   }).join('');
 
   const groupRow = groupHeaderRow(chunkCols, tb.columnGroups);
