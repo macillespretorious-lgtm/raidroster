@@ -7,8 +7,8 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
     $stmt = $pdo->prepare('SELECT * FROM raid_template_sections WHERE template_id = ? ORDER BY sort_order, id');
     $stmt->execute([$templateId]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $sec) {
-        $ins = $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order) VALUES (?, ?, ?, ?)');
-        $ins->execute([$raidId, $sec['kind'], $sec['title'], $sec['sort_order']]);
+        $ins = $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order, source_section_id) VALUES (?, ?, ?, ?, ?)');
+        $ins->execute([$raidId, $sec['kind'], $sec['title'], $sec['sort_order'], $sec['id']]);
         $newSectionId = (int)$pdo->lastInsertId();
 
         $stmtT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
@@ -24,10 +24,10 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
 // $newParentGroupId is non-null, matching the section_id/parent_group_id invariant.
 function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $insT = $pdo->prepare(
-        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, default_column_width, row_label_width)
-         VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, default_column_width, row_label_width, source_table_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['default_column_width'], $tb['row_label_width']]);
+    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['default_column_width'], $tb['row_label_width'], $tb['id']]);
     $newTableId = (int)$pdo->lastInsertId();
 
     // Column groups first (columns FK into them), preserving parent_group_id links via an old->new id map.
@@ -35,9 +35,9 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $stmtG->execute([$tb['id']]);
     $groupRows = $stmtG->fetchAll(PDO::FETCH_ASSOC);
     $groupIdMap = [];
-    $insG = $pdo->prepare('INSERT INTO raid_column_groups (table_id, parent_group_id, title, color, sort_order) VALUES (?, ?, ?, ?, ?)');
+    $insG = $pdo->prepare('INSERT INTO raid_column_groups (table_id, parent_group_id, title, color, sort_order, source_group_id) VALUES (?, ?, ?, ?, ?, ?)');
     foreach ($groupRows as $grp) {
-        $insG->execute([$newTableId, $grp['parent_group_id'] ? ($groupIdMap[$grp['parent_group_id']] ?? null) : null, $grp['title'], $grp['color'], $grp['sort_order']]);
+        $insG->execute([$newTableId, $grp['parent_group_id'] ? ($groupIdMap[$grp['parent_group_id']] ?? null) : null, $grp['title'], $grp['color'], $grp['sort_order'], $grp['id']]);
         $groupIdMap[$grp['id']] = (int)$pdo->lastInsertId();
     }
 
@@ -46,12 +46,12 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $columns = [];
     $columnIdMap = [];
     $insC = $pdo->prepare(
-        'INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, group_id, header_colspan)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, group_id, header_colspan, source_column_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     foreach ($stmtC->fetchAll(PDO::FETCH_ASSOC) as $col) {
         $newGroupId = $col['group_id'] ? ($groupIdMap[$col['group_id']] ?? null) : null;
-        $insC->execute([$newTableId, $col['label'], $col['sort_order'], $col['kind'], $col['width'], $col['header_color'], $newGroupId, $col['header_colspan']]);
+        $insC->execute([$newTableId, $col['label'], $col['sort_order'], $col['kind'], $col['width'], $col['header_color'], $newGroupId, $col['header_colspan'], $col['id']]);
         $newColId = (int)$pdo->lastInsertId();
         $columns[] = ['id' => $newColId, 'kind' => $col['kind']];
         $columnIdMap[$col['id']] = $newColId;
@@ -61,9 +61,9 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $stmtR->execute([$tb['id']]);
     $rows = [];
     $rowIdMap = [];
-    $insR = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
+    $insR = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind, height, source_row_id) VALUES (?, ?, ?, ?, ?, ?)');
     foreach ($stmtR->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $insR->execute([$newTableId, $row['label'], $row['sort_order'], $row['kind']]);
+        $insR->execute([$newTableId, $row['label'], $row['sort_order'], $row['kind'], $row['height'], $row['id']]);
         $newRowId = (int)$pdo->lastInsertId();
         $rows[] = ['id' => $newRowId, 'kind' => $row['kind']];
         $rowIdMap[$row['id']] = $newRowId;
