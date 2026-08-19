@@ -39,6 +39,10 @@ $startItems = array_values(array_filter(nav_items_for_role($tenant, $role), fn($
       color: #e8ecff;
     }
     .wrap { max-width: 640px; margin: 0 auto; padding: 40px 24px 100px; }
+    .banner-hero {
+      width: 100%; max-height: 200px; object-fit: cover; display: block;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
     h1 { font-size: 24px; margin-bottom: 6px; }
     p.sub { color: #a8b4d0; font-size: 14px; margin-bottom: 32px; }
 
@@ -62,6 +66,9 @@ $startItems = array_values(array_filter(nav_items_for_role($tenant, $role), fn($
 </head>
 <body>
   <?php render_nav_shell($tenant, $user, $role, 'home'); ?>
+  <?php if (!empty($tenant['banner_path'])): ?>
+    <img class="banner-hero" src="/<?= h($tenant['banner_path']) ?>?v=<?= (int)@filemtime(__DIR__ . '/' . $tenant['banner_path']) ?>" alt="">
+  <?php endif; ?>
   <div class="wrap">
     <h1>Welcome back, <?= h($user['username']) ?></h1>
     <p class="sub"><?= h($tenant['name']) ?> &middot; role: <?= h(str_replace('_', ' ', $role)) ?></p>

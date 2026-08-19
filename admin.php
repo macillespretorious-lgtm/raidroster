@@ -86,6 +86,21 @@ if (!$notice && !$error && ($_GET['bot'] ?? '') === 'added') {
     $notice = 'Bot added to your server!';
 }
 
+if (!$notice && !$error) {
+    $BRANDING_MESSAGES = [
+        'ok'       => ['notice', 'Branding updated.'],
+        'empty'    => ['error', 'No file was selected.'],
+        'toolarge' => ['error', 'That image is over the 2MB limit.'],
+        'badtype'  => ['error', 'Please upload a PNG, JPG, or WebP image.'],
+        'error'    => ['error', 'Upload failed — please try again.'],
+    ];
+    $brandingStatus = $_GET['branding'] ?? '';
+    if (isset($BRANDING_MESSAGES[$brandingStatus])) {
+        [$kind, $msg] = $BRANDING_MESSAGES[$brandingStatus];
+        if ($kind === 'notice') { $notice = $msg; } else { $error = $msg; }
+    }
+}
+
 $botInGuild = discord_bot_in_guild($tenant['discord_guild_id']);
 
 $stmt = $pdo->prepare('SELECT discord_role_id, discord_role_name, permission FROM guild_role_permissions WHERE guild_id = ? ORDER BY permission, discord_role_name');
@@ -269,6 +284,20 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       border-radius: 6px; padding: 7px 10px; font-size: 13px; font: inherit; width: 110px;
     }
     .recurring-active-label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #a8b4d0; white-space: nowrap; }
+
+    .brand-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .brand-preview {
+      border-radius: 8px; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.1);
+      object-fit: cover; flex-shrink: 0;
+    }
+    .brand-preview.logo { width: 64px; height: 64px; }
+    .brand-preview.banner { width: 220px; height: 55px; }
+    .brand-preview.empty {
+      display: flex; align-items: center; justify-content: center;
+      color: #7f8bad; font-size: 11px; text-align: center;
+    }
+    .brand-form { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .brand-form input[type=file] { color: #a8b4d0; font-size: 12px; max-width: 220px; }
   </style>
 </head>
 <body>
@@ -284,6 +313,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       <button type="button" class="tab-btn active" data-tab="roles">Roles</button>
       <button type="button" class="tab-btn" data-tab="webhooks">Webhooks</button>
       <button type="button" class="tab-btn" data-tab="raids">Schedule</button>
+      <button type="button" class="tab-btn" data-tab="branding">Branding</button>
     </div>
 
     <div class="tab-panel active" id="tab-roles">
@@ -407,11 +437,45 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         Templates themselves (name, default time, and roster/assignment layout) are built in <a href="/<?= h($slug) ?>/design" style="color:#a3adfa;">Design</a>.
       </div>
     </div>
+
+    <div class="tab-panel" id="tab-branding">
+      <h2>Logo</h2>
+      <div class="card">
+        <div class="brand-row">
+          <?php if (!empty($tenant['logo_path'])): ?>
+            <img class="brand-preview logo" src="/<?= h($tenant['logo_path']) ?>?v=<?= (int)@filemtime(__DIR__ . '/' . $tenant['logo_path']) ?>" alt="Current logo">
+          <?php else: ?>
+            <div class="brand-preview logo empty">No logo</div>
+          <?php endif; ?>
+          <form method="post" action="/admin/save-branding.php?slug=<?= h($slug) ?>" enctype="multipart/form-data" class="brand-form">
+            <input type="file" name="logo" accept="image/png,image/jpeg,image/webp" required>
+            <button class="btn" type="submit">Upload logo</button>
+          </form>
+        </div>
+        <p class="hint">Square, 256&times;256 recommended. PNG, JPG, or WebP, up to 2MB.</p>
+      </div>
+
+      <h2>Banner</h2>
+      <div class="card">
+        <div class="brand-row">
+          <?php if (!empty($tenant['banner_path'])): ?>
+            <img class="brand-preview banner" src="/<?= h($tenant['banner_path']) ?>?v=<?= (int)@filemtime(__DIR__ . '/' . $tenant['banner_path']) ?>" alt="Current banner">
+          <?php else: ?>
+            <div class="brand-preview banner empty">No banner</div>
+          <?php endif; ?>
+          <form method="post" action="/admin/save-branding.php?slug=<?= h($slug) ?>" enctype="multipart/form-data" class="brand-form">
+            <input type="file" name="banner" accept="image/png,image/jpeg,image/webp" required>
+            <button class="btn" type="submit">Upload banner</button>
+          </form>
+        </div>
+        <p class="hint">Wide, ~1600&times;400 (4:1) recommended. PNG, JPG, or WebP, up to 2MB.</p>
+      </div>
+    </div>
   </div>
 
   <script>
     const tabButtons = document.querySelectorAll('.tab-btn');
-    const tabPanels  = { roles: document.getElementById('tab-roles'), webhooks: document.getElementById('tab-webhooks'), raids: document.getElementById('tab-raids') };
+    const tabPanels  = { roles: document.getElementById('tab-roles'), webhooks: document.getElementById('tab-webhooks'), raids: document.getElementById('tab-raids'), branding: document.getElementById('tab-branding') };
     tabButtons.forEach(btn => {
       btn.addEventListener('click', () => {
         tabButtons.forEach(b => b.classList.remove('active'));
@@ -421,7 +485,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         if (btn.dataset.tab !== 'roles') history.replaceState(null, '', '#' + btn.dataset.tab);
       });
     });
-    if (location.hash === '#webhooks' || location.hash === '#raids') {
+    if (location.hash === '#webhooks' || location.hash === '#raids' || location.hash === '#branding') {
       document.querySelector('.tab-btn[data-tab="' + location.hash.slice(1) + '"]').click();
     }
 

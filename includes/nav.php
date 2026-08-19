@@ -57,7 +57,11 @@ function render_nav_shell($tenant, $user, $role, $active) {
     ?>
     <header class="rr-topbar">
       <a class="rr-brand" href="/<?= $slug ?>/">
-        <span class="rr-crest"><?= $crest ?></span>
+        <?php if (!empty($tenant['logo_path'])): ?>
+          <img class="rr-crest rr-crest-img" src="/<?= htmlspecialchars($tenant['logo_path']) ?>?v=<?= (int)@filemtime(__DIR__ . '/../' . $tenant['logo_path']) ?>" alt="">
+        <?php else: ?>
+          <span class="rr-crest"><?= $crest ?></span>
+        <?php endif; ?>
       </a>
       <div class="rr-server-switch">
         <button type="button" class="rr-switch-btn" id="rrSwitchBtn" aria-expanded="false">
