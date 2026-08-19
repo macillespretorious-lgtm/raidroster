@@ -179,6 +179,32 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     button.btn { display: inline-block; padding: 7px 16px; font: inherit; background: #5865f2; border: none; border-radius: 999px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     button.btn:hover { background: #4752c4; }
 
+    /* Preview modal: read-only rendering ported from raids/view.php, scoped under
+       .preview-modal so its class names (section-card, tbl-wrap, table.grid, ...) don't
+       collide with this editor's own same-named editing styles. */
+    .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500; align-items: center; justify-content: center; padding: 20px; }
+    .modal-backdrop.open { display: flex; }
+    .modal.preview-modal { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 22px; width: 100%; max-width: 960px; max-height: 90vh; overflow-y: auto; }
+    .preview-modal .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+    .preview-modal h2 { font-size: 16px; }
+    .preview-modal .preview-note { font-size: 12px; color: #7f8bad; margin-bottom: 16px; }
+    .preview-modal .section-card { border-radius: 12px; overflow: hidden; margin: 0; border: 1px solid rgba(255,255,255,0.08); }
+    .preview-modal .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
+    .preview-modal .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
+    .preview-modal .tbl-wrap { min-width: 0; max-width: 100%; }
+    .preview-modal .grid-scroll + .grid-scroll { margin-top: 2px; }
+    .preview-modal .tbl-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0; }
+    .preview-modal .group-tables { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; margin: 8px 0 4px 4px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,0.15); }
+    .preview-modal .grid-scroll { overflow-x: auto; }
+    .preview-modal table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
+    .preview-modal table.grid th, .preview-modal table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
+    .preview-modal table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
+    .preview-modal table.grid th.row-label { text-align: left; white-space: nowrap; }
+    .preview-modal td.cell { min-width: 90px; }
+    .preview-modal th.spacer-th, .preview-modal td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
+    .preview-modal .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
+    .preview-modal .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
+
     .add-section-bar { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
     .add-section-bar select { background: #111827; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 6px; }
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
@@ -194,6 +220,17 @@ function h($s) { return htmlspecialchars($s ?? ''); }
 
     <div class="tabs" id="tabsEl"></div>
     <div id="panelsEl"></div>
+  </div>
+
+  <div class="modal-backdrop" id="previewBackdrop">
+    <div class="modal preview-modal">
+      <div class="preview-head">
+        <h2 id="previewTitle">Preview</h2>
+        <button class="icon-btn" id="previewClose" type="button" title="Close">&times;</button>
+      </div>
+      <p class="preview-note">Shown as it will appear on a raid page &mdash; no assignment data exists at the template level.</p>
+      <div id="previewBody"></div>
+    </div>
   </div>
 
 <script>
@@ -426,6 +463,7 @@ function render() {
       const act = node.dataset.action;
       const id = node.dataset.id ? parseInt(node.dataset.id, 10) : null;
       if (act === 'rename-section') call({ action: 'update_section', id, title: node.value.trim() });
+      if (act === 'preview-section') openPreview(id);
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
@@ -752,6 +790,7 @@ function renderSection(sec) {
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};">
       <input class="title-input" data-action="rename-section" data-id="${sec.id}" value="${escAttr(sec.title)}">
+      <button class="icon-btn" data-action="preview-section" data-id="${sec.id}" title="Preview as it will look on a raid page">&#128065;</button>
       <button class="icon-btn" data-action="move-section-up" data-id="${sec.id}" title="Move up">&uarr;</button>
       <button class="icon-btn" data-action="move-section-down" data-id="${sec.id}" title="Move down">&darr;</button>
       <button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>
@@ -762,6 +801,113 @@ function renderSection(sec) {
     </div>
   </div>`;
 }
+
+// Preview modal: a read-only render of a section as it will actually look on a raid
+// page. Mirrors raids/view.php's rendering (same chunking/width helpers, same column-
+// group header row), but every data cell always shows the empty-slot placeholder since
+// no toon assignments exist at the template level, and the row-label column is always
+// shown (matching view.php's current behavior, which doesn't honor rowLabelWidth=0).
+function previewHeaderCellsForChunk(chunkCols) {
+  const out = [];
+  let i = 0;
+  while (i < chunkCols.length) {
+    const c = chunkCols[i];
+    if (c.kind === 'spacer') { out.push(`<th class="spacer-th"></th>`); i++; continue; }
+    const span = Math.min(c.headerColspan || 1, chunkCols.length - i);
+    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const style = c.headerColor ? ` style="background:${c.headerColor};color:${contrastText(c.headerColor)};"` : '';
+    out.push(`<th${colspanAttr}${style}>${esc(c.label)}</th>`);
+    i += span;
+  }
+  return out.join('');
+}
+
+function previewBodyCellsForRow(r, chunkCols, tb) {
+  const mergeByCol = {};
+  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+  const out = [];
+  let i = 0;
+  while (i < chunkCols.length) {
+    const c = chunkCols[i];
+    if (c.kind === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
+    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    out.push(`<td${colspanAttr} class="cell"><span class="empty-slot">+</span></td>`);
+    i += span;
+  }
+  return out.join('');
+}
+
+function previewColumnBlock(chunkCols, tb) {
+  const colHeaders = previewHeaderCellsForChunk(chunkCols);
+  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups);
+
+  const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
+    chunkCols.map(c => {
+      const w = colWidthPx(c, tb);
+      return `<col${w ? ` style="width:${w}px;"` : ''}>`;
+    }).join('') + `</colgroup>`;
+
+  const bodyRows = tb.rows.map(r => {
+    if (r.kind === 'spacer') {
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
+    }
+    return `<tr><th class="row-label">${esc(r.label)}</th>${previewBodyCellsForRow(r, chunkCols, tb)}</tr>`;
+  }).join('');
+
+  return `<div class="grid-scroll">
+      <table class="grid">
+        ${colgroup}
+        ${groupRow}
+        <tr>${groupRow ? '' : '<th></th>'}${colHeaders}</tr>
+        ${bodyRows}
+      </table>
+    </div>`;
+}
+
+function previewRenderTable(tb, groupsEnabled) {
+  const groupsWithTables = groupsEnabled ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
+  const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => previewColumnBlock(chunkCols, tb)).join('');
+  const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
+
+  const nestedGroupsHtml = groupsWithTables.map(g => `
+    <div class="group-tables">
+      ${g.tables.map(ctb => previewRenderTable(ctb, groupsEnabled)).join('')}
+    </div>`).join('');
+
+  return `<div class="tbl-wrap">
+    ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
+    ${blocks}
+    ${nestedGroupsHtml}
+  </div>`;
+}
+
+function renderPreviewSection(sec) {
+  const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
+  const groupsEnabled = sec.kind !== 'roster';
+  return `<div class="section-card">
+    <div class="section-head" style="background:${meta.color};">${esc(sec.title)}</div>
+    <div class="section-body">
+      ${sec.tables.map(tb => previewRenderTable(tb, groupsEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
+    </div>
+  </div>`;
+}
+
+function openPreview(secId) {
+  const sec = sections.find(s => s.id === secId);
+  if (!sec) return;
+  document.getElementById('previewTitle').textContent = sec.title || (KIND_META[sec.kind] || {}).label || 'Preview';
+  document.getElementById('previewBody').innerHTML = renderPreviewSection(sec);
+  document.getElementById('previewBackdrop').classList.add('open');
+}
+function closePreview() {
+  document.getElementById('previewBackdrop').classList.remove('open');
+}
+document.getElementById('previewClose').addEventListener('click', closePreview);
+document.getElementById('previewBackdrop').addEventListener('click', e => {
+  if (e.target.id === 'previewBackdrop') closePreview();
+});
 
 render();
 checkLock();
