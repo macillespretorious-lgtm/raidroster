@@ -3,20 +3,44 @@
 
 .rr-topbar {
   position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; align-items: center; gap: 10px;
   padding: 0 20px; height: 56px;
   background: #111827; border-bottom: 1px solid rgba(255,255,255,0.08);
 }
-.rr-brand { display: flex; align-items: center; gap: 9px; min-width: 0; text-decoration: none; color: inherit; }
+.rr-brand { display: flex; align-items: center; min-width: 0; text-decoration: none; color: inherit; flex-shrink: 0; }
 .rr-crest {
   width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
   background: linear-gradient(135deg, #5865f2, #8791f7);
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; font-weight: 800; color: #fff;
 }
-.rr-brand-name { font-size: 13.5px; font-weight: 700; color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rr-server-switch { position: relative; min-width: 0; }
+.rr-switch-btn {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  background: none; border: none; padding: 6px 8px; margin: 0 -8px; border-radius: 7px;
+  font: inherit; cursor: pointer; color: inherit;
+}
+.rr-switch-btn:hover { background: rgba(255,255,255,0.06); }
+.rr-switch-name { font-size: 13.5px; font-weight: 700; color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rr-switch-chevron { color: #7f8bad; flex-shrink: 0; transition: transform .15s ease; }
+.rr-switch-btn[aria-expanded="true"] .rr-switch-chevron { transform: rotate(180deg); }
+.rr-switch-panel {
+  display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 25;
+  min-width: 220px; max-width: 320px; max-height: 60vh; overflow-y: auto;
+  background: #171f33; border: 1px solid rgba(255,255,255,0.1); border-radius: 10px;
+  padding: 6px; box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+}
+.rr-switch-panel.open { display: block; }
+.rr-switch-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border-radius: 7px; font-size: 13px; font-weight: 600;
+  color: #e8ecff; text-decoration: none;
+}
+a.rr-switch-item:hover { background: rgba(88,101,242,0.15); }
+.rr-switch-item.current { color: #a3adfa; background: rgba(88,101,242,0.1); }
+.rr-switch-role { font-size: 10.5px; font-weight: 600; color: #7f8bad; text-transform: capitalize; flex-shrink: 0; }
 
-.rr-user { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.rr-user { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: auto; }
 .rr-who { text-align: right; line-height: 1.3; }
 .rr-u-name { display: block; font-size: 12px; font-weight: 600; color: #e8ecff; }
 .rr-u-role { display: block; font-size: 10.5px; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; }
@@ -27,7 +51,8 @@
 }
 .rr-logout { color: #7f8bad; display: flex; align-items: center; padding: 5px; border-radius: 6px; flex-shrink: 0; }
 .rr-logout:hover { color: #e88585; background: rgba(224,85,85,0.1); }
-.rr-logout:focus-visible, .rr-nav-item:focus-visible, .rr-brand:focus-visible {
+.rr-logout:focus-visible, .rr-nav-item:focus-visible, .rr-brand:focus-visible,
+.rr-switch-btn:focus-visible, .rr-switch-item:focus-visible {
   outline: 2px solid #5865f2; outline-offset: 2px;
 }
 

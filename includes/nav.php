@@ -1,6 +1,7 @@
 <?php
 // Shared bottom-tab navigation shell for tenant pages (home / toons / admin).
 // Usage: nav_asset_link() in <head>, render_nav_shell(...) right after <body>.
+require_once __DIR__ . '/db.php';
 
 function nav_asset_link() {
     return '<link rel="stylesheet" href="/assets/nav.css">';
@@ -37,12 +38,37 @@ function render_nav_shell($tenant, $user, $role, $active) {
     $uname   = htmlspecialchars($user['username'] ?? '');
     $initial = htmlspecialchars(strtoupper(substr($user['username'] ?? '?', 0, 1)));
     $roleTxt = htmlspecialchars(str_replace('_', ' ', $role ?? ''));
+
+    // Live membership list (not the stale Discord-session cache from login) so a guild
+    // created/joined after this user's last login still shows up in the switcher.
+    $pdo = db_connect();
+    $stmt = $pdo->prepare(
+        'SELECT g.slug, g.name, gu.role FROM guilds g
+         JOIN guild_users gu ON gu.guild_id = g.id
+         WHERE gu.discord_user_id = ? ORDER BY g.name'
+    );
+    $stmt->execute([$user['id']]);
+    $memberships = $stmt->fetchAll(PDO::FETCH_ASSOC);
     ?>
     <header class="rr-topbar">
       <a class="rr-brand" href="/<?= $slug ?>/">
         <span class="rr-crest"><?= $crest ?></span>
-        <span class="rr-brand-name"><?= $name ?></span>
       </a>
+      <div class="rr-server-switch">
+        <button type="button" class="rr-switch-btn" id="rrSwitchBtn" aria-expanded="false">
+          <span class="rr-switch-name"><?= $name ?></span>
+          <svg class="rr-switch-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="rr-switch-panel" id="rrSwitchPanel">
+          <?php foreach ($memberships as $m): ?>
+            <?php if ($m['slug'] === $tenant['slug']): ?>
+              <span class="rr-switch-item current"><?= htmlspecialchars($m['name']) ?><span class="rr-switch-role"><?= htmlspecialchars(str_replace('_', ' ', $m['role'])) ?></span></span>
+            <?php else: ?>
+              <a class="rr-switch-item" href="/<?= htmlspecialchars($m['slug']) ?>/"><?= htmlspecialchars($m['name']) ?><span class="rr-switch-role"><?= htmlspecialchars(str_replace('_', ' ', $m['role'])) ?></span></a>
+            <?php endif; ?>
+          <?php endforeach; ?>
+        </div>
+      </div>
       <div class="rr-user">
         <span class="rr-who">
           <span class="rr-u-name"><?= $uname ?></span>
@@ -63,5 +89,22 @@ function render_nav_shell($tenant, $user, $role, $active) {
         </a>
       <?php endforeach; ?>
     </nav>
+    <script>
+      (function () {
+        var btn = document.getElementById('rrSwitchBtn');
+        var panel = document.getElementById('rrSwitchPanel');
+        if (!btn || !panel) return;
+        function close() { panel.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); }
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var open = panel.classList.toggle('open');
+          btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+        document.addEventListener('click', function (e) {
+          if (!panel.contains(e.target) && e.target !== btn) close();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+      })();
+    </script>
     <?php
 }
