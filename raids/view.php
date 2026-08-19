@@ -26,6 +26,8 @@ if (!$raid) {
 }
 
 $canManage = role_at_least($role, 'raid_management');
+$isAdmin = role_at_least($role, 'admin');
+$templateId = $raid['template_id'] !== null ? (int)$raid['template_id'] : null;
 
 function fetch_table_full($pdo, $tb) {
     $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id, header_colspan FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
@@ -195,6 +197,35 @@ function fmtTime($t) {
     .lock-banner { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; background: rgba(240,128,48,0.1); border: 1px solid rgba(240,128,48,0.3); color: #f0a030; font-size: 12px; }
     .lock-banner button.btn { background: #e05555; padding: 5px 12px; font-size: 11px; border: none; border-radius: 999px; color: #fff; font-weight: 600; cursor: pointer; }
     .lock-banner button.btn:hover { background: #c94444; }
+
+    .sync-bar { margin: 8px 0 4px; }
+    .btn-sync { background: rgba(88,101,242,0.15); border: 1px solid rgba(88,101,242,0.4); color: #b9c0ff; font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+    .btn-sync:hover:not(:disabled) { background: rgba(88,101,242,0.28); }
+    .btn-sync:disabled { opacity: .4; cursor: not-allowed; }
+
+    .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500; align-items: center; justify-content: center; padding: 20px; }
+    .modal-backdrop.open { display: flex; }
+    .modal.sync-modal { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 22px; width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto; }
+    .modal.sync-modal h2 { font-size: 17px; margin-bottom: 14px; }
+    .diff-group { margin: 14px 0; }
+    .diff-group h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #7f8bad; margin-bottom: 6px; }
+    .diff-list { list-style: none; font-size: 13px; }
+    .diff-list li { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .diff-added { color: #6fd58a; }
+    .diff-removed { color: #e88585; }
+    .diff-changed { color: #f0c04a; }
+    .diff-changed .fields { color: #7f8bad; font-size: 11px; }
+    .diff-empty { color: #7f8bad; font-size: 13px; padding: 10px 0; }
+    .removal-warning { background: rgba(224,85,85,0.1); border: 1px solid rgba(224,85,85,0.35); color: #f0a0a0; border-radius: 8px; padding: 10px 14px; font-size: 12.5px; margin: 14px 0; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+    .modal-actions button { font-size: 13px; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; }
+    .btn-cancel { background: rgba(255,255,255,0.08); color: #e8ecff; }
+    .btn-cancel:hover { background: rgba(255,255,255,0.15); }
+    .btn-confirm { background: #4a63e0; color: #fff; }
+    .btn-confirm:hover { background: #3b52c4; }
+    .btn-confirm.danger { background: #c94444; }
+    .btn-confirm.danger:hover { background: #b03636; }
+    .btn-confirm:disabled { opacity: .5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -203,6 +234,7 @@ function fmtTime($t) {
     <a class="back" href="/<?= h($slug) ?>/raids">&larr; Back to calendar</a>
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
     <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
+    <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -213,12 +245,19 @@ function fmtTime($t) {
     <div id="sectionsEl"></div>
   </div>
 
+  <div class="modal-backdrop" id="syncModalBackdrop">
+    <div class="modal sync-modal" id="syncModalContent"></div>
+  </div>
+
 <script>
 const SLUG = <?= json_encode($slug) ?>;
 const CAN_MANAGE = <?= json_encode($canManage) ?>;
 const CELLS_SAVE_URL = <?= json_encode('/raids/cells-save.php?slug=' . $slug) ?>;
 const STRUCTURE_SAVE_URL = <?= json_encode('/raids/structure-save.php?slug=' . $slug) ?>;
 const LOCK_URL = <?= json_encode('/raids/lock-save.php?slug=' . $slug) ?>;
+const IS_ADMIN = <?= json_encode($isAdmin) ?>;
+const TEMPLATE_ID = <?= json_encode($templateId) ?>;
+const PUSH_TEMPLATE_URL = <?= json_encode('/raids/push-template.php?slug=' . $slug) ?>;
 const RAID_ID = <?= json_encode($raidId) ?>;
 const USER_ID = <?= json_encode($user['id']) ?>;
 let sections = <?= json_encode($sections) ?>;
@@ -296,6 +335,107 @@ function renderLockBar() {
       }
     });
   }
+  renderSyncBar();
+}
+
+// Push-template sync: structural resync of this raid from its linked template, gated at
+// admin (a structural change, not ordinary cell assignment). Two-step diff/apply matching
+// push-template.php's contract; a second explicit confirm is required before any removals.
+function renderSyncBar() {
+  const el = document.getElementById('syncBar');
+  if (!el) return;
+  const disabled = !!lockedByOther;
+  el.innerHTML = `<button type="button" class="btn-sync" id="syncBtn"${disabled ? ' disabled title="Locked by another editor"' : ''}>&#8635; Sync from template</button>`;
+  const btn = document.getElementById('syncBtn');
+  if (btn && !disabled) btn.addEventListener('click', openSyncModal);
+}
+
+const DIFF_GROUP_LABELS = { sections: 'Sections', tables: 'Tables', groups: 'Column groups', columns: 'Columns', rows: 'Rows' };
+const DIFF_KEYS = ['sections', 'tables', 'groups', 'columns', 'rows'];
+
+function diffHasRemovals(diff) {
+  return DIFF_KEYS.some(k => diff[k].removed.length > 0);
+}
+
+function renderDiffBody(diff) {
+  let html = '';
+  let hasAny = false;
+  for (const k of DIFF_KEYS) {
+    const d = diff[k];
+    const items = [];
+    d.added.forEach(x => items.push(`<li class="diff-added">+ ${esc(x.label)}</li>`));
+    d.changed.forEach(x => items.push(`<li class="diff-changed">~ ${esc(x.label)} <span class="fields">(${x.changes.join(', ')})</span></li>`));
+    d.removed.forEach(x => items.push(`<li class="diff-removed">&minus; ${esc(x.label)}</li>`));
+    if (!items.length) continue;
+    hasAny = true;
+    html += `<div class="diff-group"><h3>${DIFF_GROUP_LABELS[k]}</h3><ul class="diff-list">${items.join('')}</ul></div>`;
+  }
+  if (!hasAny) html = '<p class="diff-empty">No differences &mdash; this raid already matches the template.</p>';
+  return { html, hasAny };
+}
+
+function openSyncModal() {
+  const backdrop = document.getElementById('syncModalBackdrop');
+  const body = document.getElementById('syncModalContent');
+  body.innerHTML = '<h2>Sync from template</h2><p class="diff-empty">Loading differences&hellip;</p>';
+  backdrop.classList.add('open');
+  fetch(PUSH_TEMPLATE_URL, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'diff', raidId: RAID_ID }),
+  }).then(r => r.json()).then(d => {
+    if (!d.success) { showSyncModalError(d.error || 'Could not compute diff.'); return; }
+    renderSyncModalDiff(d.diff, false);
+  }).catch(() => showSyncModalError('Network error — could not compute diff.'));
+}
+
+function showSyncModalError(msg) {
+  const body = document.getElementById('syncModalContent');
+  body.innerHTML = `<h2>Sync from template</h2><p class="diff-empty">${esc(msg)}</p>
+    <div class="modal-actions"><button type="button" class="btn-cancel" id="syncClose">Close</button></div>`;
+  document.getElementById('syncClose').addEventListener('click', closeSyncModal);
+}
+
+function closeSyncModal() {
+  document.getElementById('syncModalBackdrop').classList.remove('open');
+}
+
+function renderSyncModalDiff(diff, confirmingRemovals) {
+  const body = document.getElementById('syncModalContent');
+  const { html, hasAny } = renderDiffBody(diff);
+  const removals = diffHasRemovals(diff);
+  let warning = '';
+  if (removals && confirmingRemovals) {
+    const n = DIFF_KEYS.reduce((sum, k) => sum + diff[k].removed.length, 0);
+    warning = `<div class="removal-warning"><strong>Warning:</strong> this will permanently delete ${n} item(s) shown above in red and any toon assignments in them. This cannot be undone.</div>`;
+  }
+  const applyLabel = removals && !confirmingRemovals ? 'Review removals' : 'Apply sync';
+  const applyClass = confirmingRemovals ? 'btn-confirm danger' : 'btn-confirm';
+  body.innerHTML = `<h2>Sync from template</h2>${html}${warning}
+    <div class="modal-actions">
+      <button type="button" class="btn-cancel" id="syncCancel">Cancel</button>
+      ${hasAny ? `<button type="button" class="${applyClass}" id="syncApply">${applyLabel}</button>` : ''}
+    </div>`;
+  document.getElementById('syncCancel').addEventListener('click', closeSyncModal);
+  const applyBtn = document.getElementById('syncApply');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      if (removals && !confirmingRemovals) { renderSyncModalDiff(diff, true); return; }
+      applySync(removals);
+    });
+  }
+}
+
+function applySync(confirmRemovals) {
+  const applyBtn = document.getElementById('syncApply');
+  if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Applying…'; }
+  fetch(PUSH_TEMPLATE_URL, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'apply', raidId: RAID_ID, confirmRemovals: !!confirmRemovals }),
+  }).then(r => r.json()).then(d => {
+    if (!d.success) { alert(d.error || 'Sync failed'); closeSyncModal(); return; }
+    closeSyncModal();
+    location.reload();
+  }).catch(() => { alert('Network error — sync may not have applied.'); closeSyncModal(); });
 }
 
 const KIND_META = {
