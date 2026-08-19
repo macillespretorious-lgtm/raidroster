@@ -122,7 +122,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .icon-btn.danger:hover { background: rgba(224,85,85,0.7); }
 
     .tbl-card { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; min-width: 0; max-width: 100%; }
-    .tbl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .tbl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; cursor: grab; }
+    .tbl-head:active { cursor: grabbing; }
     .tbl-head input.tbl-title { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; font-weight: 600; padding: 6px 9px; border-radius: 6px; flex: 1; min-width: 0; }
     .grid-scroll { overflow-x: auto; }
     .grid-scroll + .grid-scroll { margin-top: 2px; }
@@ -147,12 +148,16 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .tbl-sizing { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; }
     .col-th-inner { display: flex; flex-direction: column; gap: 3px; align-items: center; min-width: 0; }
     .row-th-inner { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-    .row-th-top { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
+    .row-th-top { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; cursor: grab; }
+    .row-th-top:active { cursor: grabbing; }
+    .col-th-top { cursor: grab; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 2px 0; }
+    .col-th-top:active { cursor: grabbing; }
     .col-th-row2 { display: flex; gap: 3px; align-items: center; width: 100%; min-width: 0; }
     .col-th-row2 .swatch { flex-shrink: 0; }
     .col-th-row2 .width-input { flex: 1 1 0; min-width: 0; width: 0; }
     .group-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
-    .group-pill { display: flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .group-pill { display: flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; cursor: grab; }
+    .group-pill:active { cursor: grabbing; }
     .group-pill input.group-title { background: transparent; border: none; color: inherit; font: inherit; font-weight: 700; width: auto; max-width: 110px; }
     .group-pill .icon-btn { width: 18px; height: 18px; font-size: 10px; background: rgba(0,0,0,0.25); }
     .add-group-btn { background: none; border: 1px dashed rgba(255,255,255,0.25); color: #a8b4d0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; }
@@ -397,7 +402,34 @@ function findRow(id) {
   return null;
 }
 
+// Whole-entity drag with FLIP-animated live reflow, vanilla JS (no library). dragData
+// tracks the entity being dragged; dragSnapshot is a pre-drag JSON snapshot of `sections`
+// restored on cancel (drop outside any valid zone); dragCompleted marks a successful drop so
+// dragend knows not to restore; dragOverKey debounces re-render to only fire when the
+// candidate landing slot actually changes (dragover fires continuously on mousemove).
 let dragData = null;
+let dragSnapshot = null;
+let dragCompleted = false;
+let dragOverKey = null;
+
+// First-Last-Invert-Play: snapshot every draggable entity's position, run the DOM mutation,
+// then animate each entity from its old position to its new one via a transform (cheaper and
+// smoother than animating layout properties directly).
+function withFlip(mutateFn) {
+  const before = new Map();
+  document.querySelectorAll('[data-flip-id]').forEach(el => before.set(el.dataset.flipId, el.getBoundingClientRect()));
+  mutateFn();
+  document.querySelectorAll('[data-flip-id]').forEach(el => {
+    const b = before.get(el.dataset.flipId);
+    if (!b) return;
+    const a = el.getBoundingClientRect();
+    const dx = b.left - a.left, dy = b.top - a.top;
+    if (!dx && !dy) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px,${dy}px)`;
+    requestAnimationFrame(() => { el.style.transition = 'transform 180ms ease'; el.style.transform = ''; });
+  });
+}
 
 function getSiblingList(kind, parentKind, parentId) {
   if (kind === 'table') {
@@ -412,15 +444,65 @@ function getSiblingList(kind, parentKind, parentId) {
   return [];
 }
 
-function reorderList(kind, parentKind, parentId, movedId, targetId, before) {
-  const ids = getSiblingList(kind, parentKind, parentId).map(x => x.id).filter(id => id !== movedId);
-  let idx = ids.indexOf(targetId);
-  if (idx === -1) idx = ids.length - 1;
-  const insertAt = before ? idx : idx + 1;
-  ids.splice(insertAt, 0, movedId);
+// Applies a candidate reorder/reparent to the in-memory `sections` tree so the live drag
+// preview (siblings sliding apart to open a landing gap) reflects it immediately, ahead of
+// any server round-trip. targetId === null means "drop at the end of this container" (used
+// for the table-container catch-all zones — empty containers, or dropping past the last
+// item). Tables are the only kind that can cross containers (section <-> group, or between
+// groups); when parentKind/parentId differ from dragData's current parent, the dragged
+// table is spliced out of its old sibling array and into the new one first ("phantom
+// reparent") before computing its position within the new list — dragData's parent is then
+// updated so subsequent dragover ticks compute siblings against the new container.
+function previewMove(kind, parentKind, parentId, movedId, targetId, before) {
+  if (kind === 'table' && (parentKind !== dragData.parentKind || parentId !== dragData.parentId)) {
+    const srcList = getSiblingList('table', dragData.parentKind, dragData.parentId);
+    const idx = srcList.findIndex(t => t.id === movedId);
+    if (idx === -1) return;
+    const [tb] = srcList.splice(idx, 1);
+    const destList = getSiblingList('table', parentKind, parentId);
+    let insertAt = destList.length;
+    if (targetId !== null) {
+      const ti = destList.findIndex(t => t.id === targetId);
+      if (ti !== -1) insertAt = before ? ti : ti + 1;
+    }
+    destList.splice(insertAt, 0, tb);
+    dragData.parentKind = parentKind;
+    dragData.parentId = parentId;
+    withFlip(() => render());
+    return;
+  }
+  const list = getSiblingList(kind, parentKind, parentId);
+  const fromIdx = list.findIndex(x => x.id === movedId);
+  if (fromIdx === -1) return;
+  if (targetId === null) {
+    if (fromIdx === list.length - 1) return;
+    const [item] = list.splice(fromIdx, 1);
+    list.push(item);
+    withFlip(() => render());
+    return;
+  }
+  let toIdx = list.findIndex(x => x.id === targetId);
+  if (toIdx === -1) return;
+  if (!before) toIdx++;
+  if (fromIdx < toIdx) toIdx--;
+  if (fromIdx === toIdx) return;
+  const [item] = list.splice(fromIdx, 1);
+  list.splice(toIdx, 0, item);
+  withFlip(() => render());
+}
+
+// The in-memory `sections` tree already reflects the final landing arrangement (every
+// dragover tick applied it via previewMove), so finalizing a drop just persists the current
+// sibling order for whichever container the dragged entity ended up in.
+function finalizeDrop() {
+  if (!dragData) return;
+  dragCompleted = true;
+  const { kind, parentId, parentKind } = dragData;
+  const ids = getSiblingList(kind, parentKind, parentId).map(x => x.id);
   const payload = { action: 'reorder', kind, parentId, orderedIds: ids };
   if (kind === 'table') payload.parentKind = parentKind;
   call(payload);
+  dragData = null; dragSnapshot = null; dragOverKey = null;
 }
 
 function call(payload) {
@@ -516,48 +598,85 @@ function render() {
 
   el.querySelectorAll('[data-drag-kind]').forEach(handle => {
     handle.addEventListener('dragstart', e => {
+      if (lockedByOther) { e.preventDefault(); return; }
       dragData = {
         kind: handle.dataset.dragKind,
         id: parseInt(handle.dataset.dragId, 10),
         parentId: parseInt(handle.dataset.dragParent, 10),
         parentKind: handle.dataset.dragParentKind || 'table',
       };
+      dragSnapshot = JSON.stringify(sections);
+      dragCompleted = false;
+      dragOverKey = null;
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', String(dragData.id));
+      // Snapshot the real entity element (its nearest data-flip-id ancestor) as the drag
+      // image so the ghost under the cursor looks like the thing being moved, not a
+      // generic browser default.
+      const ghost = handle.closest('[data-flip-id]') || handle;
+      const r = ghost.getBoundingClientRect();
+      e.dataTransfer.setDragImage(ghost, e.clientX - r.left, e.clientY - r.top);
+    });
+    handle.addEventListener('dragend', () => {
+      if (!dragCompleted && dragSnapshot) {
+        const snap = JSON.parse(dragSnapshot);
+        withFlip(() => { sections = snap; render(); });
+      }
+      dragData = null; dragSnapshot = null; dragCompleted = false; dragOverKey = null;
     });
   });
 
   el.querySelectorAll('[data-drop-kind]').forEach(zone => {
     const dropKind = zone.dataset.dropKind;
-    const dropId = parseInt(zone.dataset.dropId, 10);
+    const dropId = zone.dataset.dropId !== undefined ? parseInt(zone.dataset.dropId, 10) : null;
     const dropParent = parseInt(zone.dataset.dropParent, 10);
     const dropParentKind = zone.dataset.dropParentKind || 'table';
     zone.addEventListener('dragover', e => {
       if (!dragData) return;
+      // Catch-all container zone: lets a table be dropped into an empty section/group, or
+      // past the last table in one — per-card drop zones only cover reordering next to an
+      // existing table.
+      if (dropKind === 'table-container') {
+        if (dragData.kind !== 'table') return;
+        e.preventDefault();
+        e.stopPropagation();
+        zone.classList.add('drag-over');
+        const key = `container:${dropParentKind}:${dropParent}`;
+        if (dragOverKey === key) return;
+        dragOverKey = key;
+        previewMove('table', dropParentKind, dropParent, dragData.id, null, true);
+        return;
+      }
       const acceptsColumnOntoGroup = dropKind === 'group' && dragData.kind === 'column' && dragData.parentId === dropParent;
       const sameKind = dragData.kind === dropKind;
       if (!acceptsColumnOntoGroup && !sameKind) return;
       e.preventDefault();
+      e.stopPropagation();
       zone.classList.add('drag-over');
-    });
-    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-    zone.addEventListener('drop', e => {
-      e.preventDefault();
-      zone.classList.remove('drag-over');
-      if (!dragData) return;
-      if (dragData.kind === 'column' && dropKind === 'group' && dragData.parentId === dropParent) {
-        const c = findColumn(dragData.id);
-        call({ action: 'update_column', id: dragData.id, label: c.label, groupId: dropId });
-        dragData = null;
-        return;
-      }
-      if (dragData.kind !== dropKind || dragData.id === dropId) { dragData = null; return; }
+      if (acceptsColumnOntoGroup) return;
       const rect = zone.getBoundingClientRect();
       const before = dropKind === 'row'
         ? (e.clientY - rect.top) < rect.height / 2
         : (e.clientX - rect.left) < rect.width / 2;
-      reorderList(dropKind, dropParentKind, dropParent, dragData.id, dropId, before);
-      dragData = null;
+      const key = `${dropKind}:${dropParentKind}:${dropParent}:${dropId}:${before}`;
+      if (dragOverKey === key) return;
+      dragOverKey = key;
+      previewMove(dropKind, dropParentKind, dropParent, dragData.id, dropId, before);
+    });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.remove('drag-over');
+      if (!dragData) return;
+      if (dropKind === 'group' && dragData.kind === 'column' && dragData.parentId === dropParent) {
+        const c = findColumn(dragData.id);
+        dragCompleted = true;
+        call({ action: 'update_column', id: dragData.id, label: c.label, groupId: dropId });
+        dragData = null; dragSnapshot = null; dragOverKey = null;
+        return;
+      }
+      finalizeDrop();
     });
   });
 
@@ -565,13 +684,15 @@ function render() {
 }
 
 function colHeaderCell(c, tb, groupsEnabled, span) {
-  const dragHandle = `<span class="drag-handle" draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}" title="Drag to reorder">&#10021;</span>`;
+  const dragBar = `<div class="col-th-top" draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}" title="Drag to reorder"><span class="drag-handle">&#10021;</span></div>`;
   const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
   if (c.kind === 'spacer') {
     return `<th class="spacer-th" data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
-      <div class="col-th-inner">
-        ${dragHandle}
-        <span class="spacer-label">spacer</span>
+      <div class="col-th-inner" data-flip-id="column:${c.id}">
+        <div class="col-th-top" draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}" title="Drag to reorder">
+          <span class="drag-handle">&#10021;</span>
+          <span class="spacer-label">spacer</span>
+        </div>
         <div class="cell-actions">
           <button class="icon-btn" data-action="spacer-col-width-dec" data-id="${c.id}" title="Narrower">&minus;</button>
           <button class="icon-btn" data-action="spacer-col-width-inc" data-id="${c.id}" title="Wider">+</button>
@@ -592,8 +713,8 @@ function colHeaderCell(c, tb, groupsEnabled, span) {
     ? `<button class="icon-btn" data-action="split-header" data-id="${c.id}" title="Unmerge header">&#8622;</button>`
     : '';
   return `<th${colspanAttr} data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
-      <div class="col-th-inner">
-        ${dragHandle}
+      <div class="col-th-inner" data-flip-id="column:${c.id}">
+        ${dragBar}
         <input class="lbl-input" data-action="rename-col" data-id="${c.id}" placeholder="Label" value="${escAttr(c.label)}">
         <div class="col-th-row2">
           <input type="color" class="swatch" data-action="col-header-color" data-id="${c.id}" value="${c.headerColor || '#1a2338'}" title="Header color">
@@ -631,8 +752,8 @@ function groupHeaderRow(cols, columnGroups) {
 
 function groupStrip(tb) {
   const pills = tb.columnGroups.map(g => `
-    <div class="group-pill" data-drop-kind="group" data-drop-id="${g.id}" data-drop-parent="${tb.id}" style="background:${g.color};color:${contrastText(g.color)};">
-      <span class="drag-handle" draggable="true" data-drag-kind="group" data-drag-id="${g.id}" data-drag-parent="${tb.id}" title="Drag to reorder or move to another table, or drop a column here to assign it" style="color:inherit;opacity:.75;">&#10021;</span>
+    <div class="group-pill" data-flip-id="group:${g.id}" draggable="true" data-drag-kind="group" data-drag-id="${g.id}" data-drag-parent="${tb.id}" data-drop-kind="group" data-drop-id="${g.id}" data-drop-parent="${tb.id}" title="Drag to reorder, or drop a column here to assign it" style="background:${g.color};color:${contrastText(g.color)};">
+      <span class="drag-handle" style="color:inherit;opacity:.75;">&#10021;</span>
       <input class="group-title" data-action="rename-group" data-id="${g.id}" value="${escAttr(g.title)}">
       <input type="color" class="swatch" data-action="recolor-group" data-id="${g.id}" value="${g.color}" title="Group color">
       <button class="icon-btn" data-action="add-table-to-group" data-id="${g.id}" title="Add a table to this group">+T</button>
@@ -642,12 +763,13 @@ function groupStrip(tb) {
 }
 
 function renderRowHeader(r, tb, showRowHeader) {
-  const dragHandle = `<span class="drag-handle" draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}" title="Drag to reorder">&#10021;</span>`;
+  const dragHandle = `<span class="drag-handle">&#10021;</span>`;
   const deleteBtn = `<button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>`;
+  const dragAttrs = `draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}" title="Drag to reorder"`;
   if (r.kind === 'spacer') {
     return `<th class="spacer-th" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
-      <div class="row-th-inner">
-        <div class="row-th-top">${dragHandle}${deleteBtn}</div>
+      <div class="row-th-inner" data-flip-id="row:${r.id}">
+        <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
         <span class="spacer-label">spacer</span>
         <div class="cell-actions">
           <button class="icon-btn" data-action="spacer-row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>
@@ -660,8 +782,8 @@ function renderRowHeader(r, tb, showRowHeader) {
     ? `<input class="lbl-input" data-action="rename-row" data-id="${r.id}" placeholder="Label" value="${escAttr(r.label)}">`
     : '';
   return `<th data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
-    <div class="row-th-inner">
-      <div class="row-th-top">${dragHandle}${deleteBtn}</div>
+    <div class="row-th-inner" data-flip-id="row:${r.id}">
+      <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
       ${labelInput}
     </div>
   </th>`;
@@ -758,13 +880,13 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
   const titleHtml = `<input class="tbl-title" data-action="rename-table" data-id="${tb.id}" placeholder="Table name (optional)" value="${escAttr(tb.title)}" style="color:${titleColor};">`;
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
-    <div class="group-tables">
+    <div class="group-tables" data-drop-kind="table-container" data-drop-parent="${g.id}" data-drop-parent-kind="group">
       ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, groupsEnabled)).join('')}
     </div>`).join('');
 
-  return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}">
-    <div class="tbl-head" style="${headerStyle}">
-      <span class="drag-handle" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="color:${titleColor};opacity:.75;">&#10021;</span>
+  return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}" data-flip-id="table:${tb.id}">
+    <div class="tbl-head" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="${headerStyle}">
+      <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
       <input type="color" class="swatch" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
       <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="1" title="Default column width in units (1 unit = ${COL_UNIT_PX}px)"></div>
@@ -795,7 +917,7 @@ function renderSection(sec) {
       <button class="icon-btn" data-action="move-section-down" data-id="${sec.id}" title="Move down">&darr;</button>
       <button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>
     </div>
-    <div class="section-body">
+    <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section">
       ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled)).join('') || '<p class="empty">No tables yet.</p>'}
       <button class="btn" data-action="add-table-to-section" data-id="${sec.id}">+ Table</button>
     </div>
