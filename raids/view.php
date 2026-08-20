@@ -154,6 +154,8 @@ function fmtTime($t) {
     .pool-toolbar { margin: 8px 0 4px; }
     .btn-pool-toggle { background: rgba(88,101,242,0.15); border: 1px solid rgba(88,101,242,0.4); color: #b9c0ff; font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
     .btn-pool-toggle:hover { background: rgba(88,101,242,0.28); }
+    .attendance-status { font-size: 12px; color: #7f8bad; margin-left: 2px; }
+    .attendance-status.locked { color: #6fcf97; font-weight: 600; }
     .pool-drawer {
       position: fixed; top: 0; right: 0; bottom: 0; width: 300px; max-width: 90vw; z-index: 400;
       background: #111827; border-left: 1px solid rgba(255,255,255,0.1); box-shadow: -8px 0 24px rgba(0,0,0,0.35);
@@ -274,7 +276,7 @@ function fmtTime($t) {
     foreach ($sections as $s) { if ($s['kind'] === 'healer') { $hasHealerSection = true; break; } }
     $exportEnabled = $exportTemplate !== null && $hasHealerSection;
     ?>
-    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="eraExportBtn"<?= $exportEnabled ? '' : ' disabled title="Configure an export template and a Healer Assignments section on this raid\'s template first"' ?>>Era export (healing)</button> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
+    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="eraExportBtn"<?= $exportEnabled ? '' : ' disabled title="Configure an export template and a Healer Assignments section on this raid\'s template first"' ?>>Era export (healing)</button> <button type="button" class="btn-pool-toggle" id="attendanceLockBtn">Attendance lock-in</button> <span id="attendanceStatus" class="attendance-status"></span> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -374,6 +376,7 @@ const POOL_SAVE_URL = <?= json_encode('/raids/pool-save.php?slug=' . $slug) ?>;
 const IMPORT_URL = <?= json_encode('/raids/import-signups.php?slug=' . $slug) ?>;
 const WEBHOOKS = <?= json_encode($webhooks) ?>;
 const EXPORT_TEMPLATE = <?= json_encode($exportTemplate) ?>;
+const ATTENDANCE_SAVE_URL = <?= json_encode('/raids/attendance-save.php?slug=' . $slug) ?>;
 let stampToon = null;
 let importRows = [];
 
@@ -1442,8 +1445,46 @@ function wireClearAll() {
   });
 }
 
+function fmtLockTime(locked_at) {
+  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(locked_at || '');
+  if (!m) return '';
+  return m[4] + ':' + m[5];
+}
+
+function renderAttendanceStatus(d) {
+  const el = document.getElementById('attendanceStatus');
+  if (!el) return;
+  if (d && d.lockedAt) {
+    el.textContent = 'Locked ✓ ' + fmtLockTime(d.lockedAt) + ' (' + d.count + ')';
+    el.classList.add('locked');
+  } else {
+    el.textContent = '';
+    el.classList.remove('locked');
+  }
+}
+
+function attendanceCall(body) {
+  return fetch(ATTENDANCE_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raidId: RAID_ID, ...body }) })
+    .then(r => r.json());
+}
+
+function wireAttendance() {
+  const btn = document.getElementById('attendanceLockBtn');
+  if (!btn) return;
+  attendanceCall({ action: 'status' }).then(d => { if (d.success) renderAttendanceStatus(d); });
+  btn.addEventListener('click', () => {
+    const el = document.getElementById('attendanceStatus');
+    const alreadyLocked = el && el.classList.contains('locked');
+    if (alreadyLocked && !confirm('Attendance is already locked in. Re-locking overwrites the previous snapshot with who is currently assigned. Continue?')) return;
+    attendanceCall({ action: 'lock' }).then(d => {
+      if (!d.success) { alert(d.error || 'Lock-in failed'); return; }
+      renderAttendanceStatus(d);
+    });
+  });
+}
+
 render();
-if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireDiscordControls(); wireEraExport(); wireClearAll(); }
+if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireDiscordControls(); wireEraExport(); wireAttendance(); wireClearAll(); }
 </script>
 </body>
 </html>
