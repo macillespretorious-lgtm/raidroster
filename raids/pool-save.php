@@ -67,30 +67,26 @@ function fetch_pool($pdo, $raidId) {
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
-if ($action === 'add') {
-    $toonKind = $body['toonKind'] ?? '';
-    $toonId   = isset($body['toonId']) ? (string)$body['toonId'] : null;
-
+// Validates/inserts a single pool item. Returns null on success, or an error string.
+function add_pool_item($pdo, $tenant, $raidId, $toonKind, $toonId, $pugName, $pugClass) {
     if ($toonKind === 'main') {
         $stmt = $pdo->prepare('SELECT id FROM toons WHERE id = ? AND guild_id = ?');
         $stmt->execute([$toonId, $tenant['id']]);
-        if (!$stmt->fetch()) { http_response_code(400); echo json_encode(['error' => 'Toon not found']); exit; }
+        if (!$stmt->fetch()) return 'Toon not found';
         $pugName = null; $pugClass = null;
     } elseif ($toonKind === 'alt') {
         $stmt = $pdo->prepare('SELECT id FROM toon_alts WHERE id = ? AND guild_id = ?');
         $stmt->execute([$toonId, $tenant['id']]);
-        if (!$stmt->fetch()) { http_response_code(400); echo json_encode(['error' => 'Toon not found']); exit; }
+        if (!$stmt->fetch()) return 'Toon not found';
         $pugName = null; $pugClass = null;
     } elseif ($toonKind === 'pug') {
-        $pugName = trim((string)($body['pugName'] ?? ''));
-        if ($pugName === '') { http_response_code(400); echo json_encode(['error' => 'Pug name required']); exit; }
+        $pugName = trim((string)$pugName);
+        if ($pugName === '') return 'Pug name required';
         $pugName = substr($pugName, 0, 60);
-        $pugClass = !empty($body['pugClass']) ? substr(trim($body['pugClass']), 0, 30) : null;
+        $pugClass = !empty($pugClass) ? substr(trim($pugClass), 0, 30) : null;
         $toonId = null;
     } else {
-        http_response_code(400);
-        echo json_encode(['error' => 'Invalid toonKind']);
-        exit;
+        return 'Invalid toonKind';
     }
 
     $stmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM raid_pool WHERE raid_id = ?');
@@ -102,6 +98,21 @@ if ($action === 'add') {
          ON DUPLICATE KEY UPDATE id = id'
     );
     $stmt->execute([$raidId, $toonKind, $toonId, $pugName, $pugClass, $nextOrder]);
+    return null;
+}
+
+if ($action === 'add') {
+    $err = add_pool_item($pdo, $tenant, $raidId, $body['toonKind'] ?? '', $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null);
+    if ($err) { http_response_code(400); echo json_encode(['error' => $err]); exit; }
+} elseif ($action === 'bulkAdd') {
+    $items = is_array($body['items'] ?? null) ? $body['items'] : [];
+    $results = [];
+    foreach ($items as $item) {
+        $err = add_pool_item($pdo, $tenant, $raidId, $item['toonKind'] ?? '', $item['toonId'] ?? null, $item['pugName'] ?? null, $item['pugClass'] ?? null);
+        $results[] = ['ok' => $err === null, 'error' => $err];
+    }
+    echo json_encode(['success' => true, 'results' => $results, 'pool' => fetch_pool($pdo, $raidId)]);
+    exit;
 } elseif ($action === 'remove') {
     $poolId = isset($body['poolId']) ? (int)$body['poolId'] : 0;
     $stmt = $pdo->prepare('DELETE FROM raid_pool WHERE id = ? AND raid_id = ?');

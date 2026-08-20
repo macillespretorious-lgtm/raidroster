@@ -306,6 +306,21 @@ function fmtTime($t) {
     .btn-confirm.danger { background: #c94444; }
     .btn-confirm.danger:hover { background: #b03636; }
     .btn-confirm:disabled { opacity: .5; cursor: not-allowed; }
+    .modal.import-modal { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 22px; width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto; }
+    .modal.import-modal h2 { font-size: 17px; margin-bottom: 14px; }
+    .import-url-row { display: flex; gap: 8px; }
+    .import-url-row input { flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 9px 12px; color: #e8ecff; font-size: 13px; }
+    .import-hint { font-size: 11px; color: #7f8bad; margin: 6px 0 0; }
+    .import-status { font-size: 12px; color: #b9c0ff; margin: 10px 0; }
+    .import-rows { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; max-height: 340px; overflow-y: auto; }
+    .import-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,0.04); font-size: 12px; }
+    .import-row .name { font-weight: 600; color: #e8ecff; }
+    .import-row .detail { color: #9aa4c7; }
+    .import-row.matched .status { color: #6fd88a; }
+    .import-row.unmatched .status { color: #f0c04a; }
+    .import-row.added .status { color: #6fd88a; font-weight: 700; }
+    .import-row button { font-size: 11px; padding: 5px 10px; border-radius: 6px; border: none; cursor: pointer; font-weight: 600; background: #4a63e0; color: #fff; }
+    .import-row button:disabled { opacity: .5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -315,7 +330,7 @@ function fmtTime($t) {
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
     <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
     <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
-    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button></div><?php endif; ?>
+    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -329,6 +344,25 @@ function fmtTime($t) {
   <div class="modal-backdrop" id="syncModalBackdrop">
     <div class="modal sync-modal" id="syncModalContent"></div>
   </div>
+
+  <?php if ($canManage): ?>
+  <div class="modal-backdrop" id="importModalBackdrop">
+    <div class="modal import-modal">
+      <h2>Import Raid signups</h2>
+      <div class="import-url-row">
+        <input type="text" id="importUrlInput" placeholder="Paste Raid-Helper event URL or ID&hellip;" autocomplete="off">
+        <button type="button" class="btn-confirm" id="importFetchBtn">Fetch</button>
+      </div>
+      <p class="import-hint">Matched signups resolve to an existing main/alt; unmatched ones can be added as a one-off PUG. Nothing is added to the pool until you confirm below.</p>
+      <div class="import-status" id="importStatus"></div>
+      <div class="import-rows" id="importRows"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="importCloseBtn">Close</button>
+        <button type="button" class="btn-confirm" id="importAllBtn" disabled>Add all to pool</button>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <?php if ($canManage): ?>
   <div class="pool-drawer" id="poolDrawer">
@@ -368,7 +402,9 @@ let sections = <?= json_encode($sections) ?>;
 const roster = <?= json_encode($roster) ?>;
 let pool = <?= json_encode($pool) ?>;
 const POOL_SAVE_URL = <?= json_encode('/raids/pool-save.php?slug=' . $slug) ?>;
+const IMPORT_URL = <?= json_encode('/raids/import-signups.php?slug=' . $slug) ?>;
 let stampToon = null;
+let importRows = [];
 
 // Editing lock: advisory only, warns concurrent raid managers off each
 // other's structural edits. Only relevant to users who can manage the raid.
@@ -1050,8 +1086,91 @@ function wirePoolControls() {
   }
 }
 
+// Import Raid: fetches Raid-Helper signups (matched against toons/toon_alts server-side),
+// previews match status per row, and adds confirmed rows to the pool only -- no auto-placement
+// into cells, since RR templates have no fixed notion of e.g. "healer slot 2".
+function importItemFor(row) {
+  return row.matched
+    ? { toonKind: row.toonKind, toonId: row.toonId }
+    : { toonKind: 'pug', pugName: row.name, pugClass: row.suggestedPugClass || null };
+}
+
+function importRowHtml(row, idx) {
+  const state = row.added ? 'added' : (row.matched ? 'matched' : 'unmatched');
+  const status = row.added ? 'Added' : (row.matched ? `Matched: ${esc(row.toonName)}` : 'Not matched');
+  const detail = row.matched ? esc(row.toonClass || '') : esc(row.suggestedPugClass || row.rawClass || '');
+  const btnLabel = row.matched ? 'Add' : 'Add as PUG';
+  return `<div class="import-row ${state}">
+    <div><span class="name">${esc(row.name)}</span> <span class="detail">${detail}</span></div>
+    <div class="status">${status}${row.added ? '' : `<button type="button" data-idx="${idx}">${btnLabel}</button>`}</div>
+  </div>`;
+}
+
+function renderImportRows() {
+  const el = document.getElementById('importRows');
+  if (!el) return;
+  el.innerHTML = importRows.map((r, i) => importRowHtml(r, i)).join('');
+  el.querySelectorAll('button[data-idx]').forEach(btn => {
+    btn.addEventListener('click', () => addImportRow(parseInt(btn.dataset.idx, 10)));
+  });
+  const allBtn = document.getElementById('importAllBtn');
+  if (allBtn) allBtn.disabled = !importRows.some(r => !r.added);
+}
+
+function addImportRow(idx) {
+  const row = importRows[idx];
+  if (!row || row.added) return;
+  poolCall({ action: 'bulkAdd', items: [importItemFor(row)] }).then(() => {
+    row.added = true;
+    renderImportRows();
+  });
+}
+
+function addAllImportRows() {
+  const items = importRows.filter(r => !r.added).map(importItemFor);
+  if (!items.length) return;
+  poolCall({ action: 'bulkAdd', items }).then(() => {
+    importRows.forEach(r => { r.added = true; });
+    renderImportRows();
+  });
+}
+
+function fetchImportSignups() {
+  const input = document.getElementById('importUrlInput');
+  const statusEl = document.getElementById('importStatus');
+  const url = input.value.trim();
+  if (!url) return;
+  statusEl.textContent = 'Fetching…';
+  importRows = [];
+  renderImportRows();
+  fetch(IMPORT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raidId: RAID_ID, action: 'fetch', eventUrl: url }) })
+    .then(r => r.json()).then(d => {
+      if (!d.success) { statusEl.textContent = d.error || 'Import failed'; return; }
+      importRows = d.rows.map(r => ({ ...r, added: false }));
+      const matched = importRows.filter(r => r.matched).length;
+      statusEl.textContent = importRows.length
+        ? `${importRows.length} signup(s) found — ${matched} matched, ${importRows.length - matched} unmatched.`
+        : 'No signups found on that event.';
+      renderImportRows();
+    })
+    .catch(() => { statusEl.textContent = 'Import failed'; });
+}
+
+function wireImportControls() {
+  const toggleBtn = document.getElementById('importToggleBtn');
+  const backdrop = document.getElementById('importModalBackdrop');
+  const closeBtn = document.getElementById('importCloseBtn');
+  const fetchBtn = document.getElementById('importFetchBtn');
+  const allBtn = document.getElementById('importAllBtn');
+  if (toggleBtn && backdrop) toggleBtn.addEventListener('click', () => backdrop.classList.add('open'));
+  if (closeBtn && backdrop) closeBtn.addEventListener('click', () => backdrop.classList.remove('open'));
+  if (backdrop) backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.classList.remove('open'); });
+  if (fetchBtn) fetchBtn.addEventListener('click', fetchImportSignups);
+  if (allBtn) allBtn.addEventListener('click', addAllImportRows);
+}
+
 render();
-if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); }
+if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); }
 </script>
 </body>
 </html>
