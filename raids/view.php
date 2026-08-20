@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
 require_once __DIR__ . '/../includes/nav.php';
+require_once __DIR__ . '/../includes/raid_fetch.php';
 
 $slug   = $_GET['slug'] ?? '';
 $tenant = guild_by_slug($slug);
@@ -29,90 +30,6 @@ $canManage = role_at_least($role, 'raid_management');
 $isAdmin = role_at_least($role, 'admin');
 $templateId = $raid['template_id'] !== null ? (int)$raid['template_id'] : null;
 
-function fetch_table_full($pdo, $tb) {
-    $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id, header_colspan FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
-    $stmtC->execute([$tb['id']]);
-    $columns = array_map(fn($c) => [
-        'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
-        'width' => $c['width'] !== null ? (int)$c['width'] : null,
-        'headerColor' => $c['header_color'],
-        'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
-        'headerColspan' => (int)$c['header_colspan'],
-    ], $stmtC->fetchAll(PDO::FETCH_ASSOC));
-
-    $stmtR = $pdo->prepare('SELECT id, label, kind, height FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
-    $stmtR->execute([$tb['id']]);
-    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind'], 'height' => $r['height'] !== null ? (int)$r['height'] : null], $stmtR->fetchAll(PDO::FETCH_ASSOC));
-
-    $stmtG = $pdo->prepare('SELECT * FROM raid_column_groups WHERE table_id = ? ORDER BY sort_order, id');
-    $stmtG->execute([$tb['id']]);
-    $groupRows = $stmtG->fetchAll(PDO::FETCH_ASSOC);
-    $columnGroups = [];
-    foreach ($groupRows as $g) {
-        $stmtGT = $pdo->prepare('SELECT * FROM raid_tables WHERE parent_group_id = ? ORDER BY sort_order, id');
-        $stmtGT->execute([$g['id']]);
-        $childTables = array_map(fn($ctb) => fetch_table_full($pdo, $ctb), $stmtGT->fetchAll(PDO::FETCH_ASSOC));
-        $columnGroups[] = [
-            'id' => (int)$g['id'],
-            'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
-            'title' => $g['title'], 'color' => $g['color'],
-            'tables' => $childTables,
-        ];
-    }
-
-    $stmtCell = $pdo->prepare(
-        'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.note,
-                COALESCE(t.main_name, a.name) AS toon_name,
-                COALESCE(t.class, a.class) AS toon_class
-         FROM raid_cells c
-         LEFT JOIN toons t ON c.toon_kind = \'main\' AND t.id = c.toon_id
-         LEFT JOIN toon_alts a ON c.toon_kind = \'alt\' AND a.id = c.toon_id
-         WHERE c.table_id = ?'
-    );
-    $stmtCell->execute([$tb['id']]);
-    $cells = [];
-    foreach ($stmtCell->fetchAll(PDO::FETCH_ASSOC) as $cell) {
-        $isPug = $cell['toon_kind'] === 'pug';
-        $cells[$cell['row_id'] . '_' . $cell['column_id']] = [
-            'id'       => (int)$cell['id'],
-            'toonKind' => $cell['toon_kind'],
-            'toonId'   => $cell['toon_id'],
-            'pugName'  => $cell['pug_name'],
-            'pugClass' => $cell['pug_class'],
-            'name'     => $isPug ? $cell['pug_name'] : $cell['toon_name'],
-            'class'    => $isPug ? $cell['pug_class'] : $cell['toon_class'],
-            'note'     => $cell['note'],
-        ];
-    }
-
-    $stmtM = $pdo->prepare('SELECT row_id, column_id, colspan FROM raid_cell_merges WHERE table_id = ?');
-    $stmtM->execute([$tb['id']]);
-    $cellMerges = array_map(fn($m) => [
-        'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
-    ], $stmtM->fetchAll(PDO::FETCH_ASSOC));
-
-    return [
-        'id' => (int)$tb['id'], 'title' => $tb['title'],
-        'headerColor' => $tb['header_color'],
-        'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
-        'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
-        'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
-        'cellMerges' => $cellMerges,
-    ];
-}
-
-function fetch_raid_structure($pdo, $raidId) {
-    $out = [];
-    $stmt = $pdo->prepare('SELECT * FROM raid_sections WHERE raid_id = ? ORDER BY sort_order, id');
-    $stmt->execute([$raidId]);
-    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $sec) {
-        $stmtT = $pdo->prepare('SELECT * FROM raid_tables WHERE section_id = ? ORDER BY sort_order, id');
-        $stmtT->execute([$sec['id']]);
-        $tables = array_map(fn($tb) => fetch_table_full($pdo, $tb), $stmtT->fetchAll(PDO::FETCH_ASSOC));
-        $out[] = ['id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables];
-    }
-    return $out;
-}
 $sections = fetch_raid_structure($pdo, $raidId);
 
 $roster = [];
@@ -185,7 +102,9 @@ function fmtTime($t) {
     .readonly-note { color: #7f8bad; font-size: 12px; margin: 6px 0 20px; }
 
     .section-card { border-radius: 12px; overflow: hidden; margin: 22px 0; border: 1px solid rgba(255,255,255,0.08); }
-    .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
+    .section-clear-btn { font-size: 10px; font-weight: 700; letter-spacing: normal; text-transform: none; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 5px 10px; border-radius: 999px; cursor: pointer; }
+    .section-clear-btn:hover { background: rgba(0,0,0,0.4); }
     .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
     .tbl-wrap { min-width: 0; max-width: 100%; }
     .tbl-wrap .grid-scroll + .grid-scroll { margin-top: 2px; }
@@ -330,7 +249,7 @@ function fmtTime($t) {
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
     <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
     <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
-    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button></div><?php endif; ?>
+    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -689,7 +608,22 @@ function render() {
         });
       });
     });
+    el.querySelectorAll('.section-clear-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!confirm('Clear every assignment in this section? This cannot be undone.')) return;
+        clearCall({ action: 'clear_section', sectionId: parseInt(btn.dataset.sectionId, 10) });
+      });
+    });
   }
+}
+
+function clearCall(body) {
+  return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raidId: RAID_ID, ...body }) })
+    .then(r => r.json()).then(d => {
+      if (!d.success) { alert(d.error || 'Clear failed'); return; }
+      sections = d.sections;
+      render();
+    });
 }
 
 function findCellById(cellId) {
@@ -915,8 +849,9 @@ function renderTable(tb) {
 
 function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
+  const clearBtn = CAN_MANAGE ? `<button type="button" class="section-clear-btn" data-section-id="${sec.id}" title="Clear all assignments in this section">Clear section</button>` : '';
   return `<div class="section-card">
-    <div class="section-head" style="background:${meta.color};">${meta.icon} ${esc(sec.title)}</div>
+    <div class="section-head" style="background:${meta.color};"><span>${meta.icon} ${esc(sec.title)}</span>${clearBtn}</div>
     <div class="section-body">
       ${sec.tables.map(tb => renderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
@@ -1169,8 +1104,17 @@ function wireImportControls() {
   if (allBtn) allBtn.addEventListener('click', addAllImportRows);
 }
 
+function wireClearAll() {
+  const btn = document.getElementById('clearAllBtn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (!confirm('This clears every assignment in this raid — cannot be undone. Continue?')) return;
+    clearCall({ action: 'clear_all' });
+  });
+}
+
 render();
-if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); }
+if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireClearAll(); }
 </script>
 </body>
 </html>

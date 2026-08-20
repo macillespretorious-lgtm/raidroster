@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
+require_once __DIR__ . '/../includes/raid_fetch.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -109,6 +110,57 @@ if ($action === 'move') {
     $pdo->commit();
 
     echo json_encode(['success' => true, 'from' => fetch_cell_out($pdo, $fromCellId), 'to' => fetch_cell_out($pdo, $toCellId)]);
+    exit;
+}
+
+if ($action === 'clear_section') {
+    $sectionId = isset($body['sectionId']) ? (int)$body['sectionId'] : 0;
+    $stmt = $pdo->prepare(
+        'SELECT s.id, s.raid_id FROM raid_sections s JOIN raids r ON r.id = s.raid_id WHERE s.id = ? AND r.guild_id = ?'
+    );
+    $stmt->execute([$sectionId, $tenant['id']]);
+    $section = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$section) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Section not found']);
+        exit;
+    }
+
+    $stmtT = $pdo->prepare('SELECT id FROM raid_tables WHERE section_id = ?');
+    $stmtT->execute([$sectionId]);
+    $tableIds = [];
+    foreach ($stmtT->fetchAll(PDO::FETCH_COLUMN) as $tid) {
+        collect_table_ids($pdo, $tid, $tableIds);
+    }
+    clear_cells_for_tables($pdo, $tableIds);
+
+    echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $section['raid_id'])]);
+    exit;
+}
+
+if ($action === 'clear_all') {
+    $raidId = isset($body['raidId']) ? (int)$body['raidId'] : 0;
+    $stmt = $pdo->prepare('SELECT id FROM raids WHERE id = ? AND guild_id = ?');
+    $stmt->execute([$raidId, $tenant['id']]);
+    if (!$stmt->fetch()) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Raid not found']);
+        exit;
+    }
+
+    $stmtS = $pdo->prepare('SELECT id FROM raid_sections WHERE raid_id = ?');
+    $stmtS->execute([$raidId]);
+    $tableIds = [];
+    foreach ($stmtS->fetchAll(PDO::FETCH_COLUMN) as $sectionId) {
+        $stmtT = $pdo->prepare('SELECT id FROM raid_tables WHERE section_id = ?');
+        $stmtT->execute([$sectionId]);
+        foreach ($stmtT->fetchAll(PDO::FETCH_COLUMN) as $tid) {
+            collect_table_ids($pdo, $tid, $tableIds);
+        }
+    }
+    clear_cells_for_tables($pdo, $tableIds);
+
+    echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $raidId)]);
     exit;
 }
 
