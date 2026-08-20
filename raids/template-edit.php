@@ -117,6 +117,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .section-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
     .section-head .title-input { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: #fff; font: inherit; font-size: 14px; font-weight: 700; padding: 5px 9px; border-radius: 6px; flex: 1; min-width: 0; }
     .section-body { background: #111827; padding: 14px 16px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 14px; }
+    .section-note-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #161f36; border-top: 1px solid rgba(255,255,255,0.06); }
+    .note-toggle-label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #a8b4d0; white-space: nowrap; cursor: pointer; }
+    .note-text-input { flex: 1; min-width: 0; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: #fff; font: inherit; font-size: 12.5px; padding: 5px 9px; border-radius: 6px; }
     .icon-btn { background: rgba(255,255,255,0.12); border: none; color: #fff; width: 26px; height: 26px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1; flex-shrink: 0; }
     .icon-btn:hover { background: rgba(255,255,255,0.22); }
     .icon-btn.danger:hover { background: rgba(224,85,85,0.7); }
@@ -204,6 +207,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .export-modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .preview-modal .section-card { border-radius: 12px; overflow: hidden; margin: 0; border: 1px solid rgba(255,255,255,0.08); }
     .preview-modal .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
+    .preview-modal .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
     .preview-modal .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
     .preview-modal .tbl-wrap { min-width: 0; max-width: 100%; }
     .preview-modal .grid-scroll + .grid-scroll { margin-top: 2px; }
@@ -579,6 +583,8 @@ function render() {
       const act = node.dataset.action;
       const id = node.dataset.id ? parseInt(node.dataset.id, 10) : null;
       if (act === 'rename-section') call({ action: 'update_section', id, title: node.value.trim() });
+      if (act === 'toggle-section-note') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteEnabled: node.checked }); }
+      if (act === 'section-note-text') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteText: node.value }); }
       if (act === 'preview-section') openPreview(id);
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
@@ -951,6 +957,13 @@ function renderSection(sec) {
       <button class="icon-btn" data-action="move-section-down" data-id="${sec.id}" title="Move down">&darr;</button>
       <button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>
     </div>
+    <div class="section-note-bar">
+      <label class="note-toggle-label">
+        <input type="checkbox" data-action="toggle-section-note" data-id="${sec.id}" ${sec.noteEnabled ? 'checked' : ''}>
+        Cell markers (*)
+      </label>
+      ${sec.noteEnabled ? `<input type="text" class="note-text-input" data-action="section-note-text" data-id="${sec.id}" placeholder="Note shown under the section header" value="${escAttr(sec.noteText || '')}" maxlength="255">` : ''}
+    </div>
     <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section">
       ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled)).join('') || '<p class="empty">No tables yet.</p>'}
       <button class="btn" data-action="add-table-to-section" data-id="${sec.id}">+ Table</button>
@@ -1042,8 +1055,10 @@ function previewRenderTable(tb, groupsEnabled) {
 function renderPreviewSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
   const groupsEnabled = sec.kind !== 'roster';
+  const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};">${esc(sec.title)}</div>
+    ${noteBar}
     <div class="section-body">
       ${sec.tables.map(tb => previewRenderTable(tb, groupsEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>

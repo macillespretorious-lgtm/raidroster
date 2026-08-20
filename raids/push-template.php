@@ -417,12 +417,12 @@ function sync_raid_from_template($pdo, $raid, $template, $apply, $confirmRemoval
     foreach ($matched as $raidSectionId => $tplSection) {
         $raidSection = null;
         foreach ($raidSections as $rs) { if ((int)$rs['id'] === $raidSectionId) { $raidSection = $rs; break; } }
-        $changes = diff_scalar_fields($raidSection, $tplSection, ['title', 'sort_order']);
+        $changes = diff_scalar_fields($raidSection, $tplSection, ['title', 'sort_order', 'note_enabled', 'note_text']);
         if ($changes) {
             $diff['sections']['changed'][] = ['id' => $raidSectionId, 'label' => $raidSection['title'] ?: '(untitled section)', 'changes' => array_keys($changes)];
             if ($apply) {
-                $pdo->prepare('UPDATE raid_sections SET title = ?, sort_order = ? WHERE id = ?')
-                    ->execute([$tplSection['title'], $tplSection['sort_order'], $raidSectionId]);
+                $pdo->prepare('UPDATE raid_sections SET title = ?, sort_order = ?, note_enabled = ?, note_text = ? WHERE id = ?')
+                    ->execute([$tplSection['title'], $tplSection['sort_order'], $tplSection['note_enabled'], $tplSection['note_text'], $raidSectionId]);
             }
         }
         sync_section_tables($pdo, $raidSectionId, (int)$tplSection['id'], $diff, $apply, $confirmRemovals);
@@ -436,8 +436,8 @@ function sync_raid_from_template($pdo, $raid, $template, $apply, $confirmRemoval
     foreach ($tplOnly as $ts) {
         $diff['sections']['added'][] = ['id' => (int)$ts['id'], 'label' => $ts['title'] ?: '(untitled section)'];
         if ($apply) {
-            $ins = $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order, source_section_id) VALUES (?, ?, ?, ?, ?)');
-            $ins->execute([$raidId, $ts['kind'], $ts['title'], $ts['sort_order'], $ts['id']]);
+            $ins = $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order, note_enabled, note_text, source_section_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            $ins->execute([$raidId, $ts['kind'], $ts['title'], $ts['sort_order'], $ts['note_enabled'], $ts['note_text'], $ts['id']]);
             $newSectionId = (int)$pdo->lastInsertId();
             $stmtT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
             $stmtT->execute([$ts['id']]);

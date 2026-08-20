@@ -35,7 +35,7 @@ function fetch_table_full($pdo, $tb) {
     }
 
     $stmtCell = $pdo->prepare(
-        'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.note,
+        'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.marked,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class
          FROM raid_cells c
@@ -55,7 +55,7 @@ function fetch_table_full($pdo, $tb) {
             'pugClass' => $cell['pug_class'],
             'name'     => $isPug ? $cell['pug_name'] : $cell['toon_name'],
             'class'    => $isPug ? $cell['pug_class'] : $cell['toon_class'],
-            'note'     => $cell['note'],
+            'marked'   => (bool)$cell['marked'],
         ];
     }
 
@@ -83,7 +83,10 @@ function fetch_raid_structure($pdo, $raidId) {
         $stmtT = $pdo->prepare('SELECT * FROM raid_tables WHERE section_id = ? ORDER BY sort_order, id');
         $stmtT->execute([$sec['id']]);
         $tables = array_map(fn($tb) => fetch_table_full($pdo, $tb), $stmtT->fetchAll(PDO::FETCH_ASSOC));
-        $out[] = ['id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables];
+        $out[] = [
+            'id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables,
+            'noteEnabled' => (bool)$sec['note_enabled'], 'noteText' => $sec['note_text'],
+        ];
     }
     return $out;
 }

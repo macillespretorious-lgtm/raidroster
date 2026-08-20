@@ -246,6 +246,8 @@ function fetch_structure($pdo, $templateId) {
             'kind' => $sec['kind'],
             'title' => $sec['title'],
             'tables' => $tablesOut,
+            'noteEnabled' => (bool)$sec['note_enabled'],
+            'noteText' => $sec['note_text'],
         ];
     }
 
@@ -323,8 +325,11 @@ if ($action === 'update_section') {
     if (!$sec) fail(404, 'Section not found');
     $title = substr(trim($body['title'] ?? ''), 0, 100);
     if (!$title) fail(400, 'Title is required');
-    $stmt = $pdo->prepare('UPDATE raid_template_sections SET title = ? WHERE id = ?');
-    $stmt->execute([$title, $sec['id']]);
+    $noteEnabled = array_key_exists('noteEnabled', $body) ? (!empty($body['noteEnabled']) ? 1 : 0) : $sec['note_enabled'];
+    $noteText = array_key_exists('noteText', $body) ? ($body['noteText'] !== null ? substr(trim((string)$body['noteText']), 0, 255) : null) : $sec['note_text'];
+    if ($noteText === '') $noteText = null;
+    $stmt = $pdo->prepare('UPDATE raid_template_sections SET title = ?, note_enabled = ?, note_text = ? WHERE id = ?');
+    $stmt->execute([$title, $noteEnabled, $noteText, $sec['id']]);
     respond_structure($pdo, $sec['template_id']);
 }
 

@@ -65,7 +65,7 @@ function resolve_toon_fields($pdo, $guildId, $toonKind, $toonId, $pugName, $pugC
 
 function fetch_cell_out($pdo, $cellId) {
     $stmt = $pdo->prepare(
-        'SELECT c.id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.note,
+        'SELECT c.id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.marked,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class
          FROM raid_cells c
@@ -85,7 +85,7 @@ function fetch_cell_out($pdo, $cellId) {
         'pugClass' => $c['pug_class'],
         'name'     => $isPug ? $c['pug_name'] : $c['toon_name'],
         'class'    => $isPug ? $c['pug_class'] : $c['toon_class'],
-        'note'     => $c['note'],
+        'marked'   => (bool)$c['marked'],
     ];
 }
 
@@ -164,6 +164,20 @@ if ($action === 'clear_all') {
     exit;
 }
 
+if ($action === 'mark') {
+    $cellId = isset($body['cellId']) ? (int)$body['cellId'] : 0;
+    if (!fetch_cell_owned($pdo, $cellId, $tenant['id'])) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Cell not found']);
+        exit;
+    }
+    $marked = !empty($body['marked']) ? 1 : 0;
+    $stmt = $pdo->prepare('UPDATE raid_cells SET marked = ? WHERE id = ?');
+    $stmt->execute([$marked, $cellId]);
+    echo json_encode(['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)]);
+    exit;
+}
+
 // default: assign
 $cellId = isset($body['cellId']) ? (int)$body['cellId'] : 0;
 if (!fetch_cell_owned($pdo, $cellId, $tenant['id'])) {
@@ -171,10 +185,9 @@ if (!fetch_cell_owned($pdo, $cellId, $tenant['id'])) {
     echo json_encode(['error' => 'Cell not found']);
     exit;
 }
-$note = isset($body['note']) && $body['note'] !== '' ? substr(trim($body['note']), 0, 60) : null;
 $resolved = resolve_toon_fields($pdo, $tenant['id'], $body['toonKind'] ?? null, $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null);
 
-$stmt = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ?, note = ? WHERE id = ?');
-$stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_name'], $resolved['pug_class'], $note, $cellId]);
+$stmt = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ? WHERE id = ?');
+$stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_name'], $resolved['pug_class'], $cellId]);
 
 echo json_encode(['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)]);

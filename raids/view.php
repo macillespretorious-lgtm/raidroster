@@ -147,7 +147,10 @@ function fmtTime($t) {
     }
     .chip-clear:hover { background: rgba(0,0,0,0.45); }
     .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
-    .cell-note { display: block; font-size: 10px; color: #7f8bad; margin-top: 2px; }
+    .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .chip-marker { display: inline-block; margin-left: 4px; font-weight: 800; font-size: 11px; line-height: 1; color: rgba(255,255,255,0.35); }
+    .chip-marker.clickable { cursor: pointer; }
+    .chip-marker.active { color: #ffd76e; }
 
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
@@ -578,16 +581,20 @@ function contrastText(hex) {
   return lum > 0.6 ? '#111827' : '#ffffff';
 }
 
-function chipHtml(cell) {
+function chipHtml(cell, noteEnabled) {
   if (!cell || !cell.name) return '<span class="empty-slot">+</span>';
   const color = classColor(cell.class);
   const dragAttrs = CAN_MANAGE
     ? ` draggable="true" data-source="cell" data-cell-id="${cell.id}" data-toon-kind="${esc(cell.toonKind)}" data-toon-id="${esc(cell.toonId || '')}" data-pug-name="${esc(cell.pugName || '')}" data-pug-class="${esc(cell.pugClass || '')}"`
     : '';
   let html = `<span class="toon-chip"${dragAttrs} style="background:${color};">${esc(cell.name)}`;
+  if (noteEnabled && (cell.marked || CAN_MANAGE)) {
+    const cls = 'chip-marker' + (cell.marked ? ' active' : '') + (CAN_MANAGE ? ' clickable' : '');
+    const actionAttrs = CAN_MANAGE ? ` data-action="toggle-marker" data-cell-id="${cell.id}"` : '';
+    html += `<span class="${cls}"${actionAttrs} title="${cell.marked ? 'Marked' : 'Mark this slot'}">*</span>`;
+  }
   if (CAN_MANAGE) html += `<span class="chip-clear" data-action="clear" data-cell-id="${cell.id}">&times;</span>`;
   html += `</span>`;
-  if (cell.note) html += `<span class="cell-note">${esc(cell.note)}</span>`;
   return html;
 }
 
@@ -645,22 +652,13 @@ function render() {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         const cellId = parseInt(btn.dataset.cellId, 10);
-        const cur = findCellById(cellId);
-        saveCellPatch(cellId, { toonKind: null, toonId: null, pugName: null, pugClass: null, note: cur ? cur.note : null });
+        saveCellPatch(cellId, { toonKind: null, toonId: null, pugName: null, pugClass: null });
       });
     });
-    el.querySelectorAll('.note-btn').forEach(btn => {
+    el.querySelectorAll('.chip-marker.clickable').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        const cellId = parseInt(btn.dataset.cellId, 10);
-        const cur = findCellById(cellId);
-        const note = prompt('Short note for this slot (optional):', (cur && cur.note) || '');
-        if (note === null) return;
-        saveCellPatch(cellId, {
-          toonKind: cur ? cur.toonKind : null, toonId: cur ? cur.toonId : null,
-          pugName: cur ? cur.pugName : null, pugClass: cur ? cur.pugClass : null,
-          note: note.trim() || null,
-        });
+        toggleMarker(parseInt(btn.dataset.cellId, 10));
       });
     });
     el.querySelectorAll('.section-clear-btn').forEach(btn => {
@@ -703,9 +701,19 @@ function saveCellPatch(cellId, patch) {
     toonId: patch.toonId !== undefined ? patch.toonId : (cur ? cur.toonId : null),
     pugName: patch.pugName !== undefined ? patch.pugName : (cur ? cur.pugName : null),
     pugClass: patch.pugClass !== undefined ? patch.pugClass : (cur ? cur.pugClass : null),
-    note: patch.note !== undefined ? patch.note : (cur ? cur.note : null),
   };
   return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json()).then(d => {
+      if (!d.success) { alert(d.error || 'Save failed'); return; }
+      updateCellInPlace(d.cell);
+      render();
+    });
+}
+
+function toggleMarker(cellId) {
+  const cur = findCellById(cellId);
+  const marked = !(cur && cur.marked);
+  return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark', cellId, marked }) })
     .then(r => r.json()).then(d => {
       if (!d.success) { alert(d.error || 'Save failed'); return; }
       updateCellInPlace(d.cell);
@@ -834,7 +842,7 @@ function headerCellsForChunk(chunkCols, tb) {
 
 // Same walk-and-consume pattern for body cells: tb.cellMerges is a (rowId, columnId) ->
 // colspan lookup, independent of header merges. The covered columns get no <td> at all.
-function bodyCellsForRow(r, chunkCols, tb) {
+function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
   const mergeByCol = {};
   tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
   const out = [];
@@ -847,14 +855,13 @@ function bodyCellsForRow(r, chunkCols, tb) {
     const cell = tb.cells[r.id + '_' + c.id];
     const cellIdAttr = cell ? cell.id : '';
     const editableCls = CAN_MANAGE ? ' editable' : '';
-    const noteBtn = CAN_MANAGE ? `<button type="button" class="note-btn" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="background:none;border:none;color:#55607a;cursor:pointer;font-size:9px;vertical-align:top;">✎</button>` : '';
-    out.push(`<td${colspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}">${chipHtml(cell)}${noteBtn}</td>`);
+    out.push(`<td${colspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}">${chipHtml(cell, noteEnabled)}</td>`);
     i += span;
   }
   return out.join('');
 }
 
-function renderColumnBlock(chunkCols, tb) {
+function renderColumnBlock(chunkCols, tb, noteEnabled) {
   const colHeaders = headerCellsForChunk(chunkCols, tb);
 
   const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
@@ -867,7 +874,7 @@ function renderColumnBlock(chunkCols, tb) {
     if (r.kind === 'spacer') {
       return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
     }
-    return `<tr><th class="row-label">${esc(r.label)}</th>${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    return `<tr><th class="row-label">${esc(r.label)}</th>${bodyCellsForRow(r, chunkCols, tb, noteEnabled)}</tr>`;
   }).join('');
 
   const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb);
@@ -882,15 +889,15 @@ function renderColumnBlock(chunkCols, tb) {
     </div>`;
 }
 
-function renderTable(tb) {
+function renderTable(tb, noteEnabled) {
   const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
-  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, noteEnabled)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables">
-      ${g.tables.map(ctb => renderTable(ctb)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb, noteEnabled)).join('')}
     </div>`).join('');
 
   const headBar = tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : '';
@@ -905,10 +912,13 @@ function renderTable(tb) {
 function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
   const clearBtn = CAN_MANAGE ? `<button type="button" class="section-clear-btn" data-section-id="${sec.id}" title="Clear all assignments in this section">Clear section</button>` : '';
+  const noteEnabled = !!sec.noteEnabled;
+  const noteBar = (noteEnabled && sec.noteText) ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};"><span>${meta.icon} ${esc(sec.title)}</span>${clearBtn}</div>
+    ${noteBar}
     <div class="section-body">
-      ${sec.tables.map(tb => renderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
+      ${sec.tables.map(tb => renderTable(tb, noteEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }
