@@ -30,6 +30,13 @@ $canManage = role_at_least($role, 'raid_management');
 $isAdmin = role_at_least($role, 'admin');
 $templateId = $raid['template_id'] !== null ? (int)$raid['template_id'] : null;
 
+$exportTemplate = null;
+if ($templateId !== null) {
+    $stmt = $pdo->prepare('SELECT export_template FROM raid_templates WHERE id = ? AND guild_id = ?');
+    $stmt->execute([$templateId, $tenant['id']]);
+    $exportTemplate = $stmt->fetchColumn() ?: null;
+}
+
 $sections = fetch_raid_structure($pdo, $raidId);
 
 $roster = [];
@@ -262,7 +269,12 @@ function fmtTime($t) {
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
     <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
     <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
-    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
+    <?php
+    $hasHealerSection = false;
+    foreach ($sections as $s) { if ($s['kind'] === 'healer') { $hasHealerSection = true; break; } }
+    $exportEnabled = $exportTemplate !== null && $hasHealerSection;
+    ?>
+    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="eraExportBtn"<?= $exportEnabled ? '' : ' disabled title="Configure an export template and a Healer Assignments section on this raid\'s template first"' ?>>Era export (healing)</button> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -361,6 +373,7 @@ let pool = <?= json_encode($pool) ?>;
 const POOL_SAVE_URL = <?= json_encode('/raids/pool-save.php?slug=' . $slug) ?>;
 const IMPORT_URL = <?= json_encode('/raids/import-signups.php?slug=' . $slug) ?>;
 const WEBHOOKS = <?= json_encode($webhooks) ?>;
+const EXPORT_TEMPLATE = <?= json_encode($exportTemplate) ?>;
 let stampToon = null;
 let importRows = [];
 
@@ -1360,6 +1373,66 @@ function wireDiscordControls() {
   });
 }
 
+// Era export (healing): resolves the template's {{token}} export template against this
+// raid's actual healer-section assignments (same slot-key grammar as template-edit.php's
+// preview -- row label, or row|column when a table has more than one data column -- but
+// the value is the assigned toon's name instead of a label placeholder), then copies the
+// result to the clipboard, matching IO's clipboard-export UX.
+function walkHealerSlots(secs, cb) {
+  function walk(tables) {
+    for (const tb of tables) {
+      const dataCols = tb.columns.filter(c => c.kind === 'data');
+      for (const r of tb.rows) {
+        if (r.kind === 'spacer' || !r.label) continue;
+        if (dataCols.length === 1) {
+          cb(r.label, null, r, dataCols[0], tb);
+        } else if (dataCols.length > 1) {
+          for (const c of dataCols) { if (c.label) cb(r.label, c.label, r, c, tb); }
+        }
+      }
+      for (const g of tb.columnGroups) walk(g.tables);
+    }
+  }
+  walk(secs.filter(s => s.kind === 'healer').flatMap(s => s.tables));
+}
+
+function healerSlotMap(secs) {
+  const map = {};
+  walkHealerSlots(secs, (rowLabel, colLabel, r, c, tb) => {
+    const key = (colLabel ? rowLabel + '|' + colLabel : rowLabel).trim().toLowerCase();
+    const cell = tb.cells[r.id + '_' + c.id];
+    map[key] = cell && cell.name ? cell.name : null;
+  });
+  return map;
+}
+
+function applyExportTemplate(tmpl, resolveFn) {
+  return (tmpl || '').replace(/\{\{([^}]+)\}\}/g, (_, expr) => {
+    if (expr.charAt(0) === '*') {
+      const names = expr.slice(1).split(',').map(k => resolveFn(k.trim())).filter(Boolean);
+      return names.join(', ') || '—';
+    }
+    if (expr.charAt(0) === '#') {
+      return expr.slice(1).split(',').map((k, i) => { const nm = resolveFn(k.trim()); return nm ? nm + ' (' + (i + 1) + ')' : ''; }).filter(Boolean).join(', ') || '—';
+    }
+    return resolveFn(expr.trim()) || '—';
+  });
+}
+
+function wireEraExport() {
+  const btn = document.getElementById('eraExportBtn');
+  if (!btn || btn.disabled) return;
+  btn.addEventListener('click', () => {
+    const map = healerSlotMap(sections);
+    const text = applyExportTemplate(EXPORT_TEMPLATE, k => map[k.trim().toLowerCase()] ?? null);
+    const orig = btn.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = orig; }, 2000);
+    }).catch(() => { alert('Could not copy to clipboard.'); });
+  });
+}
+
 function wireClearAll() {
   const btn = document.getElementById('clearAllBtn');
   if (!btn) return;
@@ -1370,7 +1443,7 @@ function wireClearAll() {
 }
 
 render();
-if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireDiscordControls(); wireClearAll(); }
+if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireDiscordControls(); wireEraExport(); wireClearAll(); }
 </script>
 </body>
 </html>

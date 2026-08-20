@@ -193,6 +193,15 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .preview-modal .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
     .preview-modal h2 { font-size: 16px; }
     .preview-modal .preview-note { font-size: 12px; color: #7f8bad; margin-bottom: 16px; }
+    .modal.export-modal { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 22px; width: 100%; max-width: 900px; max-height: 90vh; overflow-y: auto; }
+    .export-modal .preview-note code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+    .export-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .export-tokens span { background: rgba(76,175,106,0.15); border: 1px solid rgba(76,175,106,0.35); color: #8fe0a8; font-size: 11px; padding: 3px 8px; border-radius: 999px; font-family: 'Courier New', monospace; }
+    .export-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .export-layout textarea { width: 100%; min-height: 260px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #e8ecff; font: 12.5px/1.5 'Courier New', monospace; padding: 10px; resize: vertical; }
+    .export-preview { min-height: 260px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; color: #c7cfe8; font: 12.5px/1.5 'Courier New', monospace; padding: 10px; white-space: pre-wrap; word-break: break-word; overflow-y: auto; }
+    .export-status { font-size: 12px; color: #4caf6a; margin-top: 8px; min-height: 16px; }
+    .export-modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .preview-modal .section-card { border-radius: 12px; overflow: hidden; margin: 0; border: 1px solid rgba(255,255,255,0.08); }
     .preview-modal .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
     .preview-modal .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
@@ -222,6 +231,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <h1><?= h($template['name']) ?></h1>
     <div class="lock-bar" id="lockBar"></div>
     <p class="sub"><span class="tag"><?= h($template['assignment_style']) ?></span> &middot; structure only &mdash; toon assignments happen per-raid</p>
+    <?php if ($template['assignment_style'] !== 'combined'): ?>
+    <button class="btn" type="button" id="exportTemplateBtn" style="margin-bottom: 14px;">Export template (healing)</button>
+    <?php endif; ?>
 
     <div class="tabs" id="tabsEl"></div>
     <div id="panelsEl"></div>
@@ -238,12 +250,34 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     </div>
   </div>
 
+  <?php if ($template['assignment_style'] !== 'combined'): ?>
+  <div class="modal-backdrop" id="exportModalBackdrop">
+    <div class="modal export-modal">
+      <div class="preview-head">
+        <h2>Export template (healing)</h2>
+        <button class="icon-btn" id="exportModalClose" type="button" title="Close">&times;</button>
+      </div>
+      <p class="preview-note">Write a text template for healing assignments. Use <code>{{Row Label}}</code> to insert a healer-section slot named by its row label (or <code>{{Row Label|Column Label}}</code> when that table has more than one data column). <code>{{*a,b,c}}</code> joins several slots with commas, skipping empty ones; <code>{{#a,b,c}}</code> numbers them. On a raid page, this resolves against real assignments &mdash; here it previews against this template's own labels.</p>
+      <div class="export-tokens" id="exportTokensList"></div>
+      <div class="export-layout">
+        <textarea id="exportTemplateInput" placeholder="e.g. MT Healing:&#10;- {{*Healer 1,Healer 2,Healer 3}}"></textarea>
+        <pre class="export-preview" id="exportPreviewOut"></pre>
+      </div>
+      <div class="export-status" id="exportStatus"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="exportSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
+
 <script>
 const SLUG = <?= json_encode($slug) ?>;
 const TEMPLATE_ID = <?= json_encode($templateId) ?>;
 const STYLE = <?= json_encode($template['assignment_style']) ?>;
 const SAVE_URL = <?= json_encode('/raids/template-structure-save.php?slug=' . $slug) ?>;
 const USER_ID = <?= json_encode($user['id']) ?>;
+let EXPORT_TEMPLATE = <?= json_encode($template['export_template']) ?>;
 let sections = <?= json_encode($sections) ?>;
 
 // Editing lock: purely advisory (everyone on this page already passed the admin
@@ -1030,6 +1064,105 @@ document.getElementById('previewClose').addEventListener('click', closePreview);
 document.getElementById('previewBackdrop').addEventListener('click', e => {
   if (e.target.id === 'previewBackdrop') closePreview();
 });
+
+// Export template (healing): a {{token}} text template resolved against healer-kind
+// sections' row (or row|column, when a table has more than one data column) labels.
+// Editing here only ever sees the template's own labels as placeholder values; the raid
+// page (view.php) resolves the same grammar against that raid's real assignments.
+function walkHealerSlots(secs, cb) {
+  function walk(tables) {
+    for (const tb of tables) {
+      const dataCols = tb.columns.filter(c => c.kind === 'data');
+      for (const r of tb.rows) {
+        if (r.kind === 'spacer' || !r.label) continue;
+        if (dataCols.length === 1) {
+          cb(r.label, null, r, dataCols[0]);
+        } else if (dataCols.length > 1) {
+          for (const c of dataCols) { if (c.label) cb(r.label, c.label, r, c); }
+        }
+      }
+      for (const g of tb.columnGroups) walk(g.tables);
+    }
+  }
+  walk(secs.filter(s => s.kind === 'healer').flatMap(s => s.tables));
+}
+
+function healerSlotMap(secs, valueFn) {
+  const map = {};
+  walkHealerSlots(secs, (rowLabel, colLabel, r, c) => {
+    const key = (colLabel ? rowLabel + '|' + colLabel : rowLabel).trim().toLowerCase();
+    map[key] = valueFn(r, c);
+  });
+  return map;
+}
+
+function applyExportTemplate(tmpl, resolveFn, flagUnknown) {
+  return (tmpl || '').replace(/\{\{([^}]+)\}\}/g, (_, expr) => {
+    if (expr.charAt(0) === '*') {
+      const names = expr.slice(1).split(',').map(k => resolveFn(k.trim())).filter(Boolean);
+      return names.join(', ') || '—';
+    }
+    if (expr.charAt(0) === '#') {
+      return expr.slice(1).split(',').map((k, i) => { const nm = resolveFn(k.trim()); return nm ? nm + ' (' + (i + 1) + ')' : ''; }).filter(Boolean).join(', ') || '—';
+    }
+    const nm = resolveFn(expr.trim());
+    if (nm) return nm;
+    return flagUnknown ? ('⚠' + expr.trim()) : '—';
+  });
+}
+
+function renderExportTokens() {
+  const el = document.getElementById('exportTokensList');
+  if (!el) return;
+  const keys = [];
+  walkHealerSlots(sections, (rowLabel, colLabel) => keys.push(colLabel ? `${rowLabel}|${colLabel}` : rowLabel));
+  el.innerHTML = keys.length
+    ? keys.map(k => `<span>{{${esc(k)}}}</span>`).join('')
+    : '<span style="background:none;border-style:dashed;color:#7f8bad;">No healer-section rows yet &mdash; add one on the Healer Assignments tab first.</span>';
+}
+
+function renderExportPreview() {
+  const ta = document.getElementById('exportTemplateInput');
+  const out = document.getElementById('exportPreviewOut');
+  if (!ta || !out) return;
+  const map = healerSlotMap(sections, (r, c) => c ? `${r.label} (${c.label})` : r.label);
+  out.textContent = applyExportTemplate(ta.value, k => map[k.trim().toLowerCase()] ?? null, true);
+}
+
+function wireExportControls() {
+  const btn = document.getElementById('exportTemplateBtn');
+  const backdrop = document.getElementById('exportModalBackdrop');
+  if (!btn || !backdrop) return;
+  const closeBtn = document.getElementById('exportModalClose');
+  const saveBtn = document.getElementById('exportSaveBtn');
+  const ta = document.getElementById('exportTemplateInput');
+  const statusEl = document.getElementById('exportStatus');
+
+  btn.addEventListener('click', () => {
+    ta.value = EXPORT_TEMPLATE || '';
+    renderExportTokens();
+    renderExportPreview();
+    statusEl.textContent = '';
+    backdrop.classList.add('open');
+  });
+  if (closeBtn) closeBtn.addEventListener('click', () => backdrop.classList.remove('open'));
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.classList.remove('open'); });
+  ta.addEventListener('input', renderExportPreview);
+
+  saveBtn.addEventListener('click', () => {
+    saveBtn.disabled = true;
+    fetch(SAVE_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_export_template', templateId: TEMPLATE_ID, exportTemplate: ta.value }),
+    }).then(r => r.json()).then(d => {
+      saveBtn.disabled = false;
+      if (!d.success) { statusEl.textContent = d.error || 'Save failed'; return; }
+      EXPORT_TEMPLATE = d.exportTemplate;
+      statusEl.textContent = 'Saved.';
+    }).catch(() => { saveBtn.disabled = false; statusEl.textContent = 'Save failed'; });
+  });
+}
+wireExportControls();
 
 render();
 checkLock();

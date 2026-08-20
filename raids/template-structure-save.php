@@ -290,6 +290,18 @@ if ($action === 'lock_status' || $action === 'lock_acquire' || $action === 'lock
     }
 }
 
+if ($action === 'save_export_template') {
+    $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
+    $template = fetch_template($pdo, $tenant['id'], $templateId);
+    if (!$template) fail(404, 'Template not found');
+    $text = isset($body['exportTemplate']) ? trim((string)$body['exportTemplate']) : '';
+    $text = $text !== '' ? substr($text, 0, 20000) : null;
+    $stmt = $pdo->prepare('UPDATE raid_templates SET export_template = ? WHERE id = ?');
+    $stmt->execute([$text, $templateId]);
+    echo json_encode(['success' => true, 'exportTemplate' => $text]);
+    exit;
+}
+
 if ($action === 'add_section') {
     $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
     $kind       = $body['kind'] ?? '';
