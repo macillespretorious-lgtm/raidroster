@@ -34,6 +34,7 @@ $sections = fetch_raid_structure($pdo, $raidId);
 
 $roster = [];
 $pool = [];
+$webhooks = [];
 if ($canManage) {
     $stmt = $pdo->prepare('SELECT id, main_name, class, status FROM toons WHERE guild_id = ? ORDER BY main_name');
     $stmt->execute([$tenant['id']]);
@@ -72,6 +73,10 @@ if ($canManage) {
             'sortOrder' => (int)$p['sort_order'],
         ];
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmt = $pdo->prepare('SELECT id, name, webhook_url FROM webhooks WHERE guild_id = ? ORDER BY sort_order, id');
+    $stmt->execute([$tenant['id']]);
+    $webhooks = array_map(fn($w) => ['id' => (int)$w['id'], 'name' => $w['name'], 'url' => $w['webhook_url']], $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
 function h($s) { return htmlspecialchars($s ?? ''); }
@@ -240,6 +245,14 @@ function fmtTime($t) {
     .import-row.added .status { color: #6fd88a; font-weight: 700; }
     .import-row button { font-size: 11px; padding: 5px 10px; border-radius: 6px; border: none; cursor: pointer; font-weight: 600; background: #4a63e0; color: #fff; }
     .import-row button:disabled { opacity: .5; cursor: not-allowed; }
+    .modal.discord-modal { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 22px; width: 100%; max-width: 720px; max-height: 90vh; overflow-y: auto; }
+    .modal.discord-modal h2 { font-size: 17px; margin-bottom: 14px; }
+    .discord-preview-wrap { border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: #05070f; padding: 10px; text-align: center; }
+    .discord-preview-wrap canvas { max-width: 100%; height: auto; border-radius: 4px; }
+    .discord-field { margin-top: 12px; }
+    .discord-field label { display: block; font-size: 11px; font-weight: 700; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 5px; }
+    .discord-field select, .discord-field textarea { width: 100%; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 9px 12px; color: #e8ecff; font-size: 13px; font-family: inherit; }
+    .discord-field textarea { resize: vertical; min-height: 60px; }
   </style>
 </head>
 <body>
@@ -249,7 +262,7 @@ function fmtTime($t) {
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
     <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
     <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
-    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
+    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -278,6 +291,31 @@ function fmtTime($t) {
       <div class="modal-actions">
         <button type="button" class="btn-cancel" id="importCloseBtn">Close</button>
         <button type="button" class="btn-confirm" id="importAllBtn" disabled>Add all to pool</button>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
+
+  <?php if ($canManage): ?>
+  <div class="modal-backdrop" id="discordModalBackdrop">
+    <div class="modal discord-modal">
+      <h2>Post to Discord</h2>
+      <div class="discord-preview-wrap"><canvas id="discordPreviewCanvas"></canvas></div>
+      <div class="discord-field">
+        <label for="discordWebhookSelect">Webhook</label>
+        <select id="discordWebhookSelect">
+          <?php if (!$webhooks): ?><option value="">No webhooks configured</option><?php endif; ?>
+          <?php foreach ($webhooks as $w): ?><option value="<?= h($w['url']) ?>"><?= h($w['name']) ?></option><?php endforeach; ?>
+        </select>
+      </div>
+      <div class="discord-field">
+        <label for="discordMessageInput">Message (optional)</label>
+        <textarea id="discordMessageInput" placeholder="Add a note to post alongside the image&hellip;"></textarea>
+      </div>
+      <div class="import-status" id="discordStatus"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="discordCloseBtn">Close</button>
+        <button type="button" class="btn-confirm" id="discordPostBtn">Post</button>
       </div>
     </div>
   </div>
@@ -322,6 +360,7 @@ const roster = <?= json_encode($roster) ?>;
 let pool = <?= json_encode($pool) ?>;
 const POOL_SAVE_URL = <?= json_encode('/raids/pool-save.php?slug=' . $slug) ?>;
 const IMPORT_URL = <?= json_encode('/raids/import-signups.php?slug=' . $slug) ?>;
+const WEBHOOKS = <?= json_encode($webhooks) ?>;
 let stampToon = null;
 let importRows = [];
 
@@ -1104,6 +1143,223 @@ function wireImportControls() {
   if (allBtn) allBtn.addEventListener('click', addAllImportRows);
 }
 
+// Discord post: renders the raid's sections/tables onto a single canvas (a generic,
+// vertically-stacked approximation of the on-screen layout -- reuses the same class
+// colors/contrast/chunking helpers as the live grid, but skips cell-merge colspans and
+// on-screen flex-wrap in favor of stacking every table top-to-bottom) and posts it as an
+// image attachment straight to the selected Discord webhook, matching IO's publish flow.
+function raidCanvasMetrics() {
+  return { width: 900, pad: 20, rowH: 28, headH: 26, groupH: 20, labelW: 110, sectionHeadH: 32, tableTitleH: 26, gapSection: 20, gapTable: 12 };
+}
+
+function flattenSectionTables(tables) {
+  const out = [];
+  for (const tb of tables) {
+    out.push(tb);
+    for (const g of tb.columnGroups) {
+      if (g.tables.length) out.push(...flattenSectionTables(g.tables));
+    }
+  }
+  return out;
+}
+
+function measureTableHeight(tb, m) {
+  let h = tb.title ? m.tableTitleH : 0;
+  if (!tb.columns.length) return h;
+  const chunks = chunkColumns(tb.columns);
+  for (const chunk of chunks) {
+    h += m.headH;
+    if (tb.columnGroups.some(g => chunk.some(c => c.groupId === g.id))) h += m.groupH;
+    for (const r of tb.rows) h += r.kind === 'spacer' ? Math.max(6, m.rowH / 2) : m.rowH;
+  }
+  return h;
+}
+
+function measureRaidCanvasHeight(m) {
+  let h = m.pad;
+  for (const sec of sections) {
+    h += m.sectionHeadH + 6;
+    const tables = flattenSectionTables(sec.tables);
+    if (!tables.length) { h += 24; continue; }
+    for (const tb of tables) h += measureTableHeight(tb, m) + m.gapTable;
+    h += m.gapSection;
+  }
+  return h;
+}
+
+function drawTable(ctx, tb, m, startY) {
+  let y = startY;
+  const x0 = m.pad;
+  const width = m.width - m.pad * 2;
+  if (tb.title) {
+    ctx.fillStyle = tb.headerColor || '#1c2333';
+    ctx.fillRect(x0, y, width, m.tableTitleH);
+    ctx.fillStyle = contrastText(tb.headerColor || '#1c2333');
+    ctx.font = 'bold 13px Segoe UI, Arial, sans-serif';
+    ctx.fillText(tb.title, x0 + 8, y + m.tableTitleH / 2);
+    y += m.tableTitleH;
+  }
+  if (!tb.columns.length) return y;
+
+  for (const chunk of chunkColumns(tb.columns)) {
+    const dataCols = chunk.filter(c => c.kind !== 'spacer');
+    const spacerCols = chunk.filter(c => c.kind === 'spacer');
+    const colW = dataCols.length ? (width - m.labelW - spacerCols.length * 10) / dataCols.length : 0;
+    let cx = x0 + m.labelW;
+    const colBoxes = chunk.map(c => {
+      const w = c.kind === 'spacer' ? 10 : colW;
+      const box = { c, x: cx, w };
+      cx += w;
+      return box;
+    });
+
+    if (tb.columnGroups.some(g => chunk.some(c => c.groupId === g.id))) {
+      let i = 0;
+      while (i < chunk.length) {
+        const gid = chunk[i].groupId;
+        if (!gid) { i++; continue; }
+        let span = 1;
+        while (i + span < chunk.length && chunk[i + span].groupId === gid) span++;
+        const grp = tb.columnGroups.find(g => g.id === gid);
+        const box = colBoxes[i];
+        const totalW = colBoxes.slice(i, i + span).reduce((s, b) => s + b.w, 0);
+        if (grp) {
+          ctx.fillStyle = grp.color || '#2a3350';
+          ctx.fillRect(box.x, y, totalW, m.groupH);
+          ctx.fillStyle = contrastText(grp.color || '#2a3350');
+          ctx.font = 'bold 10px Segoe UI, Arial, sans-serif';
+          ctx.fillText(grp.title || '', box.x + 4, y + m.groupH / 2, totalW - 8);
+        }
+        i += span;
+      }
+      y += m.groupH;
+    }
+
+    ctx.fillStyle = '#1c2333';
+    ctx.fillRect(x0, y, m.labelW, m.headH);
+    colBoxes.forEach(box => {
+      if (box.c.kind === 'spacer') return;
+      ctx.fillStyle = box.c.headerColor || '#1c2333';
+      ctx.fillRect(box.x, y, box.w, m.headH);
+      ctx.fillStyle = contrastText(box.c.headerColor || '#1c2333');
+      ctx.font = 'bold 11px Segoe UI, Arial, sans-serif';
+      ctx.fillText(box.c.label || '', box.x + 6, y + m.headH / 2, box.w - 8);
+    });
+    y += m.headH;
+
+    for (const r of tb.rows) {
+      if (r.kind === 'spacer') { y += Math.max(6, m.rowH / 2); continue; }
+      const rowH = m.rowH;
+      ctx.fillStyle = '#141a2c';
+      ctx.fillRect(x0, y, width, rowH);
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.strokeRect(x0 + 0.5, y + 0.5, width - 1, rowH - 1);
+      ctx.fillStyle = '#c7cfe8';
+      ctx.font = '11px Segoe UI, Arial, sans-serif';
+      ctx.fillText(r.label || '', x0 + 6, y + rowH / 2, m.labelW - 10);
+      colBoxes.forEach(box => {
+        if (box.c.kind === 'spacer') return;
+        const cell = tb.cells[r.id + '_' + box.c.id];
+        if (cell && cell.name) {
+          const color = classColor(cell.class);
+          const pad = 3;
+          ctx.fillStyle = color;
+          ctx.fillRect(box.x + pad, y + pad, box.w - pad * 2, rowH - pad * 2);
+          ctx.fillStyle = contrastText(color);
+          ctx.font = '11px Segoe UI, Arial, sans-serif';
+          ctx.fillText(cell.name, box.x + pad + 5, y + rowH / 2, box.w - pad * 2 - 10);
+        }
+      });
+      y += rowH;
+    }
+  }
+  return y;
+}
+
+function renderRaidCanvas() {
+  const m = raidCanvasMetrics();
+  const height = Math.max(80, measureRaidCanvasHeight(m));
+  const canvas = document.createElement('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = m.width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = m.width + 'px';
+  canvas.style.height = height + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#0b0e1a';
+  ctx.fillRect(0, 0, m.width, height);
+
+  let y = m.pad;
+  for (const sec of sections) {
+    const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
+    ctx.fillStyle = meta.color;
+    ctx.fillRect(m.pad, y, m.width - m.pad * 2, m.sectionHeadH);
+    ctx.fillStyle = contrastText(meta.color);
+    ctx.font = 'bold 15px Segoe UI, Arial, sans-serif';
+    ctx.fillText(`${meta.icon} ${sec.title}`.trim(), m.pad + 10, y + m.sectionHeadH / 2);
+    y += m.sectionHeadH + 6;
+
+    const tables = flattenSectionTables(sec.tables);
+    if (!tables.length) {
+      ctx.fillStyle = '#8892b0';
+      ctx.font = '13px Segoe UI, Arial, sans-serif';
+      ctx.fillText('No tables in this section.', m.pad + 10, y + 12);
+      y += 24;
+    }
+    for (const tb of tables) {
+      y = drawTable(ctx, tb, m, y);
+      y += m.gapTable;
+    }
+    y += m.gapSection;
+  }
+  return canvas;
+}
+
+function wireDiscordControls() {
+  const toggleBtn = document.getElementById('discordToggleBtn');
+  const backdrop = document.getElementById('discordModalBackdrop');
+  if (!toggleBtn || !backdrop) return;
+  const closeBtn = document.getElementById('discordCloseBtn');
+  const postBtn = document.getElementById('discordPostBtn');
+  const select = document.getElementById('discordWebhookSelect');
+  const statusEl = document.getElementById('discordStatus');
+
+  toggleBtn.addEventListener('click', () => {
+    const canvas = renderRaidCanvas();
+    canvas.id = 'discordPreviewCanvas';
+    const old = document.getElementById('discordPreviewCanvas');
+    old.parentElement.replaceChild(canvas, old);
+    statusEl.textContent = '';
+    backdrop.classList.add('open');
+  });
+  if (closeBtn) closeBtn.addEventListener('click', () => backdrop.classList.remove('open'));
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.classList.remove('open'); });
+
+  if (postBtn) postBtn.addEventListener('click', () => {
+    const url = select ? select.value : '';
+    if (!url) { statusEl.textContent = 'No webhook selected.'; return; }
+    const canvas = document.getElementById('discordPreviewCanvas');
+    postBtn.disabled = true;
+    statusEl.textContent = 'Posting…';
+    canvas.toBlob(blob => {
+      if (!blob) { statusEl.textContent = 'Could not render image.'; postBtn.disabled = false; return; }
+      const message = document.getElementById('discordMessageInput').value.trim();
+      const form = new FormData();
+      form.append('files[0]', blob, 'raid.png');
+      form.append('payload_json', JSON.stringify({ username: 'RaidRoster', content: message || undefined }));
+      fetch(url, { method: 'POST', body: form })
+        .then(r => {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          statusEl.textContent = 'Posted!';
+          postBtn.disabled = false;
+        })
+        .catch(() => { statusEl.textContent = 'Failed to post — check the webhook.'; postBtn.disabled = false; });
+    }, 'image/png');
+  });
+}
+
 function wireClearAll() {
   const btn = document.getElementById('clearAllBtn');
   if (!btn) return;
@@ -1114,7 +1370,7 @@ function wireClearAll() {
 }
 
 render();
-if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireClearAll(); }
+if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireDiscordControls(); wireClearAll(); }
 </script>
 </body>
 </html>
