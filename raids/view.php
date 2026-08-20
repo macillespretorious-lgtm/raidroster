@@ -150,22 +150,6 @@ function fmtTime($t) {
       font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
       color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0;
     }
-    .tbl-head {
-      display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 6px 6px 0 0;
-      background: rgba(255,255,255,0.04); cursor: grab;
-    }
-    .tbl-head:active { cursor: grabbing; }
-    .tbl-title-text {
-      font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0;
-    }
-    .tbl-title-empty { opacity: .55; font-style: italic; text-transform: none; letter-spacing: 0; font-weight: 600; }
-    .drag-handle { color: #55607a; font-size: 13px; cursor: grab; flex-shrink: 0; }
-    table.grid th.row-label[draggable="true"],
-    table.grid th[data-drag-kind="column"],
-    table.grid th.group-th[draggable="true"] { cursor: grab; }
-    table.grid th.row-label[draggable="true"]:active,
-    table.grid th[data-drag-kind="column"]:active,
-    table.grid th.group-th[draggable="true"]:active { cursor: grabbing; }
     .group-tables { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; margin: 8px 0 4px 4px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,0.15); }
     .grid-scroll { overflow-x: auto; }
     table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
@@ -253,7 +237,6 @@ function fmtTime($t) {
 const SLUG = <?= json_encode($slug) ?>;
 const CAN_MANAGE = <?= json_encode($canManage) ?>;
 const CELLS_SAVE_URL = <?= json_encode('/raids/cells-save.php?slug=' . $slug) ?>;
-const STRUCTURE_SAVE_URL = <?= json_encode('/raids/structure-save.php?slug=' . $slug) ?>;
 const LOCK_URL = <?= json_encode('/raids/lock-save.php?slug=' . $slug) ?>;
 const IS_ADMIN = <?= json_encode($isAdmin) ?>;
 const TEMPLATE_ID = <?= json_encode($templateId) ?>;
@@ -485,164 +468,11 @@ function allTables() {
 
 function findTable(id) { return allTables().find(t => t.id === id) || null; }
 
-function findGroup(id) {
-  for (const tb of allTables()) {
-    const g = tb.columnGroups.find(gr => gr.id === id);
-    if (g) return g;
-  }
-  return null;
-}
-
-function getSiblingList(kind, parentKind, parentId) {
-  if (kind === 'table') {
-    if (parentKind === 'group') {
-      const g = findGroup(parentId);
-      return g ? g.tables : [];
-    }
-    const sec = sections.find(s => s.id === parentId);
-    return sec ? sec.tables : [];
-  }
-  if (kind === 'column') {
-    const tb = findTable(parentId);
-    return tb ? tb.columns : [];
-  }
-  if (kind === 'row') {
-    const tb = findTable(parentId);
-    return tb ? tb.rows : [];
-  }
-  if (kind === 'group') {
-    const tb = findTable(parentId);
-    return tb ? tb.columnGroups : [];
-  }
-  return [];
-}
-
-// Structural drag-and-drop: reorder only (no add/rename/delete here, that stays
-// template-only). Mirrors the template editor's whole-entity + FLIP technique.
-let dragData = null;
-let dragSnapshot = null;
-let dragCompleted = false;
-let dragOverKey = null;
-
-function withFlip(mutateFn) {
-  const before = new Map();
-  document.querySelectorAll('[data-flip-id]').forEach(el => before.set(el.dataset.flipId, el.getBoundingClientRect()));
-  mutateFn();
-  document.querySelectorAll('[data-flip-id]').forEach(el => {
-    const b = before.get(el.dataset.flipId);
-    if (!b) return;
-    const a = el.getBoundingClientRect();
-    const dx = b.left - a.left, dy = b.top - a.top;
-    if (!dx && !dy) return;
-    el.style.transition = 'none';
-    el.style.transform = `translate(${dx}px,${dy}px)`;
-    requestAnimationFrame(() => { el.style.transition = 'transform 180ms ease'; el.style.transform = ''; });
-  });
-}
-
-function previewMove(kind, targetParentKind, targetParentId, overId, before) {
-  withFlip(() => {
-    const srcList = getSiblingList(kind, dragData.parentKind, dragData.parentId);
-    const idx = srcList.findIndex(x => x.id === dragData.id);
-    if (idx === -1) return;
-    const [item] = srcList.splice(idx, 1);
-
-    if (kind === 'table' && (targetParentKind !== dragData.parentKind || targetParentId !== dragData.parentId)) {
-      dragData.parentKind = targetParentKind;
-      dragData.parentId = targetParentId;
-    }
-
-    const destList = getSiblingList(kind, dragData.parentKind, dragData.parentId);
-    let insertAt = destList.length;
-    if (overId != null) {
-      const overIdx = destList.findIndex(x => x.id === overId);
-      if (overIdx !== -1) insertAt = before ? overIdx : overIdx + 1;
-    }
-    destList.splice(insertAt, 0, item);
-    render();
-  });
-}
-
-function finalizeDrop() {
-  dragCompleted = true;
-  const kind = dragData.kind;
-  const list = getSiblingList(kind, dragData.parentKind, dragData.parentId);
-  const orderedIds = list.map(x => x.id);
-  const payload = { action: 'reorder', raidId: RAID_ID, kind, orderedIds, parentId: dragData.parentId };
-  if (kind === 'table') payload.parentKind = dragData.parentKind;
-  fetch(STRUCTURE_SAVE_URL, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-  }).then(r => r.json()).then(d => {
-    if (!d.success) { alert(d.error || 'Reorder failed'); withFlip(() => { sections = JSON.parse(dragSnapshot); render(); }); return; }
-    withFlip(() => { sections = d.sections; render(); });
-  }).catch(() => { withFlip(() => { sections = JSON.parse(dragSnapshot); render(); }); });
-}
-
 function render() {
   const el = document.getElementById('sectionsEl');
   el.innerHTML = sections.map(renderSection).join('');
 
   if (CAN_MANAGE) {
-    el.querySelectorAll('[data-drag-kind]').forEach(node => {
-      node.addEventListener('dragstart', e => {
-        if (lockedByOther) { e.preventDefault(); return; }
-        const kind = node.dataset.dragKind;
-        const id = parseInt(node.dataset.dragId, 10);
-        const parentId = parseInt(node.dataset.dragParent, 10);
-        const parentKind = node.dataset.dragParentKind || null;
-        dragData = { kind, id, parentId, parentKind };
-        dragSnapshot = JSON.stringify(sections);
-        dragCompleted = false;
-        dragOverKey = null;
-        const ghost = node.closest('[data-flip-id]') || node;
-        try { e.dataTransfer.setDragImage(ghost, 10, 10); } catch (err) {}
-        e.dataTransfer.effectAllowed = 'move';
-      });
-      node.addEventListener('dragend', () => {
-        if (!dragCompleted && dragSnapshot) {
-          withFlip(() => { sections = JSON.parse(dragSnapshot); render(); });
-        }
-        dragData = null; dragSnapshot = null; dragOverKey = null;
-      });
-    });
-
-    el.querySelectorAll('[data-drop-kind]').forEach(node => {
-      node.addEventListener('dragover', e => {
-        if (!dragData) return;
-        e.preventDefault();
-        const dropKind = node.dataset.dropKind;
-        if (dropKind === 'table-container') {
-          if (dragData.kind !== 'table') return;
-          const parentId = parseInt(node.dataset.dropParent, 10);
-          const parentKind = node.dataset.dropParentKind;
-          const key = `container:${parentKind}:${parentId}`;
-          if (dragOverKey === key) return;
-          dragOverKey = key;
-          previewMove('table', parentKind, parentId, null, false);
-          return;
-        }
-        if (dropKind !== dragData.kind) return;
-        const overId = parseInt(node.dataset.dropId, 10);
-        if (overId === dragData.id) return;
-        const rect = node.getBoundingClientRect();
-        const vertical = dropKind === 'row';
-        const before = vertical
-          ? (e.clientY < rect.top + rect.height / 2)
-          : (e.clientX < rect.left + rect.width / 2);
-        const parentId = parseInt(node.dataset.dropParent, 10);
-        const parentKind = node.dataset.dropParentKind || dragData.parentKind;
-        const key = `${dropKind}:${overId}:${before ? 'b' : 'a'}`;
-        if (dragOverKey === key) return;
-        dragOverKey = key;
-        previewMove(dropKind, parentKind, parentId, overId, before);
-      });
-      node.addEventListener('drop', e => {
-        if (!dragData) return;
-        e.preventDefault();
-        finalizeDrop();
-      });
-    });
-
     el.querySelectorAll('td.cell.editable').forEach(td => {
       td.addEventListener('click', function onClick() {
         td.removeEventListener('click', onClick);
@@ -742,11 +572,7 @@ function groupHeaderRow(cols, columnGroups, tb) {
     while (i + span < cols.length && cols[i + span].groupId === gid) span++;
     const grp = columnGroups.find(g => g.id === gid);
     if (grp) {
-      const dragAttrs = CAN_MANAGE && !lockedByOther
-        ? ` draggable="true" data-drag-kind="group" data-drag-id="${grp.id}" data-drag-parent="${tb.id}"`
-        : '';
-      const dropAttrs = CAN_MANAGE ? ` data-drop-kind="group" data-drop-id="${grp.id}" data-drop-parent="${tb.id}"` : '';
-      cells.push(`<th class="group-th" colspan="${span}" style="background:${grp.color};color:${contrastText(grp.color)};"${dragAttrs}${dropAttrs} data-flip-id="group:${grp.id}">${esc(grp.title)}</th>`);
+      cells.push(`<th class="group-th" colspan="${span}" style="background:${grp.color};color:${contrastText(grp.color)};">${esc(grp.title)}</th>`);
     } else {
       cells.push(`<th colspan="${span}"></th>`);
     }
@@ -767,11 +593,7 @@ function headerCellsForChunk(chunkCols, tb) {
     const span = Math.min(c.headerColspan || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     const style = c.headerColor ? ` style="background:${c.headerColor};color:${contrastText(c.headerColor)};"` : '';
-    const dragAttrs = CAN_MANAGE && !lockedByOther
-      ? ` draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}"`
-      : '';
-    const dropAttrs = CAN_MANAGE ? ` data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}"` : '';
-    out.push(`<th${colspanAttr}${style}${dragAttrs}${dropAttrs} data-flip-id="column:${c.id}">${esc(c.label)}</th>`);
+    out.push(`<th${colspanAttr}${style}>${esc(c.label)}</th>`);
     i += span;
   }
   return out.join('');
@@ -809,14 +631,10 @@ function renderColumnBlock(chunkCols, tb) {
     }).join('') + `</colgroup>`;
 
   const bodyRows = tb.rows.map(r => {
-    const dragAttrs = CAN_MANAGE && !lockedByOther
-      ? ` draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}"`
-      : '';
-    const dropAttrs = CAN_MANAGE ? ` data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}"` : '';
     if (r.kind === 'spacer') {
-      return `<tr data-flip-id="row:${r.id}"${dropAttrs} style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
     }
-    return `<tr data-flip-id="row:${r.id}"${dropAttrs}><th class="row-label"${dragAttrs}>${esc(r.label)}</th>${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    return `<tr><th class="row-label">${esc(r.label)}</th>${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
   }).join('');
 
   const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb);
@@ -831,25 +649,20 @@ function renderColumnBlock(chunkCols, tb) {
     </div>`;
 }
 
-function renderTable(tb, parentKind, parentId) {
+function renderTable(tb) {
   const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
   const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
-    <div class="group-tables" data-drop-kind="table-container" data-drop-parent="${g.id}" data-drop-parent-kind="group">
-      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id)).join('')}
+    <div class="group-tables">
+      ${g.tables.map(ctb => renderTable(ctb)).join('')}
     </div>`).join('');
 
-  const dragAttrs = CAN_MANAGE && !lockedByOther
-    ? ` draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}"`
-    : '';
-  const headBar = CAN_MANAGE
-    ? `<div class="tbl-head"${dragAttrs}><span class="drag-handle">⠿</span>${tb.title ? `<span class="tbl-title-text"${titleStyle}>${esc(tb.title)}</span>` : '<span class="tbl-title-text tbl-title-empty">Table</span>'}</div>`
-    : (tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : '');
+  const headBar = tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : '';
 
-  return `<div class="tbl-wrap" data-flip-id="table:${tb.id}" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}">
+  return `<div class="tbl-wrap">
     ${headBar}
     ${blocks}
     ${nestedGroupsHtml}
@@ -860,8 +673,8 @@ function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};">${meta.icon} ${esc(sec.title)}</div>
-    <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section">
-      ${sec.tables.map(tb => renderTable(tb, 'section', sec.id)).join('') || '<p class="empty">No tables in this section.</p>'}
+    <div class="section-body">
+      ${sec.tables.map(tb => renderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }
