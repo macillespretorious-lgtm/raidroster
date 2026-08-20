@@ -51,6 +51,23 @@ CREATE TABLE kv_store (
     FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Curated per-raid pool of available toons (mains/alts/pugs) shown in the raid
+-- view's assignment panel. Not the same as the guild roster -- a raid manager
+-- opts characters into this pool before dragging them onto cells. toon_id
+-- references toons.id or toon_alts.id depending on toon_kind (no FK: the two
+-- id spaces are independently generated and not guaranteed disjoint).
+CREATE TABLE raid_pool (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    raid_id INT NOT NULL,
+    toon_kind ENUM('main', 'alt', 'pug') NOT NULL,
+    toon_id VARCHAR(64) NULL,
+    pug_name VARCHAR(60) NULL,
+    pug_class VARCHAR(30) NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    UNIQUE KEY uniq_pool_toon (raid_id, toon_kind, toon_id),
+    FOREIGN KEY (raid_id) REFERENCES raids(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Advisory editing lock for templates/raids (see includes/edit_lock.php).
 -- Purely advisory: does not gate the holder's own writes server-side, only
 -- informs/disables controls for other concurrent editors client-side.

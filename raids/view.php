@@ -61,19 +61,27 @@ function fetch_table_full($pdo, $tb) {
     }
 
     $stmtCell = $pdo->prepare(
-        'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.note, t.main_name, t.class
-         FROM raid_cells c LEFT JOIN toons t ON t.id = c.toon_id
+        'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.note,
+                COALESCE(t.main_name, a.name) AS toon_name,
+                COALESCE(t.class, a.class) AS toon_class
+         FROM raid_cells c
+         LEFT JOIN toons t ON c.toon_kind = \'main\' AND t.id = c.toon_id
+         LEFT JOIN toon_alts a ON c.toon_kind = \'alt\' AND a.id = c.toon_id
          WHERE c.table_id = ?'
     );
     $stmtCell->execute([$tb['id']]);
     $cells = [];
     foreach ($stmtCell->fetchAll(PDO::FETCH_ASSOC) as $cell) {
+        $isPug = $cell['toon_kind'] === 'pug';
         $cells[$cell['row_id'] . '_' . $cell['column_id']] = [
-            'id'     => (int)$cell['id'],
-            'toonId' => $cell['toon_id'],
-            'name'   => $cell['main_name'],
-            'class'  => $cell['class'],
-            'note'   => $cell['note'],
+            'id'       => (int)$cell['id'],
+            'toonKind' => $cell['toon_kind'],
+            'toonId'   => $cell['toon_id'],
+            'pugName'  => $cell['pug_name'],
+            'pugClass' => $cell['pug_class'],
+            'name'     => $isPug ? $cell['pug_name'] : $cell['toon_name'],
+            'class'    => $isPug ? $cell['pug_class'] : $cell['toon_class'],
+            'note'     => $cell['note'],
         ];
     }
 
@@ -108,10 +116,45 @@ function fetch_raid_structure($pdo, $raidId) {
 $sections = fetch_raid_structure($pdo, $raidId);
 
 $roster = [];
+$pool = [];
 if ($canManage) {
-    $stmt = $pdo->prepare("SELECT id, main_name, class, status FROM toons WHERE guild_id = ? ORDER BY main_name");
+    $stmt = $pdo->prepare('SELECT id, main_name, class, status FROM toons WHERE guild_id = ? ORDER BY main_name');
     $stmt->execute([$tenant['id']]);
-    $roster = array_map(fn($t) => ['id' => $t['id'], 'name' => $t['main_name'], 'class' => $t['class'], 'status' => $t['status']], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    $mains = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt = $pdo->prepare('SELECT id, main_id, name, class, status FROM toon_alts WHERE guild_id = ? ORDER BY name');
+    $stmt->execute([$tenant['id']]);
+    $altsByMain = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $a) {
+        $altsByMain[$a['main_id']][] = ['id' => $a['id'], 'name' => $a['name'], 'class' => $a['class'], 'status' => $a['status']];
+    }
+
+    $roster = array_map(fn($t) => [
+        'id' => $t['id'], 'name' => $t['main_name'], 'class' => $t['class'], 'status' => $t['status'],
+        'alts' => $altsByMain[$t['id']] ?? [],
+    ], $mains);
+
+    $stmt = $pdo->prepare(
+        'SELECT p.id, p.toon_kind, p.toon_id, p.pug_name, p.pug_class, p.sort_order,
+                COALESCE(t.main_name, a.name) AS toon_name,
+                COALESCE(t.class, a.class) AS toon_class
+         FROM raid_pool p
+         LEFT JOIN toons t ON p.toon_kind = \'main\' AND t.id = p.toon_id
+         LEFT JOIN toon_alts a ON p.toon_kind = \'alt\' AND a.id = p.toon_id
+         WHERE p.raid_id = ?
+         ORDER BY p.sort_order, p.id'
+    );
+    $stmt->execute([$raidId]);
+    $pool = array_map(function ($p) {
+        $isPug = $p['toon_kind'] === 'pug';
+        return [
+            'id' => (int)$p['id'], 'toonKind' => $p['toon_kind'], 'toonId' => $p['toon_id'],
+            'pugName' => $p['pug_name'], 'pugClass' => $p['pug_class'],
+            'name' => $isPug ? $p['pug_name'] : $p['toon_name'],
+            'class' => $isPug ? $p['pug_class'] : $p['toon_class'],
+            'sortOrder' => (int)$p['sort_order'],
+        ];
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
 function h($s) { return htmlspecialchars($s ?? ''); }
@@ -161,15 +204,68 @@ function fmtTime($t) {
     th.spacer-th, td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
 
     .toon-chip {
-      display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 10px;
+      position: relative; display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 10px;
       font-size: 11px; font-weight: 700; color: #000; white-space: nowrap; cursor: default;
     }
-    td.cell.editable .toon-chip, td.cell.editable .empty-slot { cursor: pointer; }
+    td.cell.editable .toon-chip[draggable="true"] { cursor: grab; }
+    td.cell.editable.drop-hover { background: rgba(88,101,242,0.18); }
+    .chip-clear {
+      display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;
+      margin-left: 2px; border-radius: 50%; background: rgba(0,0,0,0.25); color: inherit; font-size: 11px;
+      line-height: 1; cursor: pointer;
+    }
+    .chip-clear:hover { background: rgba(0,0,0,0.45); }
     .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
     .cell-note { display: block; font-size: 10px; color: #7f8bad; margin-top: 2px; }
-    select.cell-picker { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.2); color: #e8ecff; font: inherit; font-size: 11px; padding: 3px 5px; border-radius: 5px; max-width: 130px; }
 
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
+
+    .pool-toolbar { margin: 8px 0 4px; }
+    .btn-pool-toggle { background: rgba(88,101,242,0.15); border: 1px solid rgba(88,101,242,0.4); color: #b9c0ff; font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+    .btn-pool-toggle:hover { background: rgba(88,101,242,0.28); }
+    .pool-drawer {
+      position: fixed; top: 0; right: 0; bottom: 0; width: 300px; max-width: 90vw; z-index: 400;
+      background: #111827; border-left: 1px solid rgba(255,255,255,0.1); box-shadow: -8px 0 24px rgba(0,0,0,0.35);
+      display: flex; flex-direction: column; padding: 16px; gap: 12px; overflow-y: auto;
+      transform: translateX(100%); transition: transform .18s ease, border-color .18s ease;
+    }
+    .pool-drawer.open { transform: translateX(0); }
+    .pool-drawer.stamp-mode { border-left-color: #f0c04a; box-shadow: -8px 0 24px rgba(240,192,74,0.25); }
+    .pool-drawer-head { display: flex; align-items: center; justify-content: space-between; }
+    .pool-drawer-head h2 { font-size: 15px; }
+    .pool-drawer-close { background: none; border: none; color: #a8b4d0; font-size: 20px; cursor: pointer; line-height: 1; }
+    .pool-drawer-close:hover { color: #e8ecff; }
+    .pool-search-wrap { position: relative; }
+    #poolSearchInput {
+      width: 100%; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px;
+      background: #0a0f1e; color: #e8ecff; font-size: 12.5px; font: inherit;
+    }
+    .pool-search-results {
+      display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 10;
+      max-height: 200px; overflow-y: auto; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 7px; box-shadow: 0 8px 22px rgba(0,0,0,0.4);
+    }
+    .pool-search-results.open { display: block; }
+    .pool-search-item { padding: 7px 10px; font-size: 12px; color: #c7cef2; cursor: pointer; }
+    .pool-search-item:hover { background: rgba(88,101,242,0.15); color: #e8ecff; }
+    .pool-search-empty { color: #7f8bad; font-style: italic; cursor: default; }
+    .pool-search-empty:hover { background: none; }
+    .pool-add-pug { display: flex; gap: 6px; }
+    #pugNameInput { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12.5px; font: inherit; }
+    #pugClassInput { padding: 8px 6px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12px; font: inherit; }
+    #pugAddBtn { padding: 8px 12px; border: none; border-radius: 7px; background: #4a63e0; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+    #pugAddBtn:hover { background: #3b52c4; }
+    .pool-list { display: flex; flex-direction: column; gap: 6px; }
+    .pool-chip-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    .pool-chip-row.indent { margin-left: 16px; }
+    .pool-chip { flex: 1; min-width: 0; cursor: grab; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; }
+    .pool-chip.stamped { outline: 2px solid #f0c04a; outline-offset: 1px; }
+    .pool-tag { font-size: 9px; font-weight: 700; opacity: .75; margin-left: 4px; }
+    .pool-tag.pug { color: #5a3d00; }
+    .pool-remove { flex-shrink: 0; background: none; border: none; color: #7f8bad; font-size: 15px; cursor: pointer; line-height: 1; padding: 2px 4px; }
+    .pool-remove:hover { color: #e88585; }
+    .pool-empty { color: #7f8bad; font-size: 12px; padding: 8px 0; }
+    .pool-hint { color: #55607a; font-size: 11px; line-height: 1.5; margin-top: auto; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
 
     .lock-bar { margin: 8px 0 4px; }
     .lock-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #a8b4d0; cursor: pointer; user-select: none; }
@@ -219,6 +315,7 @@ function fmtTime($t) {
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
     <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
     <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
+    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -233,6 +330,30 @@ function fmtTime($t) {
     <div class="modal sync-modal" id="syncModalContent"></div>
   </div>
 
+  <?php if ($canManage): ?>
+  <div class="pool-drawer" id="poolDrawer">
+    <div class="pool-drawer-head">
+      <h2>Available toons</h2>
+      <button type="button" class="pool-drawer-close" id="poolDrawerClose">&times;</button>
+    </div>
+    <div class="pool-search-wrap">
+      <input type="text" id="poolSearchInput" placeholder="Search roster to add&hellip;" autocomplete="off">
+      <div class="pool-search-results" id="poolSearchResults"></div>
+    </div>
+    <div class="pool-add-pug">
+      <input type="text" id="pugNameInput" placeholder="PUG name">
+      <select id="pugClassInput">
+        <option value="">Class</option>
+        <option>Warrior</option><option>Paladin</option><option>Priest</option><option>Druid</option>
+        <option>Mage</option><option>Rogue</option><option>Warlock</option><option>Shaman</option><option>Hunter</option>
+      </select>
+      <button type="button" id="pugAddBtn">Add</button>
+    </div>
+    <div class="pool-list" id="poolList"></div>
+    <p class="pool-hint">Drag a toon onto a slot to assign it. Alt+Click an assigned toon to cycle its alts. Ctrl/Cmd+Click a pool toon to stamp it repeatedly onto empty slots.</p>
+  </div>
+  <?php endif; ?>
+
 <script>
 const SLUG = <?= json_encode($slug) ?>;
 const CAN_MANAGE = <?= json_encode($canManage) ?>;
@@ -245,6 +366,9 @@ const RAID_ID = <?= json_encode($raidId) ?>;
 const USER_ID = <?= json_encode($user['id']) ?>;
 let sections = <?= json_encode($sections) ?>;
 const roster = <?= json_encode($roster) ?>;
+let pool = <?= json_encode($pool) ?>;
+const POOL_SAVE_URL = <?= json_encode('/raids/pool-save.php?slug=' . $slug) ?>;
+let stampToon = null;
 
 // Editing lock: advisory only, warns concurrent raid managers off each
 // other's structural edits. Only relevant to users who can manage the raid.
@@ -445,16 +569,15 @@ function contrastText(hex) {
 }
 
 function chipHtml(cell) {
-  if (!cell || !cell.toonId) return '<span class="empty-slot">+</span>';
+  if (!cell || !cell.name) return '<span class="empty-slot">+</span>';
   const color = classColor(cell.class);
-  let html = `<span class="toon-chip" style="background:${color};">${esc(cell.name || cell.toonId)}</span>`;
+  const dragAttrs = CAN_MANAGE
+    ? ` draggable="true" data-source="cell" data-cell-id="${cell.id}" data-toon-kind="${esc(cell.toonKind)}" data-toon-id="${esc(cell.toonId || '')}" data-pug-name="${esc(cell.pugName || '')}" data-pug-class="${esc(cell.pugClass || '')}"`
+    : '';
+  let html = `<span class="toon-chip"${dragAttrs} style="background:${color};">${esc(cell.name)}`;
+  if (CAN_MANAGE) html += `<span class="chip-clear" data-action="clear" data-cell-id="${cell.id}">&times;</span>`;
+  html += `</span>`;
   if (cell.note) html += `<span class="cell-note">${esc(cell.note)}</span>`;
-  return html;
-}
-
-function rosterOptionsHtml(selectedId) {
-  let html = '<option value="">— empty —</option>';
-  html += roster.map(t => `<option value="${esc(t.id)}" ${t.id === selectedId ? 'selected' : ''}>${esc(t.name)} (${esc(t.class)})</option>`).join('');
   return html;
 }
 
@@ -474,58 +597,143 @@ function render() {
 
   if (CAN_MANAGE) {
     el.querySelectorAll('td.cell.editable').forEach(td => {
-      td.addEventListener('click', function onClick() {
-        td.removeEventListener('click', onClick);
-        const rowId = parseInt(td.dataset.rowId, 10);
-        const colId = parseInt(td.dataset.colId, 10);
+      td.addEventListener('dragover', e => { e.preventDefault(); td.classList.add('drop-hover'); });
+      td.addEventListener('dragleave', () => td.classList.remove('drop-hover'));
+      td.addEventListener('drop', e => {
+        e.preventDefault();
+        td.classList.remove('drop-hover');
+        handleDrop(td, e);
+      });
+      td.addEventListener('click', () => {
+        if (!stampToon) return;
         const cellId = parseInt(td.dataset.cellId, 10);
-        const tableId = parseInt(td.dataset.tableId, 10);
-        const cur = findCell(tableId, rowId, colId);
-        const sel = document.createElement('select');
-        sel.className = 'cell-picker';
-        sel.innerHTML = rosterOptionsHtml(cur ? cur.toonId : null);
-        td.innerHTML = '';
-        td.appendChild(sel);
-        sel.focus();
-        sel.addEventListener('change', () => {
-          const toonId = sel.value || null;
-          let note = cur ? cur.note : null;
-          persistCell(cellId, toonId, note).then(() => { render(); });
-        });
-        sel.addEventListener('blur', () => { render(); });
+        const cur = findCellById(cellId);
+        if (cur && cur.name) return; // stamp mode only fills empty slots
+        saveCellPatch(cellId, { toonKind: stampToon.toonKind, toonId: stampToon.toonId, pugName: stampToon.pugName, pugClass: stampToon.pugClass });
+      });
+    });
+    el.querySelectorAll('.toon-chip[draggable="true"]').forEach(chip => {
+      chip.addEventListener('dragstart', e => {
+        const payload = {
+          source: 'cell',
+          cellId: parseInt(chip.dataset.cellId, 10),
+          toonKind: chip.dataset.toonKind,
+          toonId: chip.dataset.toonId || null,
+          pugName: chip.dataset.pugName || null,
+          pugClass: chip.dataset.pugClass || null,
+        };
+        e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      chip.addEventListener('click', e => {
+        if (!e.altKey) return;
+        e.stopPropagation();
+        cycleAlt(chip);
+      });
+    });
+    el.querySelectorAll('.chip-clear').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const cellId = parseInt(btn.dataset.cellId, 10);
+        const cur = findCellById(cellId);
+        saveCellPatch(cellId, { toonKind: null, toonId: null, pugName: null, pugClass: null, note: cur ? cur.note : null });
       });
     });
     el.querySelectorAll('.note-btn').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         const cellId = parseInt(btn.dataset.cellId, 10);
-        const tableId = parseInt(btn.dataset.tableId, 10);
-        const rowId = parseInt(btn.dataset.rowId, 10);
-        const colId = parseInt(btn.dataset.colId, 10);
-        const cur = findCell(tableId, rowId, colId);
+        const cur = findCellById(cellId);
         const note = prompt('Short note for this slot (optional):', (cur && cur.note) || '');
         if (note === null) return;
-        persistCell(cellId, cur ? cur.toonId : null, note.trim() || null).then(() => render());
+        saveCellPatch(cellId, {
+          toonKind: cur ? cur.toonKind : null, toonId: cur ? cur.toonId : null,
+          pugName: cur ? cur.pugName : null, pugClass: cur ? cur.pugClass : null,
+          note: note.trim() || null,
+        });
       });
     });
   }
 }
 
-function findCell(tableId, rowId, colId) {
-  const tb = allTables().find(t => t.id === tableId);
-  return tb ? (tb.cells[rowId + '_' + colId] || null) : null;
+function findCellById(cellId) {
+  for (const tb of allTables()) {
+    for (const key in tb.cells) if (tb.cells[key].id === cellId) return tb.cells[key];
+  }
+  return null;
 }
 
-function persistCell(cellId, toonId, note) {
-  return fetch(CELLS_SAVE_URL, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cellId, toonId, note }),
-  }).then(r => r.json()).then(d => {
-    if (!d.success) { alert(d.error || 'Save failed'); return; }
-    for (const tb of allTables()) {
-      for (const key in tb.cells) if (tb.cells[key].id === cellId) { tb.cells[key] = d.cell; return; }
+function updateCellInPlace(cell) {
+  if (!cell) return;
+  for (const tb of allTables()) {
+    for (const key in tb.cells) if (tb.cells[key].id === cell.id) { tb.cells[key] = cell; return; }
+  }
+}
+
+function saveCellPatch(cellId, patch) {
+  const cur = findCellById(cellId);
+  const body = {
+    action: 'assign', cellId,
+    toonKind: patch.toonKind !== undefined ? patch.toonKind : (cur ? cur.toonKind : null),
+    toonId: patch.toonId !== undefined ? patch.toonId : (cur ? cur.toonId : null),
+    pugName: patch.pugName !== undefined ? patch.pugName : (cur ? cur.pugName : null),
+    pugClass: patch.pugClass !== undefined ? patch.pugClass : (cur ? cur.pugClass : null),
+    note: patch.note !== undefined ? patch.note : (cur ? cur.note : null),
+  };
+  return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json()).then(d => {
+      if (!d.success) { alert(d.error || 'Save failed'); return; }
+      updateCellInPlace(d.cell);
+      render();
+    });
+}
+
+function persistMove(fromCellId, toCellId) {
+  return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'move', fromCellId, toCellId }) })
+    .then(r => r.json()).then(d => {
+      if (!d.success) { alert(d.error || 'Move failed'); return; }
+      updateCellInPlace(d.from);
+      updateCellInPlace(d.to);
+      render();
+    });
+}
+
+function handleDrop(td, e) {
+  let payload;
+  try { payload = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (err) { return; }
+  if (!payload) return;
+  const toCellId = parseInt(td.dataset.cellId, 10);
+  if (!toCellId) return;
+  if (payload.source === 'cell') {
+    if (payload.cellId === toCellId) return;
+    persistMove(payload.cellId, toCellId);
+  } else if (payload.source === 'pool') {
+    saveCellPatch(toCellId, { toonKind: payload.toonKind, toonId: payload.toonId, pugName: payload.pugName, pugClass: payload.pugClass });
+  }
+}
+
+// Ordered [main, alt1, alt2, ...] cycle list for whichever main/alt id owns this chip,
+// used by Alt+Click to swap an assigned chip to the "next" character on the same person.
+function siblingChain(toonKind, toonId) {
+  for (const m of roster) {
+    if ((toonKind === 'main' && m.id === toonId) || (toonKind === 'alt' && m.alts.some(a => a.id === toonId))) {
+      return [{ toonKind: 'main', toonId: m.id, name: m.name, class: m.class }]
+        .concat(m.alts.map(a => ({ toonKind: 'alt', toonId: a.id, name: a.name, class: a.class })));
     }
-  });
+  }
+  return [];
+}
+
+function cycleAlt(chip) {
+  const toonKind = chip.dataset.toonKind;
+  const toonId = chip.dataset.toonId;
+  if (toonKind !== 'main' && toonKind !== 'alt') return; // pugs have no siblings
+  const chain = siblingChain(toonKind, toonId);
+  if (chain.length < 2) return;
+  const idx = chain.findIndex(x => x.toonKind === toonKind && x.toonId === toonId);
+  const next = chain[(idx + 1) % chain.length];
+  const cellId = parseInt(chip.dataset.cellId, 10);
+  saveCellPatch(cellId, { toonKind: next.toonKind, toonId: next.toonId, pugName: null, pugClass: null });
 }
 
 const MAX_DATA_COLS = 10;
@@ -679,8 +887,171 @@ function renderSection(sec) {
   </div>`;
 }
 
+function poolEntryHtml(p, indent) {
+  const color = classColor(p.class);
+  const tagLabel = p.toonKind === 'pug' ? 'PUG' : (p.toonKind === 'alt' ? 'ALT' : '');
+  const tag = tagLabel ? `<span class="pool-tag${p.toonKind === 'pug' ? ' pug' : ''}">${tagLabel}</span>` : '';
+  return `<div class="pool-chip-row${indent ? ' indent' : ''}">
+    <span class="toon-chip pool-chip" draggable="true" data-source="pool" data-pool-id="${p.id}"
+      data-toon-kind="${esc(p.toonKind)}" data-toon-id="${esc(p.toonId || '')}"
+      data-pug-name="${esc(p.pugName || '')}" data-pug-class="${esc(p.pugClass || '')}"
+      style="background:${color};">${esc(p.name)}${tag}</span>
+    <button type="button" class="pool-remove" data-pool-id="${p.id}" title="Remove from pool">&times;</button>
+  </div>`;
+}
+
+function renderPool() {
+  const listEl = document.getElementById('poolList');
+  if (!listEl) return;
+
+  const byMainId = {};
+  const altEntries = [];
+  const pugEntries = [];
+  pool.forEach(p => {
+    if (p.toonKind === 'main') byMainId[p.toonId] = p;
+    else if (p.toonKind === 'alt') altEntries.push(p);
+    else pugEntries.push(p);
+  });
+  const altIdsByMain = {};
+  roster.forEach(m => { altIdsByMain[m.id] = new Set(m.alts.map(a => a.id)); });
+
+  let html = '';
+  roster.forEach(m => {
+    const mainEntry = byMainId[m.id];
+    const mine = altEntries.filter(a => altIdsByMain[m.id] && altIdsByMain[m.id].has(a.toonId));
+    if (!mainEntry && !mine.length) return;
+    if (mainEntry) html += poolEntryHtml(mainEntry, false);
+    mine.forEach(a => { html += poolEntryHtml(a, true); });
+  });
+  pugEntries.forEach(p => { html += poolEntryHtml(p, false); });
+
+  listEl.innerHTML = html || '<p class="pool-empty">No one in the pool yet. Search or add a PUG below.</p>';
+
+  listEl.querySelectorAll('.pool-chip').forEach(chip => {
+    chip.addEventListener('dragstart', e => {
+      const payload = {
+        source: 'pool',
+        poolId: parseInt(chip.dataset.poolId, 10),
+        toonKind: chip.dataset.toonKind,
+        toonId: chip.dataset.toonId || null,
+        pugName: chip.dataset.pugName || null,
+        pugClass: chip.dataset.pugClass || null,
+      };
+      e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'copy';
+    });
+    chip.addEventListener('click', e => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.stopPropagation();
+      const next = {
+        toonKind: chip.dataset.toonKind,
+        toonId: chip.dataset.toonId || null,
+        pugName: chip.dataset.pugName || null,
+        pugClass: chip.dataset.pugClass || null,
+      };
+      const same = stampToon && stampToon.toonKind === next.toonKind
+        && stampToon.toonId === next.toonId && stampToon.pugName === next.pugName;
+      stampToon = same ? null : next;
+      updateStampVisuals();
+    });
+  });
+  listEl.querySelectorAll('.pool-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      poolCall({ action: 'remove', poolId: parseInt(btn.dataset.poolId, 10) });
+    });
+  });
+  updateStampVisuals();
+}
+
+function updateStampVisuals() {
+  const drawer = document.getElementById('poolDrawer');
+  if (drawer) drawer.classList.toggle('stamp-mode', !!stampToon);
+  document.querySelectorAll('.pool-chip').forEach(chip => {
+    const match = stampToon && chip.dataset.toonKind === stampToon.toonKind
+      && (chip.dataset.toonId || null) === (stampToon.toonId || null)
+      && (chip.dataset.pugName || null) === (stampToon.pugName || null);
+    chip.classList.toggle('stamped', !!match);
+  });
+}
+
+function poolCall(body) {
+  return fetch(POOL_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raidId: RAID_ID, ...body }) })
+    .then(r => r.json()).then(d => {
+      if (!d.success) { alert(d.error || 'Pool update failed'); return; }
+      pool = d.pool;
+      renderPool();
+    });
+}
+
+// Flattened, searchable view of the whole guild roster (mains + alts) for the pool's
+// type-ahead add box; alt names are annotated so a same-named alt/main pair stays distinguishable.
+function fullRosterFlat() {
+  const out = [];
+  roster.forEach(m => {
+    out.push({ toonKind: 'main', toonId: m.id, name: m.name, class: m.class });
+    m.alts.forEach(a => out.push({ toonKind: 'alt', toonId: a.id, name: `${a.name} (alt of ${m.name})`, class: a.class }));
+  });
+  return out;
+}
+
+function wirePoolControls() {
+  const toggleBtn = document.getElementById('poolToggleBtn');
+  const drawer = document.getElementById('poolDrawer');
+  const closeBtn = document.getElementById('poolDrawerClose');
+  if (toggleBtn && drawer) toggleBtn.addEventListener('click', () => drawer.classList.toggle('open'));
+  if (closeBtn && drawer) closeBtn.addEventListener('click', () => drawer.classList.remove('open'));
+
+  const searchInput = document.getElementById('poolSearchInput');
+  const resultsEl = document.getElementById('poolSearchResults');
+  if (searchInput && resultsEl) {
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim().toLowerCase();
+      if (!q) { resultsEl.classList.remove('open'); resultsEl.innerHTML = ''; return; }
+      const inPool = new Set(pool.filter(p => p.toonKind !== 'pug').map(p => p.toonKind + ':' + p.toonId));
+      const matches = fullRosterFlat().filter(t => t.name.toLowerCase().includes(q) && !inPool.has(t.toonKind + ':' + t.toonId)).slice(0, 20);
+      resultsEl.innerHTML = matches.length
+        ? matches.map(t => `<div class="pool-search-item" data-toon-kind="${esc(t.toonKind)}" data-toon-id="${esc(t.toonId)}">${esc(t.name)}</div>`).join('')
+        : '<div class="pool-search-item pool-search-empty">No matches</div>';
+      resultsEl.classList.add('open');
+      resultsEl.querySelectorAll('.pool-search-item[data-toon-id]').forEach(item => {
+        item.addEventListener('click', () => {
+          poolCall({ action: 'add', toonKind: item.dataset.toonKind, toonId: item.dataset.toonId });
+          searchInput.value = '';
+          resultsEl.classList.remove('open');
+          resultsEl.innerHTML = '';
+        });
+      });
+    });
+    document.addEventListener('click', e => {
+      if (!resultsEl.contains(e.target) && e.target !== searchInput) resultsEl.classList.remove('open');
+    });
+  }
+
+  const pugAddBtn = document.getElementById('pugAddBtn');
+  if (pugAddBtn) {
+    pugAddBtn.addEventListener('click', () => {
+      const nameInput = document.getElementById('pugNameInput');
+      const classInput = document.getElementById('pugClassInput');
+      const name = nameInput.value.trim();
+      if (!name) return;
+      poolCall({ action: 'add', toonKind: 'pug', pugName: name, pugClass: classInput.value || null });
+      nameInput.value = '';
+      classInput.value = '';
+    });
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && stampToon) { stampToon = null; updateStampVisuals(); }
+  });
+  if (drawer) {
+    drawer.addEventListener('click', e => {
+      if (e.target === drawer && stampToon) { stampToon = null; updateStampVisuals(); }
+    });
+  }
+}
+
 render();
-if (CAN_MANAGE) checkLock();
+if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); }
 </script>
 </body>
 </html>
