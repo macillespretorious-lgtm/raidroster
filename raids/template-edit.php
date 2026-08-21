@@ -139,6 +139,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12px; }
     table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     table.grid th { background: rgba(255,255,255,0.04); }
+    table.grid th.row-th { background: transparent; border-right-color: rgba(255,255,255,0.16); }
     .lbl-input { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 5px; width: 100%; min-width: 0; box-sizing: border-box; }
     .cell-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 2px; }
     .cell-actions .icon-btn { width: 20px; height: 20px; font-size: 10px; }
@@ -870,10 +871,9 @@ function renderRowHeader(r, tb) {
   const deleteBtn = `<button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>`;
   const dragAttrs = `draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}" title="Drag to reorder"`;
   if (r.kind === 'spacer') {
-    return `<th class="spacer-th" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
+    return `<th class="spacer-th row-th" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
       <div class="row-th-inner" data-flip-id="row:${r.id}">
         <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
-        <span class="spacer-label">spacer</span>
         <div class="cell-actions">
           <button class="icon-btn" data-action="spacer-row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>
           <button class="icon-btn" data-action="spacer-row-height-inc" data-id="${r.id}" title="Taller">+</button>
@@ -881,10 +881,9 @@ function renderRowHeader(r, tb) {
       </div>
     </th>`;
   }
-  return `<th data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
+  return `<th class="row-th" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
     <div class="row-th-inner" data-flip-id="row:${r.id}">
       <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
-      <span class="kind-label">${r.kind}</span>
     </div>
   </th>`;
 }
