@@ -129,7 +129,7 @@ function fmtTime($t) {
     table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
     table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
-    table.grid th.row-label { text-align: left; white-space: nowrap; }
+    table.grid td.text-cell { text-align: left; white-space: nowrap; }
     table.grid th.group-th { font-size: 13px; letter-spacing: .04em; }
     td.cell { min-width: 90px; }
     th.spacer-th, td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
@@ -771,6 +771,38 @@ function cycleAlt(chip) {
 
 const MAX_DATA_COLS = 10;
 
+// Spacer > Text > General: a cell is only a draggable toon slot when both its row and
+// column are General; if either is Text, the cell shows that row/column's own Text
+// content; if either is Spacer, the cell is blank.
+function effectiveKind(row, col) {
+  if (row.kind === 'spacer' || col.kind === 'spacer') return 'spacer';
+  if (row.kind === 'text' || col.kind === 'text') return 'text';
+  return 'general';
+}
+
+let _measureCtx = null;
+function measureTextPx(text, font) {
+  if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
+  _measureCtx.font = font || '600 12.5px system-ui, -apple-system, sans-serif';
+  return _measureCtx.measureText(text || '').width;
+}
+
+// Longest rendered value in this column, across every non-spacer row — Text cells measure
+// their own text_content, General cells measure the assigned toon's name — used to size a
+// width:0 ("shrink to content") column.
+function longestCellText(c, tb) {
+  let longest = c.label || '';
+  for (const r of tb.rows) {
+    if (r.kind === 'spacer') continue;
+    const eff = effectiveKind(r, c);
+    if (eff === 'spacer') continue;
+    const cell = tb.cells[r.id + '_' + c.id];
+    const t = eff === 'text' ? (cell && cell.textContent) : (cell && cell.name);
+    if (t && t.length > longest.length) longest = t;
+  }
+  return longest;
+}
+
 // Tables cap at MAX_DATA_COLS data columns (spacers don't count against it); beyond that
 // they split into stacked column-blocks that each repeat the full row set, rather than
 // growing arbitrarily wide.
@@ -779,13 +811,13 @@ function chunkColumns(columns) {
   let current = [];
   let dataCount = 0;
   for (const c of columns) {
-    if (c.kind === 'data' && dataCount >= MAX_DATA_COLS) {
+    if (c.kind === 'general' && dataCount >= MAX_DATA_COLS) {
       chunks.push(current);
       current = [];
       dataCount = 0;
     }
     current.push(c);
-    if (c.kind === 'data') dataCount++;
+    if (c.kind === 'general') dataCount++;
   }
   chunks.push(current);
   return chunks;
@@ -798,13 +830,18 @@ function colWidthPx(c, tb) {
   }
   // Always resolve to a real pixel width (never null) so every <col> in the colgroup is
   // explicit — table-layout:fixed only sums a colspan cell's width from its spanned <col>
-  // widths correctly when all of them are explicit.
-  return c.width || tb.defaultColumnWidth || 120; // 2 units at 60px/unit, matches the editor's default
+  // widths correctly when all of them are explicit. An explicit width of 0 means "shrink
+  // to the longest rendered value in this column" rather than falling through to default.
+  const effWidth = (c.width !== null && c.width !== undefined) ? c.width : tb.defaultColumnWidth;
+  if (effWidth === 0) {
+    return Math.max(60, Math.round(measureTextPx(longestCellText(c, tb)) + 24));
+  }
+  return effWidth || 120; // 2 units at 60px/unit, matches the editor's default
 }
 
 function groupHeaderRow(cols, columnGroups, tb) {
   if (!columnGroups.length) return '';
-  const cells = [`<th rowspan="2"></th>`];
+  const cells = [];
   let i = 0;
   while (i < cols.length) {
     const gid = cols[i].groupId;
@@ -849,13 +886,19 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
-    if (c.kind === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    const eff = effectiveKind(r, c);
+    if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     const cell = tb.cells[r.id + '_' + c.id];
-    const cellIdAttr = cell ? cell.id : '';
-    const editableCls = CAN_MANAGE ? ' editable' : '';
-    out.push(`<td${colspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}">${chipHtml(cell, noteEnabled)}</td>`);
+    if (eff === 'text') {
+      const style = `background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};`;
+      out.push(`<td${colspanAttr} class="cell text-cell" style="${style}">${esc(cell ? cell.textContent : '')}</td>`);
+    } else {
+      const cellIdAttr = cell ? cell.id : '';
+      const editableCls = CAN_MANAGE ? ' editable' : '';
+      out.push(`<td${colspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}">${chipHtml(cell, noteEnabled)}</td>`);
+    }
     i += span;
   }
   return out.join('');
@@ -864,7 +907,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
 function renderColumnBlock(chunkCols, tb, noteEnabled) {
   const colHeaders = headerCellsForChunk(chunkCols, tb);
 
-  const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
+  const colgroup = `<colgroup>` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
       return `<col${w ? ` style="width:${w}px;"` : ''}>`;
@@ -872,9 +915,9 @@ function renderColumnBlock(chunkCols, tb, noteEnabled) {
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
     }
-    return `<tr><th class="row-label">${esc(r.label)}</th>${bodyCellsForRow(r, chunkCols, tb, noteEnabled)}</tr>`;
+    return `<tr>${bodyCellsForRow(r, chunkCols, tb, noteEnabled)}</tr>`;
   }).join('');
 
   const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb);
@@ -883,7 +926,7 @@ function renderColumnBlock(chunkCols, tb, noteEnabled) {
       <table class="grid">
         ${colgroup}
         ${groupRow}
-        <tr>${groupRow ? '' : '<th></th>'}${colHeaders}</tr>
+        <tr>${colHeaders}</tr>
         ${bodyRows}
       </table>
     </div>`;
@@ -1175,7 +1218,7 @@ function wireImportControls() {
 // on-screen flex-wrap in favor of stacking every table top-to-bottom) and posts it as an
 // image attachment straight to the selected Discord webhook, matching IO's publish flow.
 function raidCanvasMetrics() {
-  return { width: 900, pad: 20, rowH: 28, headH: 26, groupH: 20, labelW: 110, sectionHeadH: 32, tableTitleH: 26, gapSection: 20, gapTable: 12 };
+  return { pad: 20, rowH: 28, headH: 26, groupH: 20, sectionHeadH: 32, tableTitleH: 26, gapSection: 20, gapTable: 12 };
 }
 
 function flattenSectionTables(tables) {
@@ -1187,6 +1230,39 @@ function flattenSectionTables(tables) {
     }
   }
   return out;
+}
+
+// Mirrors colWidthPx's on-screen model (own configured width, or shrink-to-content at
+// width 0) instead of evenly dividing a fixed canvas width among columns.
+function canvasColWidth(c, tb) {
+  if (c.kind === 'spacer') {
+    const base = c.width || tb.defaultColumnWidth || 30;
+    return Math.max(8, Math.round(base / 3));
+  }
+  const effWidth = (c.width !== null && c.width !== undefined) ? c.width : tb.defaultColumnWidth;
+  if (effWidth === 0) {
+    return Math.max(60, Math.round(measureTextPx(longestCellText(c, tb), 'bold 11px Segoe UI, Arial, sans-serif') + 16));
+  }
+  return effWidth || 120;
+}
+
+function measureChunkWidth(chunk, tb) {
+  return chunk.reduce((sum, c) => sum + canvasColWidth(c, tb), 0);
+}
+
+function measureTableWidth(tb) {
+  let w = 0;
+  if (!tb.columns.length) return w;
+  for (const chunk of chunkColumns(tb.columns)) w = Math.max(w, measureChunkWidth(chunk, tb));
+  return w;
+}
+
+function measureRaidCanvasWidth() {
+  let w = 0;
+  for (const sec of sections) {
+    for (const tb of flattenSectionTables(sec.tables)) w = Math.max(w, measureTableWidth(tb));
+  }
+  return w;
 }
 
 function measureTableHeight(tb, m) {
@@ -1228,12 +1304,9 @@ function drawTable(ctx, tb, m, startY) {
   if (!tb.columns.length) return y;
 
   for (const chunk of chunkColumns(tb.columns)) {
-    const dataCols = chunk.filter(c => c.kind !== 'spacer');
-    const spacerCols = chunk.filter(c => c.kind === 'spacer');
-    const colW = dataCols.length ? (width - m.labelW - spacerCols.length * 10) / dataCols.length : 0;
-    let cx = x0 + m.labelW;
+    let cx = x0;
     const colBoxes = chunk.map(c => {
-      const w = c.kind === 'spacer' ? 10 : colW;
+      const w = canvasColWidth(c, tb);
       const box = { c, x: cx, w };
       cx += w;
       return box;
@@ -1261,8 +1334,6 @@ function drawTable(ctx, tb, m, startY) {
       y += m.groupH;
     }
 
-    ctx.fillStyle = '#1c2333';
-    ctx.fillRect(x0, y, m.labelW, m.headH);
     colBoxes.forEach(box => {
       if (box.c.kind === 'spacer') return;
       ctx.fillStyle = box.c.headerColor || '#1c2333';
@@ -1280,12 +1351,17 @@ function drawTable(ctx, tb, m, startY) {
       ctx.fillRect(x0, y, width, rowH);
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.strokeRect(x0 + 0.5, y + 0.5, width - 1, rowH - 1);
-      ctx.fillStyle = '#c7cfe8';
-      ctx.font = '11px Segoe UI, Arial, sans-serif';
-      ctx.fillText(r.label || '', x0 + 6, y + rowH / 2, m.labelW - 10);
       colBoxes.forEach(box => {
-        if (box.c.kind === 'spacer') return;
+        const eff = effectiveKind(r, box.c);
+        if (eff === 'spacer') return;
         const cell = tb.cells[r.id + '_' + box.c.id];
+        if (eff === 'text') {
+          if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
+          ctx.fillStyle = (cell && cell.textColor) || '#c7cfe8';
+          ctx.font = '11px Segoe UI, Arial, sans-serif';
+          ctx.fillText((cell && cell.textContent) || '', box.x + 6, y + rowH / 2, box.w - 10);
+          return;
+        }
         if (cell && cell.name) {
           const color = classColor(cell.class);
           const pad = 3;
@@ -1304,6 +1380,7 @@ function drawTable(ctx, tb, m, startY) {
 
 function renderRaidCanvas() {
   const m = raidCanvasMetrics();
+  m.width = Math.max(700, measureRaidCanvasWidth() + m.pad * 2);
   const height = Math.max(80, measureRaidCanvasHeight(m));
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
@@ -1394,9 +1471,9 @@ function wireDiscordControls() {
 function walkHealerSlots(secs, cb) {
   function walk(tables) {
     for (const tb of tables) {
-      const dataCols = tb.columns.filter(c => c.kind === 'data');
       for (const r of tb.rows) {
         if (r.kind === 'spacer' || !r.label) continue;
+        const dataCols = tb.columns.filter(c => effectiveKind(r, c) === 'general');
         if (dataCols.length === 1) {
           cb(r.label, null, r, dataCols[0], tb);
         } else if (dataCols.length > 1) {

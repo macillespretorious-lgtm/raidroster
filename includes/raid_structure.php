@@ -24,10 +24,10 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
 // $newParentGroupId is non-null, matching the section_id/parent_group_id invariant.
 function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $insT = $pdo->prepare(
-        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, default_column_width, row_label_width, source_table_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, default_column_width, source_table_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
-    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['default_column_width'], $tb['row_label_width'], $tb['id']]);
+    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['default_column_width'], $tb['id']]);
     $newTableId = (int)$pdo->lastInsertId();
 
     // Column groups first (columns FK into them), preserving parent_group_id links via an old->new id map.
@@ -53,7 +53,7 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
         $newGroupId = $col['group_id'] ? ($groupIdMap[$col['group_id']] ?? null) : null;
         $insC->execute([$newTableId, $col['label'], $col['sort_order'], $col['kind'], $col['width'], $col['header_color'], $newGroupId, $col['header_colspan'], $col['id']]);
         $newColId = (int)$pdo->lastInsertId();
-        $columns[] = ['id' => $newColId, 'kind' => $col['kind']];
+        $columns[] = ['id' => $newColId, 'kind' => $col['kind'], 'srcId' => $col['id']];
         $columnIdMap[$col['id']] = $newColId;
     }
 
@@ -65,17 +65,27 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     foreach ($stmtR->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $insR->execute([$newTableId, $row['label'], $row['sort_order'], $row['kind'], $row['height'], $row['id']]);
         $newRowId = (int)$pdo->lastInsertId();
-        $rows[] = ['id' => $newRowId, 'kind' => $row['kind']];
+        $rows[] = ['id' => $newRowId, 'kind' => $row['kind'], 'srcId' => $row['id']];
         $rowIdMap[$row['id']] = $newRowId;
     }
 
+    // Template-authored cell text/colors, keyed by source row/column id so they can be
+    // carried onto the freshly-created raid_cells rows below.
+    $stmtCells = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color FROM raid_template_cells WHERE table_id = ?');
+    $stmtCells->execute([$tb['id']]);
+    $tplCells = [];
+    foreach ($stmtCells->fetchAll(PDO::FETCH_ASSOC) as $tc) {
+        $tplCells[$tc['row_id'] . '_' . $tc['column_id']] = $tc;
+    }
+
     // Spacer rows/columns never hold data, so no raid_cells row is created for either side.
-    $insCell = $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id) VALUES (?, ?, ?)');
+    $insCell = $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id, text_content, bg_color, text_color) VALUES (?, ?, ?, ?, ?, ?)');
     foreach ($rows as $r) {
         if ($r['kind'] === 'spacer') continue;
         foreach ($columns as $c) {
             if ($c['kind'] === 'spacer') continue;
-            $insCell->execute([$newTableId, $r['id'], $c['id']]);
+            $tc = $tplCells[$r['srcId'] . '_' . $c['srcId']] ?? null;
+            $insCell->execute([$newTableId, $r['id'], $c['id'], $tc['text_content'] ?? null, $tc['bg_color'] ?? null, $tc['text_color'] ?? null]);
         }
     }
 

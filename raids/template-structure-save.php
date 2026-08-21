@@ -215,16 +215,26 @@ function fetch_table_full($pdo, $tb) {
         'colspan' => (int)$m['colspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
+    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color FROM raid_template_cells WHERE table_id = ?');
+    $stmt->execute([$tb['id']]);
+    $cells = array_map(fn($c) => [
+        'rowId' => (int)$c['row_id'],
+        'columnId' => (int)$c['column_id'],
+        'textContent' => $c['text_content'],
+        'bgColor' => $c['bg_color'],
+        'textColor' => $c['text_color'],
+    ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+
     return [
         'id' => (int)$tb['id'],
         'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
-        'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
         'columns' => $columns,
         'rows' => $rows,
         'columnGroups' => $columnGroups,
         'cellMerges' => $cellMerges,
+        'cells' => $cells,
     ];
 }
 
@@ -357,8 +367,7 @@ if ($action === 'add_table') {
         $title = substr(trim($body['title'] ?? ''), 0, 100);
         if (!$title) fail(400, 'Title is required');
         $order = next_sort_order($pdo, 'raid_template_tables', 'parent_group_id', $grp['id']);
-        // row_label_width 0 = row header column hidden by default; most tables don't need one.
-        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order, row_label_width) VALUES (?, ?, ?, 0)');
+        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order) VALUES (?, ?, ?)');
         $stmt->execute([$grp['id'], $title, $order]);
         respond_structure($pdo, $grp['template_id']);
     }
@@ -368,7 +377,7 @@ if ($action === 'add_table') {
     // Top-level tables are numbered automatically in the UI, so a title is optional here.
     $title = substr(trim($body['title'] ?? ''), 0, 100);
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
-    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, row_label_width) VALUES (?, ?, ?, 0)');
+    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order) VALUES (?, ?, ?)');
     $stmt->execute([$sec['id'], $title, $order]);
     respond_structure($pdo, $sec['template_id']);
 }
@@ -381,9 +390,8 @@ if ($action === 'update_table') {
     if ($isNested && !$title) fail(400, 'Title is required');
     $headerColor = array_key_exists('headerColor', $body) ? ($body['headerColor'] ?: null) : $tb['header_color'];
     $colWidth    = array_key_exists('defaultColumnWidth', $body) ? ($body['defaultColumnWidth'] !== null && $body['defaultColumnWidth'] !== '' ? (int)$body['defaultColumnWidth'] : null) : $tb['default_column_width'];
-    $labelWidth  = array_key_exists('rowLabelWidth', $body) ? ($body['rowLabelWidth'] !== null && $body['rowLabelWidth'] !== '' ? (int)$body['rowLabelWidth'] : null) : $tb['row_label_width'];
-    $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, row_label_width = ? WHERE id = ?');
-    $stmt->execute([$title, $headerColor, $colWidth, $labelWidth, $tb['id']]);
+    $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ? WHERE id = ?');
+    $stmt->execute([$title, $headerColor, $colWidth, $tb['id']]);
     respond_structure($pdo, $tb['template_id']);
 }
 
@@ -400,7 +408,8 @@ if ($action === 'add_column' || $action === 'add_row') {
     $isCol = $action === 'add_column';
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['tableId'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
-    $kind = ($body['kind'] ?? 'data') === 'spacer' ? 'spacer' : 'data';
+    $kindIn = $body['kind'] ?? 'general';
+    $kind = in_array($kindIn, ['text', 'general', 'spacer'], true) ? $kindIn : 'general';
     $label = substr(trim($body['label'] ?? ''), 0, 60);
     $table = $isCol ? 'raid_template_columns' : 'raid_template_rows';
     $order = next_sort_order($pdo, $table, 'table_id', $tb['id']);
@@ -439,6 +448,27 @@ if ($action === 'update_column' || $action === 'update_row') {
     }
 
     respond_structure($pdo, $item['template_id']);
+}
+
+if ($action === 'update_cell') {
+    $col = fetch_column_owned($pdo, $tenant['id'], (int)($body['columnId'] ?? 0));
+    if (!$col) fail(404, 'Column not found');
+    $row = fetch_row_owned($pdo, $tenant['id'], (int)($body['rowId'] ?? 0));
+    if (!$row) fail(404, 'Row not found');
+    if ((int)$col['table_id'] !== (int)$row['table_id']) fail(400, 'Row/column mismatch');
+
+    $textContent = array_key_exists('textContent', $body) ? substr(trim((string)$body['textContent']), 0, 500) : '';
+    $bgColor = !empty($body['bgColor']) ? $body['bgColor'] : null;
+    $textColor = !empty($body['textColor']) ? $body['textColor'] : null;
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color)'
+    );
+    $stmt->execute([$col['table_id'], $row['id'], $col['id'], $textContent, $bgColor, $textColor]);
+
+    respond_structure($pdo, $col['template_id']);
 }
 
 if ($action === 'merge_header' || $action === 'split_header') {

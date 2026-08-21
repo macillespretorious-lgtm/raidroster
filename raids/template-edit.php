@@ -62,13 +62,19 @@ function fetch_table_full($pdo, $tb) {
         'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
     ], $stmt6->fetchAll(PDO::FETCH_ASSOC));
 
+    $stmt7 = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color FROM raid_template_cells WHERE table_id = ?');
+    $stmt7->execute([$tb['id']]);
+    $cells = array_map(fn($c) => [
+        'rowId' => (int)$c['row_id'], 'columnId' => (int)$c['column_id'],
+        'textContent' => $c['text_content'], 'bgColor' => $c['bg_color'], 'textColor' => $c['text_color'],
+    ], $stmt7->fetchAll(PDO::FETCH_ASSOC));
+
     return [
         'id' => (int)$tb['id'], 'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
-        'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
-        'cellMerges' => $cellMerges,
+        'cellMerges' => $cellMerges, 'cells' => $cells,
     ];
 }
 
@@ -167,7 +173,18 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .add-group-btn:hover { border-color: rgba(255,255,255,0.5); color: #e8ecff; }
     .group-tables { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 14px; margin: 6px 0 12px 4px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,0.15); }
     td.spacer-cell, th.spacer-th { background: repeating-linear-gradient(135deg, rgba(255,255,255,0.03) 0 6px, transparent 6px 12px); border-style: dashed; }
-    .spacer-label { font-size: 9px; color: #55618a; text-transform: uppercase; letter-spacing: .05em; }
+    .spacer-label, .kind-label { font-size: 9px; color: #55618a; text-transform: uppercase; letter-spacing: .05em; }
+
+    .kind-picker-wrap { position: relative; }
+    .kind-picker { position: absolute; top: 100%; left: 0; margin-top: 4px; background: #1a2338; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 2px; z-index: 20; min-width: 140px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+    .kind-picker[hidden] { display: none; }
+    .kind-picker button { background: none; border: none; color: #e8ecff; text-align: left; padding: 6px 10px; border-radius: 5px; font: inherit; font-size: 12px; cursor: pointer; }
+    .kind-picker button:hover { background: rgba(255,255,255,0.1); }
+
+    td.text-td { text-align: left; }
+    .cell-text-input { margin-bottom: 3px; }
+    .cell-color-row { display: flex; gap: 4px; }
+    .cell-color-row .swatch { width: 18px; height: 18px; }
 
     .drag-handle { cursor: grab; display: inline-block; color: #6b7595; font-size: 13px; line-height: 1; user-select: none; }
     .drag-handle:active { cursor: grabbing; }
@@ -217,7 +234,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .preview-modal table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     .preview-modal table.grid th, .preview-modal table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
     .preview-modal table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
-    .preview-modal table.grid th.row-label { text-align: left; white-space: nowrap; }
     .preview-modal td.cell { min-width: 90px; }
     .preview-modal th.spacer-th, .preview-modal td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
     .preview-modal .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
@@ -387,24 +403,56 @@ const MAX_DATA_COLS = 10;
 // admins don't have to think in pixels — 1 unit = 60px, defaulting to 2 units (120px).
 const COL_UNIT_PX = 60;
 const DEFAULT_COL_UNITS = 2;
-function pxToUnits(px) { return px ? Math.round(px / COL_UNIT_PX) : ''; }
-function unitsToPx(units) { return units ? parseInt(units, 10) * COL_UNIT_PX : null; }
+function pxToUnits(px) { return (px === null || px === undefined) ? '' : Math.round(px / COL_UNIT_PX); }
+function unitsToPx(units) { return (units === '' || units === null || units === undefined) ? null : parseInt(units, 10) * COL_UNIT_PX; }
 
 function chunkColumns(columns) {
   const chunks = [];
   let current = [];
   let dataCount = 0;
   for (const c of columns) {
-    if (c.kind === 'data' && dataCount >= MAX_DATA_COLS) {
+    if (c.kind === 'general' && dataCount >= MAX_DATA_COLS) {
       chunks.push(current);
       current = [];
       dataCount = 0;
     }
     current.push(c);
-    if (c.kind === 'data') dataCount++;
+    if (c.kind === 'general') dataCount++;
   }
   chunks.push(current);
   return chunks;
+}
+
+// Priority rule when a row and column of different kinds intersect: Spacer > Text > General.
+// A cell is only a draggable toon slot when both its row and column are General.
+function effectiveKind(row, col) {
+  if (row.kind === 'spacer' || col.kind === 'spacer') return 'spacer';
+  if (row.kind === 'text' || col.kind === 'text') return 'text';
+  return 'general';
+}
+
+let _measureCtx = null;
+function measureTextPx(text, font) {
+  if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
+  _measureCtx.font = font || '600 12px system-ui, -apple-system, sans-serif';
+  return _measureCtx.measureText(text || '').width;
+}
+
+function cellFor(tb, rowId, colId) {
+  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null };
+}
+function tableForCell(rowId, colId) {
+  return allTables().find(tb => tb.rows.some(r => r.id === rowId) && tb.columns.some(c => c.id === colId)) || null;
+}
+
+function autoTextColWidth(c, tb) {
+  let longest = c.label || '';
+  for (const r of tb.rows) {
+    if (r.kind === 'spacer') continue;
+    const cell = cellFor(tb, r.id, c.id);
+    if (cell.textContent && cell.textContent.length > longest.length) longest = cell.textContent;
+  }
+  return Math.max(40, Math.round(measureTextPx(longest) + 24));
 }
 
 function colWidthPx(c, tb) {
@@ -412,11 +460,15 @@ function colWidthPx(c, tb) {
     const base = c.width || tb.defaultColumnWidth || 30;
     return Math.max(8, Math.round(base / 3));
   }
+  const effWidth = (c.width !== null && c.width !== undefined) ? c.width : tb.defaultColumnWidth;
+  if (effWidth === 0) {
+    return c.kind === 'text' ? autoTextColWidth(c, tb) : Math.max(60, Math.round(measureTextPx(c.label || '') + 24));
+  }
   // Always resolve to a real pixel width (never null) so every <col> in the colgroup is
   // explicit — table-layout:fixed only sums a colspan cell's width from its spanned <col>
   // widths correctly when all of them are explicit; an "auto" column breaks that sum and
   // lets merged headers/cells collapse toward a single column's width instead.
-  return c.width || tb.defaultColumnWidth || (DEFAULT_COL_UNITS * COL_UNIT_PX);
+  return effWidth || (DEFAULT_COL_UNITS * COL_UNIT_PX);
 }
 
 // Every table anywhere in the tree (top-level or nested inside a group), flattened for lookup.
@@ -449,6 +501,11 @@ let dragData = null;
 let dragSnapshot = null;
 let dragCompleted = false;
 let dragOverKey = null;
+
+// Which "+ Row"/"+ Column" kind-picker popover is open, e.g. "row-42" or "column-42"; null
+// when none. Re-derived on every render() rather than tracked in the DOM since render()
+// fully replaces #panelsEl's innerHTML each time.
+let openKindPicker = null;
 
 // First-Last-Invert-Play: snapshot every draggable entity's position, run the DOM mutation,
 // then animate each entity from its old position to its new one via a transform (cheaper and
@@ -601,18 +658,23 @@ function render() {
       if (act === 'delete-col') call({ action: 'delete_column', id });
       if (act === 'rename-row') call({ action: 'update_row', id, label: node.value.trim() });
       if (act === 'delete-row') call({ action: 'delete_row', id });
-      if (act === 'add-col') call({ action: 'add_column', tableId: id, label: '' });
-      if (act === 'add-row') call({ action: 'add_row', tableId: id, label: '' });
-      if (act === 'add-spacer-col') call({ action: 'add_column', tableId: id, kind: 'spacer', label: '' });
-      if (act === 'add-spacer-row') call({ action: 'add_row', tableId: id, kind: 'spacer', label: '' });
+      if (act === 'open-kind-picker') {
+        const key = `${node.dataset.kind}-${id}`;
+        openKindPicker = openKindPicker === key ? null : key;
+        render();
+        return;
+      }
+      if (act === 'add-col') { openKindPicker = null; call({ action: 'add_column', tableId: id, kind: node.dataset.kind, label: '' }); }
+      if (act === 'add-row') { openKindPicker = null; call({ action: 'add_row', tableId: id, kind: node.dataset.kind, label: '' }); }
       if (act === 'spacer-col-width-dec') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: Math.max(20, (c.width || 20) - 20) }); }
       if (act === 'spacer-col-width-inc') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: (c.width || 20) + 20 }); }
       if (act === 'spacer-row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
       if (act === 'spacer-row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
-      if (act === 'toggle-row-header') { const tb = findTable(id); const showing = tb.rowLabelWidth !== 0; call({ action: 'update_table', id, title: tb.title, rowLabelWidth: showing ? 0 : null }); }
       if (act === 'table-header-color') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, headerColor: node.value }); }
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
-      if (act === 'table-label-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, rowLabelWidth: unitsToPx(node.value) }); }
+      if (act === 'cell-text') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: node.value, bgColor: cell.bgColor, textColor: cell.textColor }); }
+      if (act === 'cell-bg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: node.value, textColor: cell.textColor }); }
+      if (act === 'cell-fg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: node.value }); }
       if (act === 'col-header-color') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, headerColor: node.value }); }
       if (act === 'col-width') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: unitsToPx(node.value) }); }
       if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
@@ -755,10 +817,11 @@ function colHeaderCell(c, tb, groupsEnabled, span) {
   return `<th${colspanAttr} data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
       <div class="col-th-inner" data-flip-id="column:${c.id}">
         ${dragBar}
+        <span class="kind-label">${c.kind}</span>
         <input class="lbl-input" data-action="rename-col" data-id="${c.id}" placeholder="Label" value="${escAttr(c.label)}">
         <div class="col-th-row2">
           <input type="color" class="swatch" data-action="col-header-color" data-id="${c.id}" value="${c.headerColor || '#1a2338'}" title="Header color">
-          <input type="number" class="width-input" data-action="col-width" data-id="${c.id}" value="${pxToUnits(c.width)}" placeholder="${DEFAULT_COL_UNITS}" min="1" title="Width in units (1 unit = ${COL_UNIT_PX}px)">
+          <input type="number" class="width-input" data-action="col-width" data-id="${c.id}" value="${pxToUnits(c.width)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content.">
         </div>
         ${groupSelect}
         <div class="cell-actions">
@@ -770,9 +833,9 @@ function colHeaderCell(c, tb, groupsEnabled, span) {
     </th>`;
 }
 
-function groupHeaderRow(cols, columnGroups) {
+function groupHeaderRow(cols, columnGroups, leadCol = true) {
   if (!columnGroups.length) return '';
-  const cells = [`<th rowspan="2"></th>`];
+  const cells = leadCol ? [`<th rowspan="2"></th>`] : [];
   let i = 0;
   while (i < cols.length) {
     const gid = cols[i].groupId;
@@ -802,7 +865,7 @@ function groupStrip(tb) {
   return `<div class="group-strip">${pills}<button class="add-group-btn" data-action="add-group" data-id="${tb.id}">+ Group header</button></div>`;
 }
 
-function renderRowHeader(r, tb, showRowHeader) {
+function renderRowHeader(r, tb) {
   const dragHandle = `<span class="drag-handle">&#10021;</span>`;
   const deleteBtn = `<button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>`;
   const dragAttrs = `draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}" title="Drag to reorder"`;
@@ -818,13 +881,10 @@ function renderRowHeader(r, tb, showRowHeader) {
       </div>
     </th>`;
   }
-  const labelInput = showRowHeader
-    ? `<input class="lbl-input" data-action="rename-row" data-id="${r.id}" placeholder="Label" value="${escAttr(r.label)}">`
-    : '';
   return `<th data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
     <div class="row-th-inner" data-flip-id="row:${r.id}">
       <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
-      ${labelInput}
+      <span class="kind-label">${r.kind}</span>
     </div>
   </th>`;
 }
@@ -853,32 +913,43 @@ function bodyCellsForRow(r, chunkCols, tb) {
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
-    if (c.kind === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    const eff = effectiveKind(r, c);
+    if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     const splitBtn = span > 1
       ? `<button class="icon-btn" data-action="split-cell" data-row-id="${r.id}" data-col-id="${c.id}" title="Unmerge cell">&#8622;</button>`
       : '';
-    out.push(`<td${colspanAttr} class="data-td">
-      <div class="cell-merge-actions">
+    const mergeActions = `<div class="cell-merge-actions">
         <button class="icon-btn" data-action="merge-cell" data-row-id="${r.id}" data-col-id="${c.id}" title="Merge with next column">&harr;</button>
         ${splitBtn}
-      </div>
-    </td>`);
+      </div>`;
+    if (eff === 'text') {
+      const cell = cellFor(tb, r.id, c.id);
+      out.push(`<td${colspanAttr} class="data-td text-td">
+        <input class="lbl-input cell-text-input" data-action="cell-text" data-row-id="${r.id}" data-col-id="${c.id}" placeholder="Text" value="${escAttr(cell.textContent || '')}">
+        <div class="cell-color-row">
+          <input type="color" class="swatch" data-action="cell-bg" data-row-id="${r.id}" data-col-id="${c.id}" value="${cell.bgColor || '#1a2338'}" title="Background color">
+          <input type="color" class="swatch" data-action="cell-fg" data-row-id="${r.id}" data-col-id="${c.id}" value="${cell.textColor || '#e8ecff'}" title="Text color">
+        </div>
+        ${mergeActions}
+      </td>`);
+    } else {
+      out.push(`<td${colspanAttr} class="data-td">${mergeActions}</td>`);
+    }
     i += span;
   }
   return out.join('');
 }
 
 function renderColumnBlock(chunkCols, tb, groupsEnabled) {
-  const showRowHeader = tb.rowLabelWidth !== 0;
   const colHeaders = headerCellsForChunk(chunkCols, tb, groupsEnabled);
   const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups) : '';
 
   // 84px keeps this collapsed to a slim rail while still fitting the row-action buttons
   // (3 x 20px + gaps) on one line — narrower and they wrap onto stacked rows, which forces
   // the whole body row taller since a <tr>'s height is driven by its tallest cell.
-  const rowHeaderColWidth = showRowHeader ? (tb.rowLabelWidth || 110) : 84;
+  const rowHeaderColWidth = 84;
   const colgroup = `<colgroup><col style="width:${rowHeaderColWidth}px;">` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
@@ -886,7 +957,7 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
     }).join('') + `</colgroup>`;
 
   const bodyRows = tb.rows.map(r => {
-    const rowHeader = renderRowHeader(r, tb, showRowHeader);
+    const rowHeader = renderRowHeader(r, tb);
     if (r.kind === 'spacer') {
       const spacerCells = chunkCols.map(() => `<td class="spacer-cell"></td>`).join('');
       return `<tr style="height:${r.height || 20}px;">${rowHeader}${spacerCells}</tr>`;
@@ -929,18 +1000,28 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
       <input type="color" class="swatch" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
-      <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="1" title="Default column width in units (1 unit = ${COL_UNIT_PX}px)"></div>
-      <div class="tbl-sizing">Label w<input type="number" class="width-input" data-action="table-label-width" data-id="${tb.id}" value="${pxToUnits(tb.rowLabelWidth)}" placeholder="auto" min="0" title="Width in units (1 unit = ${COL_UNIT_PX}px)"></div>
+      <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
     ${groupsEnabled ? groupStrip(tb) : ''}
     ${blocks}
     ${!isContainerOnly ? `<div class="tbl-actions-row">
-      <button class="add-row-btn" data-action="add-col" data-id="${tb.id}">+ Column</button>
-      <button class="add-row-btn" data-action="add-row" data-id="${tb.id}">+ Row</button>
-      <button class="add-row-btn" data-action="add-spacer-col" data-id="${tb.id}">+ Spacer column</button>
-      <button class="add-row-btn" data-action="add-spacer-row" data-id="${tb.id}">+ Spacer row</button>
-      <button class="add-row-btn" data-action="toggle-row-header" data-id="${tb.id}">${tb.rowLabelWidth !== 0 ? '− Row header column' : '+ Row header column'}</button>
+      <div class="kind-picker-wrap">
+        <button class="add-row-btn" data-action="open-kind-picker" data-kind="row" data-id="${tb.id}">+ Row</button>
+        <div class="kind-picker" ${openKindPicker === `row-${tb.id}` ? '' : 'hidden'}>
+          <button data-action="add-row" data-kind="text" data-id="${tb.id}">Text Row</button>
+          <button data-action="add-row" data-kind="general" data-id="${tb.id}">General Row</button>
+          <button data-action="add-row" data-kind="spacer" data-id="${tb.id}">Spacer Row</button>
+        </div>
+      </div>
+      <div class="kind-picker-wrap">
+        <button class="add-row-btn" data-action="open-kind-picker" data-kind="column" data-id="${tb.id}">+ Column</button>
+        <div class="kind-picker" ${openKindPicker === `column-${tb.id}` ? '' : 'hidden'}>
+          <button data-action="add-col" data-kind="spacer" data-id="${tb.id}">Spacer</button>
+          <button data-action="add-col" data-kind="text" data-id="${tb.id}">Text</button>
+          <button data-action="add-col" data-kind="general" data-id="${tb.id}">General</button>
+        </div>
+      </div>
     </div>` : ''}
     ${nestedGroupsHtml}
   </div>`;
@@ -973,9 +1054,9 @@ function renderSection(sec) {
 
 // Preview modal: a read-only render of a section as it will actually look on a raid
 // page. Mirrors raids/view.php's rendering (same chunking/width helpers, same column-
-// group header row), but every data cell always shows the empty-slot placeholder since
-// no toon assignments exist at the template level, and the row-label column is always
-// shown (matching view.php's current behavior, which doesn't honor rowLabelWidth=0).
+// group header row, same effectiveKind cell-kind resolution), but every General cell
+// always shows the empty-slot placeholder since no toon assignments exist at the
+// template level; Text cells render their real authored content/colors.
 function previewHeaderCellsForChunk(chunkCols) {
   const out = [];
   let i = 0;
@@ -998,10 +1079,17 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
-    if (c.kind === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    const eff = effectiveKind(r, c);
+    if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
-    out.push(`<td${colspanAttr} class="cell"><span class="empty-slot">+</span></td>`);
+    if (eff === 'text') {
+      const cell = cellFor(tb, r.id, c.id);
+      const style = `background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};`;
+      out.push(`<td${colspanAttr} class="cell text-td" style="${style}">${esc(cell.textContent || '')}</td>`);
+    } else {
+      out.push(`<td${colspanAttr} class="cell"><span class="empty-slot">+</span></td>`);
+    }
     i += span;
   }
   return out.join('');
@@ -1009,9 +1097,9 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
 
 function previewColumnBlock(chunkCols, tb) {
   const colHeaders = previewHeaderCellsForChunk(chunkCols);
-  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups);
+  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, false);
 
-  const colgroup = `<colgroup><col style="width:${tb.rowLabelWidth || 110}px;">` +
+  const colgroup = `<colgroup>` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
       return `<col${w ? ` style="width:${w}px;"` : ''}>`;
@@ -1019,16 +1107,16 @@ function previewColumnBlock(chunkCols, tb) {
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length + 1}"></td></tr>`;
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
     }
-    return `<tr><th class="row-label">${esc(r.label)}</th>${previewBodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    return `<tr>${previewBodyCellsForRow(r, chunkCols, tb)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
       <table class="grid">
         ${colgroup}
         ${groupRow}
-        <tr>${groupRow ? '' : '<th></th>'}${colHeaders}</tr>
+        <tr>${colHeaders}</tr>
         ${bodyRows}
       </table>
     </div>`;
@@ -1087,9 +1175,9 @@ document.getElementById('previewBackdrop').addEventListener('click', e => {
 function walkHealerSlots(secs, cb) {
   function walk(tables) {
     for (const tb of tables) {
-      const dataCols = tb.columns.filter(c => c.kind === 'data');
       for (const r of tb.rows) {
         if (r.kind === 'spacer' || !r.label) continue;
+        const dataCols = tb.columns.filter(c => effectiveKind(r, c) === 'general');
         if (dataCols.length === 1) {
           cb(r.label, null, r, dataCols[0]);
         } else if (dataCols.length > 1) {

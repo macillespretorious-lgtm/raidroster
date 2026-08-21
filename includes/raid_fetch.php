@@ -36,6 +36,7 @@ function fetch_table_full($pdo, $tb) {
 
     $stmtCell = $pdo->prepare(
         'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.marked,
+                c.text_content, c.bg_color, c.text_color,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class
          FROM raid_cells c
@@ -48,14 +49,17 @@ function fetch_table_full($pdo, $tb) {
     foreach ($stmtCell->fetchAll(PDO::FETCH_ASSOC) as $cell) {
         $isPug = $cell['toon_kind'] === 'pug';
         $cells[$cell['row_id'] . '_' . $cell['column_id']] = [
-            'id'       => (int)$cell['id'],
-            'toonKind' => $cell['toon_kind'],
-            'toonId'   => $cell['toon_id'],
-            'pugName'  => $cell['pug_name'],
-            'pugClass' => $cell['pug_class'],
-            'name'     => $isPug ? $cell['pug_name'] : $cell['toon_name'],
-            'class'    => $isPug ? $cell['pug_class'] : $cell['toon_class'],
-            'marked'   => (bool)$cell['marked'],
+            'id'          => (int)$cell['id'],
+            'toonKind'    => $cell['toon_kind'],
+            'toonId'      => $cell['toon_id'],
+            'pugName'     => $cell['pug_name'],
+            'pugClass'    => $cell['pug_class'],
+            'name'        => $isPug ? $cell['pug_name'] : $cell['toon_name'],
+            'class'       => $isPug ? $cell['pug_class'] : $cell['toon_class'],
+            'marked'      => (bool)$cell['marked'],
+            'textContent' => $cell['text_content'],
+            'bgColor'     => $cell['bg_color'],
+            'textColor'   => $cell['text_color'],
         ];
     }
 
@@ -69,7 +73,6 @@ function fetch_table_full($pdo, $tb) {
         'id' => (int)$tb['id'], 'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
-        'rowLabelWidth' => $tb['row_label_width'] !== null ? (int)$tb['row_label_width'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
         'cellMerges' => $cellMerges,
     ];

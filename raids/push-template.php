@@ -172,12 +172,12 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
     $stmt->execute([$tplTableId]);
     $tplTb = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $changes = diff_scalar_fields($raidTb, $tplTb, ['title', 'header_color', 'default_column_width', 'row_label_width', 'sort_order']);
+    $changes = diff_scalar_fields($raidTb, $tplTb, ['title', 'header_color', 'default_column_width', 'sort_order']);
     if ($changes) {
         $diff['tables']['changed'][] = ['id' => $raidTableId, 'label' => $raidTb['title'] ?: '(untitled table)', 'changes' => array_keys($changes)];
         if ($apply) {
-            $pdo->prepare('UPDATE raid_tables SET title = ?, header_color = ?, default_column_width = ?, row_label_width = ?, sort_order = ? WHERE id = ?')
-                ->execute([$tplTb['title'], $tplTb['header_color'], $tplTb['default_column_width'], $tplTb['row_label_width'], $tplTb['sort_order'], $raidTableId]);
+            $pdo->prepare('UPDATE raid_tables SET title = ?, header_color = ?, default_column_width = ?, sort_order = ? WHERE id = ?')
+                ->execute([$tplTb['title'], $tplTb['header_color'], $tplTb['default_column_width'], $tplTb['sort_order'], $raidTableId]);
         }
     }
 
@@ -334,12 +334,14 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
 
     if ($apply) {
         // Fill raid_cells for any row/column pair that doesn't have one yet -- covers new
-        // rows crossed with old columns and vice versa, not just brand-new tables.
-        $stmt = $pdo->prepare("SELECT id FROM raid_columns WHERE table_id = ? AND kind = 'data'");
+        // rows crossed with old columns and vice versa, not just brand-new tables. Text
+        // rows/columns also need a raid_cells row (to hold synced text content), so only
+        // spacers are excluded.
+        $stmt = $pdo->prepare("SELECT id FROM raid_columns WHERE table_id = ? AND kind != 'spacer'");
         $stmt->execute([$raidTableId]);
         $dataColIds = array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
 
-        $stmt = $pdo->prepare("SELECT id FROM raid_rows WHERE table_id = ? AND kind = 'data'");
+        $stmt = $pdo->prepare("SELECT id FROM raid_rows WHERE table_id = ? AND kind != 'spacer'");
         $stmt->execute([$raidTableId]);
         $dataRowIds = array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
 
@@ -354,6 +356,18 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
                 if (isset($existing[$r . '_' . $c])) continue;
                 $insCell->execute([$raidTableId, $r, $c]);
             }
+        }
+
+        // Sync template-authored cell text/colors down onto their matched raid cells, using
+        // the row/column id maps built above (covers matched and newly-added rows/columns).
+        $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color FROM raid_template_cells WHERE table_id = ?');
+        $stmt->execute([$tplTableId]);
+        $updCell = $pdo->prepare('UPDATE raid_cells SET text_content = ?, bg_color = ?, text_color = ? WHERE table_id = ? AND row_id = ? AND column_id = ?');
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $tc) {
+            $rId = $rowIdMap[(int)$tc['row_id']] ?? null;
+            $cId = $columnIdMap[(int)$tc['column_id']] ?? null;
+            if ($rId === null || $cId === null) continue;
+            $updCell->execute([$tc['text_content'], $tc['bg_color'], $tc['text_color'], $raidTableId, $rId, $cId]);
         }
 
         // Cell merges carry no assignment data, so just wholesale-resync them from the
