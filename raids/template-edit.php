@@ -146,7 +146,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .lbl-input { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 5px; width: 100%; min-width: 0; box-sizing: border-box; }
     .cell-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 2px; }
     .cell-actions .icon-btn { width: 20px; height: 20px; font-size: 10px; }
-    td.data-td { position: relative; min-width: 24px; }
+    td.data-td { position: relative; min-width: 24px; min-height: 24px; }
     .cell-merge-actions { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 2px; opacity: 0; pointer-events: none; transition: opacity .15s; }
     .cell-merge-actions .icon-btn { width: 16px; height: 16px; font-size: 9px; padding: 0; pointer-events: auto; }
     td.data-td:hover .cell-merge-actions { opacity: 1; }
@@ -180,7 +180,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .spacer-label, .kind-label { font-size: 9px; color: #55618a; text-transform: uppercase; letter-spacing: .05em; }
 
     .kind-picker-wrap { position: relative; }
-    .kind-picker { position: absolute; top: 100%; left: 0; margin-top: 4px; background: #1a2338; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 2px; z-index: 20; min-width: 140px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+    /* position: fixed (with top/left set in JS from the trigger button's rect) so the
+       popover escapes .section-card's overflow:hidden — that rule exists only to clip the
+       section header's square corners behind its rounded border. */
+    .kind-picker { position: fixed; background: #1a2338; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 2px; z-index: 20; min-width: 140px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
     .kind-picker[hidden] { display: none; }
     .kind-picker button { background: none; border: none; color: #e8ecff; text-align: left; padding: 6px 10px; border-radius: 5px; font: inherit; font-size: 12px; cursor: pointer; }
     .kind-picker button:hover { background: rgba(255,255,255,0.1); }
@@ -674,8 +677,17 @@ function render() {
       if (act === 'delete-row') call({ action: 'delete_row', id });
       if (act === 'open-kind-picker') {
         const key = `${node.dataset.kind}-${id}`;
-        openKindPicker = openKindPicker === key ? null : key;
+        const wasOpen = openKindPicker === key;
+        const rect = node.getBoundingClientRect();
+        openKindPicker = wasOpen ? null : key;
         render();
+        if (!wasOpen) {
+          const picker = el.querySelector('.kind-picker:not([hidden])');
+          if (picker) {
+            picker.style.top = `${rect.bottom + 4}px`;
+            picker.style.left = `${rect.left}px`;
+          }
+        }
         return;
       }
       if (act === 'add-col') { openKindPicker = null; call({ action: 'add_column', tableId: id, kind: node.dataset.kind, label: '' }); }
@@ -1294,6 +1306,12 @@ function wireExportControls() {
   });
 }
 wireExportControls();
+
+document.addEventListener('click', e => {
+  if (!openKindPicker || e.target.closest('.kind-picker-wrap')) return;
+  openKindPicker = null;
+  render();
+});
 
 const rowControlsToggle = document.getElementById('rowControlsToggle');
 rowControlsToggle.checked = showRowControls;
