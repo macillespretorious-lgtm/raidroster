@@ -757,10 +757,11 @@ function render() {
         e.preventDefault();
         e.stopPropagation();
         zone.classList.add('drag-over');
-        const key = `container:${dropParentKind}:${dropParent}`;
-        if (dragOverKey === key) return;
-        dragOverKey = key;
-        previewMove('table', dropParentKind, dropParent, dragData.id, null, true);
+        // Tables commit their move once, on drop (see the drop listener below) rather than
+        // live-reflowing on every dragover tick — a table drag can jump between containers
+        // (section <-> group) whose nested layouts differ in width/indent, and FLIP-animating
+        // that mid-drag caused the reported overlapping/"nesting" visual glitches. A static
+        // dashed-outline highlight (.drag-over) is the only in-drag feedback for tables now.
         return;
       }
       const acceptsColumnOntoGroup = dropKind === 'group' && dragData.kind === 'column' && dragData.parentId === dropParent;
@@ -770,6 +771,7 @@ function render() {
       e.stopPropagation();
       zone.classList.add('drag-over');
       if (acceptsColumnOntoGroup) return;
+      if (dragData.kind === 'table') return; // committed once, on drop — see above
       const rect = zone.getBoundingClientRect();
       const before = dropKind === 'row'
         ? (e.clientY - rect.top) < rect.height / 2
@@ -791,6 +793,15 @@ function render() {
         call({ action: 'update_column', id: dragData.id, label: c.label, groupId: dropId });
         dragData = null; dragSnapshot = null; dragOverKey = null;
         return;
+      }
+      if (dragData.kind === 'table') {
+        let targetId = null, before = true;
+        if (dropKind === 'table') {
+          targetId = dropId;
+          const rect = zone.getBoundingClientRect();
+          before = (e.clientX - rect.left) < rect.width / 2;
+        }
+        previewMove('table', dropParentKind, dropParent, dragData.id, targetId, before);
       }
       finalizeDrop();
     });
