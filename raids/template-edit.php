@@ -140,9 +140,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     table.grid th { background: rgba(255,255,255,0.04); }
     table.grid th.row-th { background: transparent; border-right-color: rgba(255,255,255,0.16); }
-    table.grid th.row-th.collapsed { padding: 0; border-right-color: rgba(255,255,255,0.08); }
-    .row-controls-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #a8b4d0; margin: 0 0 14px; cursor: pointer; user-select: none; }
-    .row-controls-toggle input { cursor: pointer; }
     .lbl-input { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 5px; width: 100%; min-width: 0; box-sizing: border-box; }
     .cell-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 2px; }
     .cell-actions .icon-btn { width: 20px; height: 20px; font-size: 10px; }
@@ -265,11 +262,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <?php if ($template['assignment_style'] !== 'combined'): ?>
     <button class="btn" type="button" id="exportTemplateBtn" style="margin-bottom: 14px;">Export template (healing)</button>
     <?php endif; ?>
-
-    <label class="row-controls-toggle">
-      <input type="checkbox" id="rowControlsToggle">
-      Show row drag/delete controls
-    </label>
 
     <div class="tabs" id="tabsEl"></div>
     <div id="panelsEl"></div>
@@ -522,11 +514,6 @@ let dragOverKey = null;
 // when none. Re-derived on every render() rather than tracked in the DOM since render()
 // fully replaces #panelsEl's innerHTML each time.
 let openKindPicker = null;
-
-// Row drag/delete controls render as a hairline rail by default (see .row-th CSS) so they
-// don't read as a persistent structural column; this expands them back to a usable width
-// on demand. Persisted across visits since it's a per-user editing preference, not per-table.
-let showRowControls = localStorage.getItem('rr_show_row_controls') === '1';
 
 // First-Last-Invert-Play: snapshot every draggable entity's position, run the DOM mutation,
 // then animate each entity from its old position to its new one via a transform (cheaper and
@@ -907,10 +894,6 @@ function groupStrip(tb) {
 }
 
 function renderRowHeader(r, tb) {
-  if (!showRowControls) {
-    const cls = r.kind === 'spacer' ? 'spacer-th row-th collapsed' : 'row-th collapsed';
-    return `<th class="${cls}" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}"></th>`;
-  }
   const dragHandle = `<span class="drag-handle">&#10021;</span>`;
   const deleteBtn = `<button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>`;
   const dragAttrs = `draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}" title="Drag to reorder"`;
@@ -991,9 +974,8 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
 
   // 84px fits the row-action buttons (3 x 20px + gaps) on one line — narrower and they wrap
   // onto stacked rows, which forces the whole body row taller since a <tr>'s height is driven
-  // by its tallest cell. When controls are hidden (default), this shrinks to a hairline so the
-  // rail doesn't read as a persistent structural column.
-  const rowHeaderColWidth = showRowControls ? 84 : 6;
+  // by its tallest cell.
+  const rowHeaderColWidth = 84;
   const colgroup = `<colgroup><col style="width:${rowHeaderColWidth}px;">` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
@@ -1314,14 +1296,6 @@ wireExportControls();
 document.addEventListener('click', e => {
   if (!openKindPicker || e.target.closest('.kind-picker-wrap')) return;
   openKindPicker = null;
-  render();
-});
-
-const rowControlsToggle = document.getElementById('rowControlsToggle');
-rowControlsToggle.checked = showRowControls;
-rowControlsToggle.addEventListener('change', () => {
-  showRowControls = rowControlsToggle.checked;
-  localStorage.setItem('rr_show_row_controls', showRowControls ? '1' : '0');
   render();
 });
 
