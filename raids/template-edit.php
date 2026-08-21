@@ -147,6 +147,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .cell-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 2px; }
     .cell-actions .icon-btn { width: 20px; height: 20px; font-size: 10px; }
     td.data-td { position: relative; min-width: 24px; min-height: 24px; }
+    /* Real in-flow content, not just a min-height on the (otherwise entirely
+       absolutely-positioned-content) <td> — table cell min-height is applied
+       inconsistently across browsers when the cell has no in-flow content at all. */
+    .cell-height-spacer { height: 16px; }
     .cell-merge-actions { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 2px; opacity: 0; pointer-events: none; transition: opacity .15s; }
     .cell-merge-actions .icon-btn { width: 16px; height: 16px; font-size: 9px; padding: 0; pointer-events: auto; }
     td.data-td:hover .cell-merge-actions { opacity: 1; }
@@ -974,7 +978,7 @@ function bodyCellsForRow(r, chunkCols, tb) {
         ${mergeActions}
       </td>`);
     } else {
-      out.push(`<td${colspanAttr} class="data-td">${mergeActions}</td>`);
+      out.push(`<td${colspanAttr} class="data-td"><div class="cell-height-spacer"></div>${mergeActions}</td>`);
     }
     i += span;
   }
