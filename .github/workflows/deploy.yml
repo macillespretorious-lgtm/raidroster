@@ -11,15 +11,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy via 20i git API
-        run: |
-          curl -s -X POST https://api.20i.com/package/3867551/gitManager \
-            -H "Authorization: Bearer $(echo -n '${{ secrets.TWENTYI_API_KEY }}' | base64)" \
-            -H "Content-Type: application/json" \
-            -d '{"id":null,"jsonrpc":"2.0","method":"deployRepositoryV2","params":[{"repositoryId":21879,"deploymentBranch":"main"}]}' \
-            | tee /tmp/deploy-response.json
-          if grep -q '"message"' /tmp/deploy-response.json; then
-            echo "Deploy triggered"
-          else
-            echo "Deploy may have failed:" && cat /tmp/deploy-response.json && exit 1
-          fi
+      - name: FTP deploy to 20i
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.RR_FTP_SERVER }}
+          username: ${{ secrets.RR_FTP_USERNAME }}
+          password: ${{ secrets.RR_FTP_PASSWORD }}
+          local-dir: ./
+          server-dir: /public_html/
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .github/**
+            includes/db.php
+            includes/discord.php
+            uploads/**
