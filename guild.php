@@ -41,7 +41,6 @@ $startItems = array_values(array_filter(nav_items_for_role($tenant, $role), fn($
     .wrap { max-width: 640px; margin: 0 auto; padding: 40px 24px 100px; }
     .banner-hero {
       width: 100%; max-height: 200px; object-fit: contain; object-position: center; display: block;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
     }
     h1 { font-size: 24px; margin-bottom: 6px; }
     p.sub { color: #a8b4d0; font-size: 14px; margin-bottom: 32px; }
