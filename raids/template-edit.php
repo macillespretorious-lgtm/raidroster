@@ -1041,7 +1041,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
 
 function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
-  const groupsEnabled = sec.kind !== 'roster';
+  const groupsEnabled = false;
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};">
       <input class="title-input" data-action="rename-section" data-id="${sec.id}" value="${escAttr(sec.title)}">
@@ -1107,9 +1107,9 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
   return out.join('');
 }
 
-function previewColumnBlock(chunkCols, tb) {
+function previewColumnBlock(chunkCols, tb, groupsEnabled) {
   const colHeaders = previewHeaderCellsForChunk(chunkCols);
-  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, false);
+  const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups, false) : '';
 
   const colgroup = `<colgroup>` +
     chunkCols.map(c => {
@@ -1138,7 +1138,7 @@ function previewColumnBlock(chunkCols, tb) {
 function previewRenderTable(tb, groupsEnabled) {
   const groupsWithTables = groupsEnabled ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
-  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => previewColumnBlock(chunkCols, tb)).join('');
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => previewColumnBlock(chunkCols, tb, groupsEnabled)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
@@ -1155,7 +1155,7 @@ function previewRenderTable(tb, groupsEnabled) {
 
 function renderPreviewSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
-  const groupsEnabled = sec.kind !== 'roster';
+  const groupsEnabled = false;
   const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   return `<div class="section-card">
     <div class="section-head" style="background:${meta.color};">${esc(sec.title)}</div>
