@@ -62,11 +62,12 @@ function fetch_table_full($pdo, $tb) {
         'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
     ], $stmt6->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt7 = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color FROM raid_template_cells WHERE table_id = ?');
+    $stmt7 = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, kind_override FROM raid_template_cells WHERE table_id = ?');
     $stmt7->execute([$tb['id']]);
     $cells = array_map(fn($c) => [
         'rowId' => (int)$c['row_id'], 'columnId' => (int)$c['column_id'],
         'textContent' => $c['text_content'], 'bgColor' => $c['bg_color'], 'textColor' => $c['text_color'],
+        'kindOverride' => $c['kind_override'],
     ], $stmt7->fetchAll(PDO::FETCH_ASSOC));
 
     return [
@@ -131,22 +132,28 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .wrap { max-width: 100%; margin: 0; padding: 32px 32px 110px; }
     .back { color: #7f8bad; font-size: 12px; text-decoration: none; }
     .back:hover { color: #a3adfa; }
-    h1 { font-size: 20px; margin: 10px 0 4px; }
+    h1 { font-size: 20px; }
     p.sub { color: #a8b4d0; font-size: 13px; margin-bottom: 24px; }
     .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; font-weight: 700; background: rgba(255,255,255,0.08); color: #a8b4d0; }
 
-    .tpl-mgmt-section { border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 4px; margin: 14px 0 20px; max-width: 520px; }
-    .tpl-mgmt-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; }
-    .tpl-mgmt-info { flex: 1; min-width: 0; }
-    .tpl-mgmt-name { font-size: 13px; font-weight: 700; color: #e8ecff; }
-    .tpl-mgmt-desc { font-size: 11.5px; color: #7f8bad; margin-top: 1px; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 10px 0 4px; flex-wrap: wrap; }
 
-    .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.08); flex-wrap: wrap; align-items: center; }
+    /* Sticky so it stays available while the page scrolls -- only the sections/tables
+       below scroll out of view. Pinned just under the site topbar (.rr-topbar, 56px). */
+    .controls-bar { position: sticky; top: 56px; z-index: 15; background: #0a0f1e; padding: 8px 0; margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+
+    .tabs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .angry-inline { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: #7f8bad; white-space: nowrap; }
+    .angry-inline .lock-toggle { font-size: 11.5px; font-weight: 700; color: #a8b4d0; }
+    .angry-inline-meta { color: #7f8bad; }
+    .angry-inline button.btn { padding: 5px 12px; font-size: 11.5px; }
+
+    .tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
     .tab-add-btn { background: none; border: 1px dashed rgba(255,255,255,0.25); color: #8fe0a8; border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; margin: 0 0 8px 8px; }
     .tab-add-btn:hover { border-color: rgba(143,224,168,0.6); background: rgba(143,224,168,0.08); }
     .tab-delete-btn { background: rgba(224,85,85,0.12); border: 1px solid rgba(224,85,85,0.3); color: #e88585; }
     .tab-delete-btn:hover { background: rgba(224,85,85,0.25); }
-    .tab-btn { background: none; border: none; font: inherit; cursor: pointer; color: #7f8bad; font-size: 13px; font-weight: 600; padding: 10px 16px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn { background: none; border: none; font: inherit; cursor: pointer; color: #7f8bad; font-size: 13px; font-weight: 600; padding: 7px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
     .tab-btn:hover { color: #c7cef2; }
     .tab-btn.active { color: #e8ecff; border-bottom-color: #5865f2; }
     .tab-panel { display: none; }
@@ -229,7 +236,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .drag-handle:active { cursor: grabbing; }
     [data-drop-kind].drag-over { outline: 2px dashed #5865f2; outline-offset: -2px; }
 
-    .lock-bar { margin: 8px 0 4px; }
+    .lock-bar { margin: 0; flex-shrink: 0; }
     .lock-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #a8b4d0; cursor: pointer; user-select: none; }
     .lock-toggle input { display: none; }
     .lock-switch { width: 34px; height: 19px; border-radius: 999px; background: rgba(255,255,255,0.15); position: relative; transition: background .15s; flex-shrink: 0; }
@@ -239,6 +246,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .lock-banner { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; background: rgba(240,128,48,0.1); border: 1px solid rgba(240,128,48,0.3); color: #f0a030; font-size: 12px; }
     .lock-banner button.btn { background: #e05555; padding: 5px 12px; font-size: 11px; }
     .lock-banner button.btn:hover { background: #c94444; }
+    .lock-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8fe0a8; }
+    .lock-dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf6a; flex-shrink: 0; }
+    .lock-release-btn { background: none; border: 1px solid rgba(255,255,255,0.15); color: #a8b4d0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; }
+    .lock-release-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
 
     button.btn { display: inline-block; padding: 7px 16px; font: inherit; background: #5865f2; border: none; border-radius: 999px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     button.btn:hover { background: #4752c4; }
@@ -289,18 +300,13 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .add-section-bar select { background: #111827; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 6px; }
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
-    .mode-switcher { display: flex; gap: 4px; background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 4px; margin-bottom: 12px; width: fit-content; }
-    .mode-btn { background: none; border: none; color: #a8b4d0; font: inherit; font-size: 13px; font-weight: 700; padding: 7px 16px; border-radius: 6px; cursor: pointer; }
+    .mode-switcher { display: flex; gap: 4px; background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 3px; width: fit-content; }
+    .mode-btn { background: none; border: none; color: #a8b4d0; font: inherit; font-size: 12.5px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
     .mode-btn:hover { color: #e8ecff; }
     .mode-btn.active { background: #5865f2; color: #fff; }
     .mode-placeholder { background: #111827; border: 1px dashed rgba(255,255,255,0.15); border-radius: 12px; padding: 60px 20px; text-align: center; color: #7f8bad; }
     .mode-placeholder h2 { color: #e8ecff; font-size: 18px; margin-bottom: 6px; }
     .mode-placeholder p { font-size: 13.5px; }
-
-    .layout-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
-    .cell-override-btn { background: rgba(240,192,74,0.12); border: 1px solid rgba(240,192,74,0.4); color: #f0c04a; border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
-    .cell-override-btn:hover { background: rgba(240,192,74,0.2); }
-    .cell-override-btn.active { background: #f0c04a; color: #1a1400; }
 
     .stamp-badge { position: fixed; z-index: 4000; pointer-events: none; background: #f0c04a; color: #1a1400; font-size: 11.5px; font-weight: 800; padding: 4px 9px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); white-space: nowrap; }
     body.stamp-mode-active .data-td, body.stamp-mode-active .spacer-cell, body.stamp-mode-active .text-td {
@@ -318,14 +324,20 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <?php render_nav_shell($tenant, $user, $role, 'raids'); ?>
   <div class="wrap">
     <a class="back" href="/<?= h($slug) ?>/design">&larr; Back to templates</a>
-    <h1><?= h($template['name']) ?></h1>
-    <div class="lock-bar" id="lockBar"></div>
+    <div class="page-header">
+      <h1><?= h($template['name']) ?></h1>
+      <div class="lock-bar" id="lockBar"></div>
+    </div>
 
-    <div class="mode-switcher" id="modeSwitcherEl"></div>
-    <div class="layout-toolbar" id="layoutToolbarEl"></div>
+    <div class="controls-bar" id="controlsBar">
+      <div class="mode-switcher" id="modeSwitcherEl"></div>
+      <div class="tabs-row" id="tabsRowEl">
+        <div class="tabs" id="tabsEl"></div>
+        <div class="angry-inline" id="angryInlineEl"></div>
+      </div>
+    </div>
 
     <div id="modeBodyEl">
-      <div class="tabs" id="tabsEl"></div>
       <div id="panelsEl"></div>
       <div class="mode-placeholder" id="modePlaceholderEl" hidden></div>
     </div>
@@ -389,11 +401,11 @@ let sections = <?= json_encode($sections) ?>;
 // body for a placeholder, leaving Layout as the only mode with real tools.
 let editMode = 'layout';
 
-// "Add cell Override" stamp tool: once a kind is picked, cellOverrideStamp holds it
-// and every click on a template grid cell applies it (multi-select), until a
-// right-click clears the stamp and exits the tool.
+// "Add cell Override" stamp tool: armed from the same +Row/+Column popover mechanism
+// (a "+ Cell Override" button per table, see renderTable()/openKindPicker). Once a kind
+// is picked, cellOverrideStamp holds it and every click on a template grid cell applies
+// it (multi-select), until a right-click clears the stamp and exits the tool.
 let cellOverrideStamp = null;
-let openCellOverridePicker = false;
 
 // Editing lock: purely advisory (everyone on this page already passed the admin
 // role check), it exists to warn concurrent admins off each other's edits, not
@@ -420,19 +432,26 @@ window.addEventListener('beforeunload', () => {
     navigator.sendBeacon(SAVE_URL, new Blob([JSON.stringify({ action: 'lock_release', templateId: TEMPLATE_ID })], { type: 'application/json' }));
   }
 });
+// Auto-claims the lock for whoever loads this page first (no held lock yet) rather than
+// requiring a manual "claim" click -- the lock stays purely advisory (see note above), so
+// there's no real downside to acquiring it eagerly on behalf of the first viewer.
 function checkLock() {
   return lockCall('lock_status').then(d => {
     const holder = d.holder;
     if (holder && holder.discordUserId === USER_ID) {
       lockHeldByMe = true; lockedByOther = null;
       if (!lockHeartbeatTimer) startHeartbeat();
+      renderLockBar(); render();
     } else if (holder) {
       lockedByOther = holder; lockHeldByMe = false;
+      renderLockBar(); render();
     } else {
-      lockedByOther = null; lockHeldByMe = false;
+      lockCall('lock_acquire').then(d2 => {
+        if (d2.success) { lockHeldByMe = true; lockedByOther = null; startHeartbeat(); }
+        else { lockedByOther = d2.holder; lockHeldByMe = false; }
+        renderLockBar(); render();
+      });
     }
-    renderLockBar();
-    render();
   });
 }
 function renderLockBar() {
@@ -447,23 +466,16 @@ function renderLockBar() {
       if (!confirm(`Force unlock? ${lockedByOther.username} may still be editing.`)) return;
       lockCall('lock_force_release').then(() => checkLock());
     });
-  } else {
-    el.innerHTML = `<label class="lock-toggle">
-      <input type="checkbox" id="lockToggle" ${lockHeldByMe ? 'checked' : ''}>
-      <span class="lock-switch"></span>
-      ${lockHeldByMe ? 'Editing (locked to you)' : 'Claim edit lock'}
-    </label>`;
-    document.getElementById('lockToggle').addEventListener('change', e => {
-      if (e.target.checked) {
-        lockCall('lock_acquire').then(d => {
-          if (d.success) { lockHeldByMe = true; lockedByOther = null; startHeartbeat(); }
-          else { lockedByOther = d.holder; lockHeldByMe = false; }
-          renderLockBar(); render();
-        });
-      } else {
-        lockCall('lock_release').then(() => { lockHeldByMe = false; stopHeartbeat(); renderLockBar(); render(); });
-      }
+  } else if (lockHeldByMe) {
+    el.innerHTML = `<div class="lock-status">
+      <span class="lock-dot"></span> Editing (locked to you)
+      <button class="lock-release-btn" type="button" data-action="release-lock">Release</button>
+    </div>`;
+    el.querySelector('[data-action="release-lock"]').addEventListener('click', () => {
+      lockCall('lock_release').then(() => { lockHeldByMe = false; lockedByOther = null; stopHeartbeat(); renderLockBar(); render(); });
     });
+  } else {
+    el.innerHTML = '';
   }
 }
 function applyLockGate() {
@@ -727,7 +739,6 @@ function setMode(m) {
   if (editMode === m) return;
   editMode = m;
   cellOverrideStamp = null;
-  openCellOverridePicker = false;
   updateStampBadge();
   render();
 }
@@ -751,46 +762,42 @@ function updateStampBadge() {
   badge.hidden = false;
 }
 
-function renderLayoutToolbar() {
-  const el = document.getElementById('layoutToolbarEl');
-  if (editMode !== 'layout') { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="kind-picker-wrap">
-      <button type="button" class="cell-override-btn ${cellOverrideStamp ? 'active' : ''}" data-action="open-cell-override-picker">+ Add cell Override</button>
-      <div class="kind-picker" ${openCellOverridePicker ? '' : 'hidden'} style="position:absolute;top:36px;left:0;">
-        <button data-action="pick-cell-override" data-kind="general">General</button>
-        <button data-action="pick-cell-override" data-kind="text">Text</button>
-        <button data-action="pick-cell-override" data-kind="spacer">Filler</button>
-      </div>
-    </div>`;
-  el.querySelector('[data-action="open-cell-override-picker"]').addEventListener('click', () => {
-    openCellOverridePicker = !openCellOverridePicker;
-    renderLayoutToolbar();
-  });
-  el.querySelectorAll('[data-action="pick-cell-override"]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      cellOverrideStamp = btn.dataset.kind;
-      openCellOverridePicker = false;
-      updateStampBadge();
-      renderLayoutToolbar();
+function renderAngryInline() {
+  const el = document.getElementById('angryInlineEl');
+  if (!activeTab) { el.innerHTML = ''; return; }
+  const te = tabExportFor(activeTab);
+  const pageCount = te.pages.length;
+  el.innerHTML = `
+    <label class="lock-toggle">
+      <input type="checkbox" data-action="toggle-tab-export" data-kind="${escAttr(activeTab)}" ${te.enabled ? 'checked' : ''}>
+      <span class="lock-switch"></span>
+    </label>
+    <span class="angry-inline-meta">AngryERA &middot; ${pageCount} page${pageCount === 1 ? '' : 's'} &middot; ${te.singlePage ? 'single' : 'multi'}${te.exportName ? ' &middot; "' + esc(te.exportName) + '"' : ''}</span>
+    <button class="btn" type="button" data-action="edit-tab-export" data-kind="${escAttr(activeTab)}" ${te.enabled ? '' : 'disabled'}>Edit</button>`;
+  el.querySelectorAll('[data-action]').forEach(node => {
+    const evt = node.tagName === 'INPUT' ? 'change' : 'click';
+    node.addEventListener(evt, () => {
+      const act = node.dataset.action;
+      if (act === 'toggle-tab-export') call({ action: 'set_tab_export_enabled', templateId: TEMPLATE_ID, kind: node.dataset.kind, enabled: node.checked });
+      if (act === 'edit-tab-export') openAngryEditor(node.dataset.kind);
     });
   });
 }
 
 function render() {
   renderModeSwitcher();
-  renderLayoutToolbar();
 
-  const tabsEl0 = document.getElementById('tabsEl');
+  const tabsRowEl = document.getElementById('tabsRowEl');
   const panelsEl0 = document.getElementById('panelsEl');
   const placeholderEl = document.getElementById('modePlaceholderEl');
   if (editMode !== 'layout') {
-    tabsEl0.hidden = true; panelsEl0.hidden = true;
+    tabsRowEl.hidden = true; panelsEl0.hidden = true;
     placeholderEl.hidden = false;
     const modeInfo = EDIT_MODES.find(m => m.key === editMode);
     placeholderEl.innerHTML = `<h2>${esc(modeInfo.label)}</h2><p>Coming soon — we'll add these tools shortly.</p>`;
     return;
   }
-  tabsEl0.hidden = false; panelsEl0.hidden = false; placeholderEl.hidden = true;
+  tabsRowEl.hidden = false; panelsEl0.hidden = false; placeholderEl.hidden = true;
 
   const TABS = currentTabs();
   if (!TABS.includes(activeTab)) activeTab = TABS[0] || null;
@@ -815,29 +822,15 @@ function render() {
     });
   });
 
+  renderAngryInline();
+
   const el = document.getElementById('panelsEl');
   el.innerHTML = TABS.length ? TABS.map(k => {
     const secs = sections.filter(s => s.kind === k);
     const body = secs.length
       ? secs.map(sec => renderSection(sec)).join('')
       : '<p class="empty">No section yet — add one below to start building this tab.</p>';
-    const te = tabExportFor(k);
-    const pageCount = te.pages.length;
-    const angryBar = `<div class="tpl-mgmt-section">
-      <div class="tpl-mgmt-row">
-        <div class="tpl-mgmt-info">
-          <div class="tpl-mgmt-name">AngryERA export</div>
-          <div class="tpl-mgmt-desc">${pageCount} page${pageCount === 1 ? '' : 's'} &middot; ${te.singlePage ? 'single page' : 'multi-page'}${te.exportName ? ' &middot; "' + esc(te.exportName) + '"' : ''}</div>
-        </div>
-        <label class="lock-toggle" style="gap:8px;">
-          <input type="checkbox" data-action="toggle-tab-export" data-kind="${escAttr(k)}" ${te.enabled ? 'checked' : ''}>
-          <span class="lock-switch"></span>
-        </label>
-        <button class="btn" type="button" data-action="edit-tab-export" data-kind="${escAttr(k)}" ${te.enabled ? '' : 'disabled'}>Edit</button>
-      </div>
-    </div>`;
     return `<div class="tab-panel ${k === activeTab ? 'active' : ''}" data-panel="${escAttr(k)}">
-      ${angryBar}
       ${body}
       <div class="add-section-bar">
         <button class="btn" data-action="add-section-for-kind" data-kind="${escAttr(k)}">+ Add section to this tab</button>
@@ -895,6 +888,7 @@ function render() {
       }
       if (act === 'add-col') { openKindPicker = null; call({ action: 'add_column', tableId: id, kind: node.dataset.kind, label: '' }); }
       if (act === 'add-row') { openKindPicker = null; call({ action: 'add_row', tableId: id, kind: node.dataset.kind, label: '' }); }
+      if (act === 'pick-cell-override') { openKindPicker = null; cellOverrideStamp = node.dataset.kind; updateStampBadge(); render(); }
       if (act === 'col-width-dec') {
         const c = findColumn(id);
         if (c.kind === 'spacer') { call({ action: 'update_column', id, label: c.label, width: Math.max(20, (c.width || 20) - 20) }); }
@@ -1256,6 +1250,14 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
           <button data-action="add-col" data-kind="general" data-id="${tb.id}">General</button>
         </div>
       </div>
+      <div class="kind-picker-wrap">
+        <button class="add-row-btn" data-action="open-kind-picker" data-kind="cell-override" data-id="${tb.id}">+ Cell Override</button>
+        <div class="kind-picker" ${openKindPicker === `cell-override-${tb.id}` ? '' : 'hidden'}>
+          <button data-action="pick-cell-override" data-kind="general" data-id="${tb.id}">General</button>
+          <button data-action="pick-cell-override" data-kind="text" data-id="${tb.id}">Text</button>
+          <button data-action="pick-cell-override" data-kind="spacer" data-id="${tb.id}">Filler</button>
+        </div>
+      </div>
     </div>` : ''}
     ${nestedGroupsHtml}
   </div>`;
@@ -1578,12 +1580,6 @@ document.addEventListener('click', e => {
   if (!openKindPicker || e.target.closest('.kind-picker-wrap')) return;
   openKindPicker = null;
   render();
-});
-
-document.addEventListener('click', e => {
-  if (!openCellOverridePicker || e.target.closest('#layoutToolbarEl')) return;
-  openCellOverridePicker = false;
-  renderLayoutToolbar();
 });
 
 // Stamp tool: while a cell-override kind is picked, every click on a grid cell inside
