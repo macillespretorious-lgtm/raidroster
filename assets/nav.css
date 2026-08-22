@@ -46,9 +46,9 @@ a.rr-switch-item:hover { background: rgba(88,101,242,0.15); }
 .rr-u-name { display: block; font-size: 12px; font-weight: 600; color: #e8ecff; }
 .rr-u-role { display: block; font-size: 10.5px; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; }
 .rr-avatar {
-  width: 26px; height: 26px; border-radius: 50%; background: #171f33;
+  width: 32px; height: 32px; border-radius: 8px; background: #171f33;
   border: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; color: #a8b4d0; flex-shrink: 0;
+  font-size: 12px; font-weight: 700; color: #a8b4d0; flex-shrink: 0;
   object-fit: cover;
 }
 .rr-logout { color: #7f8bad; display: flex; align-items: center; padding: 5px; border-radius: 6px; flex-shrink: 0; }
