@@ -949,13 +949,17 @@ function colHeaderCell(c, tb, groupsEnabled, span) {
     </th>`;
 }
 
-function groupHeaderRow(cols, columnGroups, leadCol = true) {
+// singleRow=true means this group row is the table's only header row (the preview, which
+// has no second row of column controls beneath it to rowspan into) — leadCol/group filler
+// cells render without a rowspan in that case.
+function groupHeaderRow(cols, columnGroups, leadCol = true, singleRow = false) {
   if (!columnGroups.length) return '';
-  const cells = leadCol ? [`<th rowspan="2"></th>`] : [];
+  const fillerCell = singleRow ? `<th></th>` : `<th rowspan="2"></th>`;
+  const cells = leadCol ? [fillerCell] : [];
   let i = 0;
   while (i < cols.length) {
     const gid = cols[i].groupId;
-    if (!gid) { cells.push(`<th rowspan="2"></th>`); i++; continue; }
+    if (!gid) { cells.push(fillerCell); i++; continue; }
     let span = 1;
     while (i + span < cols.length && cols[i + span].groupId === gid) span++;
     const grp = columnGroups.find(g => g.id === gid);
@@ -1168,21 +1172,6 @@ function renderSection(sec) {
 // group header row, same effectiveKind cell-kind resolution), but every General cell
 // always shows the empty-slot placeholder since no toon assignments exist at the
 // template level; Text cells render their real authored content/colors.
-function previewHeaderCellsForChunk(chunkCols) {
-  const out = [];
-  let i = 0;
-  while (i < chunkCols.length) {
-    const c = chunkCols[i];
-    if (c.kind === 'spacer') { out.push(`<th class="spacer-th"></th>`); i++; continue; }
-    const span = Math.min(c.headerColspan || 1, chunkCols.length - i);
-    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
-    const style = c.headerColor ? ` style="background:${c.headerColor};color:${contrastText(c.headerColor)};"` : '';
-    out.push(`<th${colspanAttr}${style}>${esc(c.label)}</th>`);
-    i += span;
-  }
-  return out.join('');
-}
-
 function previewBodyCellsForRow(r, chunkCols, tb) {
   const mergeByCol = {};
   tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
@@ -1207,8 +1196,7 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
 }
 
 function previewColumnBlock(chunkCols, tb, groupsEnabled) {
-  const colHeaders = previewHeaderCellsForChunk(chunkCols);
-  const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups, false) : '';
+  const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups, false, true) : '';
 
   const colgroup = `<colgroup>` +
     chunkCols.map(c => {
@@ -1228,7 +1216,6 @@ function previewColumnBlock(chunkCols, tb, groupsEnabled) {
       <table class="grid">
         ${colgroup}
         ${groupRow}
-        <tr>${colHeaders}</tr>
         ${bodyRows}
       </table>
     </div>`;

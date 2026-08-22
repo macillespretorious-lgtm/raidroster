@@ -891,7 +891,7 @@ function groupHeaderRow(cols, columnGroups, tb) {
   let i = 0;
   while (i < cols.length) {
     const gid = cols[i].groupId;
-    if (!gid) { cells.push(`<th rowspan="2"></th>`); i++; continue; }
+    if (!gid) { cells.push(`<th></th>`); i++; continue; }
     let span = 1;
     while (i + span < cols.length && cols[i + span].groupId === gid) span++;
     const grp = columnGroups.find(g => g.id === gid);
@@ -903,24 +903,6 @@ function groupHeaderRow(cols, columnGroups, tb) {
     i += span;
   }
   return `<tr>${cells.join('')}</tr>`;
-}
-
-// Header colspans are stored per-column and consumed left-to-right, same convention as
-// the template editor: a column with headerColspan > 1 renders one <th> spanning N
-// columns and the next N-1 columns are skipped.
-function headerCellsForChunk(chunkCols, tb) {
-  const out = [];
-  let i = 0;
-  while (i < chunkCols.length) {
-    const c = chunkCols[i];
-    if (c.kind === 'spacer') { out.push(`<th class="spacer-th"></th>`); i++; continue; }
-    const span = Math.min(c.headerColspan || 1, chunkCols.length - i);
-    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
-    const style = c.headerColor ? ` style="background:${c.headerColor};color:${contrastText(c.headerColor)};"` : '';
-    out.push(`<th${colspanAttr}${style}>${esc(c.label)}</th>`);
-    i += span;
-  }
-  return out.join('');
 }
 
 // Same walk-and-consume pattern for body cells: tb.cellMerges is a (rowId, columnId) ->
@@ -951,8 +933,6 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
 }
 
 function renderColumnBlock(chunkCols, tb, noteEnabled) {
-  const colHeaders = headerCellsForChunk(chunkCols, tb);
-
   const colgroup = `<colgroup>` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
@@ -973,7 +953,6 @@ function renderColumnBlock(chunkCols, tb, noteEnabled) {
       <table class="grid">
         ${colgroup}
         ${groupRow}
-        <tr>${colHeaders}</tr>
         ${bodyRows}
       </table>
     </div>`;
@@ -1269,7 +1248,7 @@ function wireImportControls() {
 // on-screen flex-wrap in favor of stacking every table top-to-bottom) and posts it as an
 // image attachment straight to the selected Discord webhook, matching IO's publish flow.
 function raidCanvasMetrics() {
-  return { pad: 20, rowH: 28, headH: 26, groupH: 20, sectionHeadH: 32, tableTitleH: 26, gapSection: 20, gapTable: 12 };
+  return { pad: 20, rowH: 28, groupH: 20, sectionHeadH: 32, tableTitleH: 26, gapSection: 20, gapTable: 12 };
 }
 
 function flattenSectionTables(tables) {
@@ -1321,7 +1300,6 @@ function measureTableHeight(tb, m) {
   if (!tb.columns.length) return h;
   const chunks = chunkColumns(tb.columns);
   for (const chunk of chunks) {
-    h += m.headH;
     if (tb.columnGroups.some(g => chunk.some(c => c.groupId === g.id))) h += m.groupH;
     for (const r of tb.rows) h += r.kind === 'spacer' ? Math.max(6, m.rowH / 2) : m.rowH;
   }
@@ -1384,16 +1362,6 @@ function drawTable(ctx, tb, m, startY) {
       }
       y += m.groupH;
     }
-
-    colBoxes.forEach(box => {
-      if (box.c.kind === 'spacer') return;
-      ctx.fillStyle = box.c.headerColor || '#1c2333';
-      ctx.fillRect(box.x, y, box.w, m.headH);
-      ctx.fillStyle = contrastText(box.c.headerColor || '#1c2333');
-      ctx.font = 'bold 11px Segoe UI, Arial, sans-serif';
-      ctx.fillText(box.c.label || '', box.x + 6, y + m.headH / 2, box.w - 8);
-    });
-    y += m.headH;
 
     for (const r of tb.rows) {
       if (r.kind === 'spacer') { y += Math.max(6, m.rowH / 2); continue; }
