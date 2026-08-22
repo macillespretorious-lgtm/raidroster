@@ -973,8 +973,8 @@ function groupStrip(tb) {
   const pills = tb.columnGroups.map(g => `
     <div class="group-pill" data-flip-id="group:${g.id}" draggable="true" data-drag-kind="group" data-drag-id="${g.id}" data-drag-parent="${tb.id}" data-drop-kind="group" data-drop-id="${g.id}" data-drop-parent="${tb.id}" title="Drag to reorder, or drop a column here to assign it" style="background:${g.color};color:${contrastText(g.color)};">
       <span class="drag-handle" style="color:inherit;opacity:.75;">&#10021;</span>
-      <input class="group-title" data-action="rename-group" data-id="${g.id}" value="${escAttr(g.title)}">
-      <input type="color" class="swatch" data-action="recolor-group" data-id="${g.id}" value="${g.color}" title="Group color">
+      <input class="group-title" draggable="false" data-action="rename-group" data-id="${g.id}" value="${escAttr(g.title)}">
+      <input type="color" class="swatch" draggable="false" data-action="recolor-group" data-id="${g.id}" value="${g.color}" title="Group color">
       <button class="icon-btn" data-action="add-table-to-group" data-id="${g.id}" title="Add a table to this group">+T</button>
       <button class="icon-btn danger" data-action="delete-group" data-id="${g.id}" title="Delete group">&times;</button>
     </div>`).join('');
@@ -1095,7 +1095,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
   const headerStyle = headerBg ? `background:${headerBg};` : '';
   const titleColor = headerBg ? contrastText(headerBg) : '#e8ecff';
 
-  const titleHtml = `<input class="tbl-title" data-action="rename-table" data-id="${tb.id}" placeholder="Table name (optional)" value="${escAttr(tb.title)}" style="color:${titleColor};">`;
+  const titleHtml = `<input class="tbl-title" draggable="false" data-action="rename-table" data-id="${tb.id}" placeholder="Table name (optional)" value="${escAttr(tb.title)}" style="color:${titleColor};">`;
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables" data-drop-kind="table-container" data-drop-parent="${g.id}" data-drop-parent-kind="group">
@@ -1106,8 +1106,8 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
     <div class="tbl-head" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="${headerStyle}">
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
-      <input type="color" class="swatch" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
-      <div class="tbl-sizing">Col w<input type="number" class="width-input" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
+      <input type="color" class="swatch" draggable="false" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
+      <div class="tbl-sizing">Col w<input type="number" class="width-input" draggable="false" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
     ${groupsEnabled ? groupStrip(tb) : ''}
