@@ -210,7 +210,7 @@ function fetch_table_full($pdo, $tb) {
         'colspan' => (int)$m['colspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color FROM raid_template_cells WHERE table_id = ?');
+    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, kind_override FROM raid_template_cells WHERE table_id = ?');
     $stmt->execute([$tb['id']]);
     $cells = array_map(fn($c) => [
         'rowId' => (int)$c['row_id'],
@@ -218,6 +218,7 @@ function fetch_table_full($pdo, $tb) {
         'textContent' => $c['text_content'],
         'bgColor' => $c['bg_color'],
         'textColor' => $c['text_color'],
+        'kindOverride' => $c['kind_override'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
     return [
@@ -605,6 +606,28 @@ if ($action === 'update_cell') {
          ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color)'
     );
     $stmt->execute([$col['table_id'], $row['id'], $col['id'], $textContent, $bgColor, $textColor]);
+
+    respond_structure($pdo, $col['template_id']);
+}
+
+if ($action === 'set_cell_kind_override') {
+    $col = fetch_column_owned($pdo, $tenant['id'], (int)($body['columnId'] ?? 0));
+    if (!$col) fail(404, 'Column not found');
+    $row = fetch_row_owned($pdo, $tenant['id'], (int)($body['rowId'] ?? 0));
+    if (!$row) fail(404, 'Row not found');
+    if ((int)$col['table_id'] !== (int)$row['table_id']) fail(400, 'Row/column mismatch');
+
+    $kindOverride = $body['kindOverride'] ?? null;
+    if ($kindOverride !== null && !in_array($kindOverride, ['general', 'text', 'spacer'], true)) {
+        fail(400, 'Invalid kind override');
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, kind_override)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE kind_override = VALUES(kind_override)'
+    );
+    $stmt->execute([$col['table_id'], $row['id'], $col['id'], $kindOverride]);
 
     respond_structure($pdo, $col['template_id']);
 }

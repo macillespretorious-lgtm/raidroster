@@ -288,6 +288,30 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .add-section-bar { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
     .add-section-bar select { background: #111827; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 6px; }
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
+
+    .mode-switcher { display: flex; gap: 4px; background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 4px; margin-bottom: 12px; width: fit-content; }
+    .mode-btn { background: none; border: none; color: #a8b4d0; font: inherit; font-size: 13px; font-weight: 700; padding: 7px 16px; border-radius: 6px; cursor: pointer; }
+    .mode-btn:hover { color: #e8ecff; }
+    .mode-btn.active { background: #5865f2; color: #fff; }
+    .mode-placeholder { background: #111827; border: 1px dashed rgba(255,255,255,0.15); border-radius: 12px; padding: 60px 20px; text-align: center; color: #7f8bad; }
+    .mode-placeholder h2 { color: #e8ecff; font-size: 18px; margin-bottom: 6px; }
+    .mode-placeholder p { font-size: 13.5px; }
+
+    .layout-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+    .cell-override-btn { background: rgba(240,192,74,0.12); border: 1px solid rgba(240,192,74,0.4); color: #f0c04a; border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+    .cell-override-btn:hover { background: rgba(240,192,74,0.2); }
+    .cell-override-btn.active { background: #f0c04a; color: #1a1400; }
+
+    .stamp-badge { position: fixed; z-index: 4000; pointer-events: none; background: #f0c04a; color: #1a1400; font-size: 11.5px; font-weight: 800; padding: 4px 9px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); white-space: nowrap; }
+    body.stamp-mode-active .data-td, body.stamp-mode-active .spacer-cell, body.stamp-mode-active .text-td {
+      cursor: crosshair !important;
+    }
+    body.stamp-mode-active .data-td:hover, body.stamp-mode-active .spacer-cell:hover, body.stamp-mode-active .text-td:hover {
+      outline: 2px solid #f0c04a; outline-offset: -2px;
+    }
+    body.stamp-mode-active .cell-text-input, body.stamp-mode-active .swatch { pointer-events: none; }
+    .kind-override-tag { position: absolute; top: 1px; left: 2px; font-size: 8.5px; font-weight: 800; letter-spacing: .03em; color: #f0c04a; text-transform: uppercase; pointer-events: none; }
+    .data-td, .text-td, .spacer-cell { position: relative; }
   </style>
 </head>
 <body>
@@ -297,9 +321,17 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <h1><?= h($template['name']) ?></h1>
     <div class="lock-bar" id="lockBar"></div>
 
-    <div class="tabs" id="tabsEl"></div>
-    <div id="panelsEl"></div>
+    <div class="mode-switcher" id="modeSwitcherEl"></div>
+    <div class="layout-toolbar" id="layoutToolbarEl"></div>
+
+    <div id="modeBodyEl">
+      <div class="tabs" id="tabsEl"></div>
+      <div id="panelsEl"></div>
+      <div class="mode-placeholder" id="modePlaceholderEl" hidden></div>
+    </div>
   </div>
+
+  <div class="stamp-badge" id="stampBadge" hidden></div>
 
   <div class="modal-backdrop" id="previewBackdrop">
     <div class="modal preview-modal">
@@ -351,6 +383,17 @@ const SAVE_URL = <?= json_encode('/raids/template-structure-save.php?slug=' . $s
 const USER_ID = <?= json_encode($user['id']) ?>;
 let tabExports = <?= json_encode($tabExports) ?>;
 let sections = <?= json_encode($sections) ?>;
+
+// Layout / Colour-Merge / Logic mode switcher. Colour-Merge and Logic have no
+// functionality yet (coming soon) -- selecting either just swaps the whole editor
+// body for a placeholder, leaving Layout as the only mode with real tools.
+let editMode = 'layout';
+
+// "Add cell Override" stamp tool: once a kind is picked, cellOverrideStamp holds it
+// and every click on a template grid cell applies it (multi-select), until a
+// right-click clears the stamp and exits the tool.
+let cellOverrideStamp = null;
+let openCellOverridePicker = false;
 
 // Editing lock: purely advisory (everyone on this page already passed the admin
 // role check), it exists to warn concurrent admins off each other's edits, not
@@ -486,8 +529,10 @@ function chunkColumns(columns) {
 }
 
 // Priority rule when a row and column of different kinds intersect: Spacer > Text > General.
-// A cell is only a draggable toon slot when both its row and column are General.
-function effectiveKind(row, col) {
+// A cell is only a draggable toon slot when both its row and column are General. A cell-level
+// kindOverride (set via "Add cell Override") takes priority over all of that.
+function effectiveKind(row, col, cell) {
+  if (cell && cell.kindOverride) return cell.kindOverride;
   if (row.kind === 'spacer' || col.kind === 'spacer') return 'spacer';
   if (row.kind === 'text' || col.kind === 'text') return 'text';
   return 'general';
@@ -501,7 +546,7 @@ function measureTextPx(text, font) {
 }
 
 function cellFor(tb, rowId, colId) {
-  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null };
+  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null, kindOverride: null };
 }
 function tableForCell(rowId, colId) {
   return allTables().find(tb => tb.rows.some(r => r.id === rowId) && tb.columns.some(c => c.id === colId)) || null;
@@ -672,7 +717,81 @@ function call(payload) {
 
 let activeTab = decodeURIComponent(location.hash.slice(1)) || null;
 
+const EDIT_MODES = [
+  { key: 'layout', label: 'Layout' },
+  { key: 'colourMerge', label: 'Colour/Merge' },
+  { key: 'logic', label: 'Logic' },
+];
+
+function setMode(m) {
+  if (editMode === m) return;
+  editMode = m;
+  cellOverrideStamp = null;
+  openCellOverridePicker = false;
+  updateStampBadge();
+  render();
+}
+
+function renderModeSwitcher() {
+  const el = document.getElementById('modeSwitcherEl');
+  el.innerHTML = EDIT_MODES.map(m =>
+    `<button type="button" class="mode-btn ${m.key === editMode ? 'active' : ''}" data-mode="${m.key}">${esc(m.label)}</button>`
+  ).join('');
+  el.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => setMode(btn.dataset.mode));
+  });
+}
+
+function updateStampBadge() {
+  const badge = document.getElementById('stampBadge');
+  document.body.classList.toggle('stamp-mode-active', !!cellOverrideStamp);
+  if (!cellOverrideStamp) { badge.hidden = true; return; }
+  const label = cellOverrideStamp === 'spacer' ? 'Filler' : (cellOverrideStamp === 'text' ? 'Text' : 'General');
+  badge.textContent = `Cell override: ${label} — click cells to apply, right-click to stop`;
+  badge.hidden = false;
+}
+
+function renderLayoutToolbar() {
+  const el = document.getElementById('layoutToolbarEl');
+  if (editMode !== 'layout') { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="kind-picker-wrap">
+      <button type="button" class="cell-override-btn ${cellOverrideStamp ? 'active' : ''}" data-action="open-cell-override-picker">+ Add cell Override</button>
+      <div class="kind-picker" ${openCellOverridePicker ? '' : 'hidden'} style="position:absolute;top:36px;left:0;">
+        <button data-action="pick-cell-override" data-kind="general">General</button>
+        <button data-action="pick-cell-override" data-kind="text">Text</button>
+        <button data-action="pick-cell-override" data-kind="spacer">Filler</button>
+      </div>
+    </div>`;
+  el.querySelector('[data-action="open-cell-override-picker"]').addEventListener('click', () => {
+    openCellOverridePicker = !openCellOverridePicker;
+    renderLayoutToolbar();
+  });
+  el.querySelectorAll('[data-action="pick-cell-override"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      cellOverrideStamp = btn.dataset.kind;
+      openCellOverridePicker = false;
+      updateStampBadge();
+      renderLayoutToolbar();
+    });
+  });
+}
+
 function render() {
+  renderModeSwitcher();
+  renderLayoutToolbar();
+
+  const tabsEl0 = document.getElementById('tabsEl');
+  const panelsEl0 = document.getElementById('panelsEl');
+  const placeholderEl = document.getElementById('modePlaceholderEl');
+  if (editMode !== 'layout') {
+    tabsEl0.hidden = true; panelsEl0.hidden = true;
+    placeholderEl.hidden = false;
+    const modeInfo = EDIT_MODES.find(m => m.key === editMode);
+    placeholderEl.innerHTML = `<h2>${esc(modeInfo.label)}</h2><p>Coming soon — we'll add these tools shortly.</p>`;
+    return;
+  }
+  tabsEl0.hidden = false; panelsEl0.hidden = false; placeholderEl.hidden = true;
+
   const TABS = currentTabs();
   if (!TABS.includes(activeTab)) activeTab = TABS[0] || null;
 
@@ -1023,8 +1142,12 @@ function bodyCellsForRow(r, chunkCols, tb) {
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
-    const eff = effectiveKind(r, c);
-    if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    const cell = cellFor(tb, r.id, c.id);
+    const eff = effectiveKind(r, c, cell);
+    const overrideTag = cell.kindOverride
+      ? `<span class="kind-override-tag" title="Cell override: ${cell.kindOverride === 'spacer' ? 'Filler' : (cell.kindOverride === 'text' ? 'Text' : 'General')}">${cell.kindOverride === 'spacer' ? 'F' : (cell.kindOverride === 'text' ? 'T' : 'G')}</span>`
+      : '';
+    if (eff === 'spacer') { out.push(`<td class="spacer-cell" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}</td>`); i++; continue; }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     const splitBtn = span > 1
@@ -1035,8 +1158,8 @@ function bodyCellsForRow(r, chunkCols, tb) {
         ${splitBtn}
       </div>`;
     if (eff === 'text') {
-      const cell = cellFor(tb, r.id, c.id);
-      out.push(`<td${colspanAttr} class="data-td text-td">
+      out.push(`<td${colspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}">
+        ${overrideTag}
         <input class="lbl-input cell-text-input" data-action="cell-text" data-row-id="${r.id}" data-col-id="${c.id}" placeholder="Text" value="${escAttr(cell.textContent || '')}">
         <div class="cell-color-row">
           <input type="color" class="swatch" data-action="cell-bg" data-row-id="${r.id}" data-col-id="${c.id}" value="${cell.bgColor || '#1a2338'}" title="Background color">
@@ -1045,7 +1168,7 @@ function bodyCellsForRow(r, chunkCols, tb) {
         ${mergeActions}
       </td>`);
     } else {
-      out.push(`<td${colspanAttr} class="data-td"><div class="cell-height-spacer"></div>${mergeActions}</td>`);
+      out.push(`<td${colspanAttr} class="data-td" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}<div class="cell-height-spacer"></div>${mergeActions}</td>`);
     }
     i += span;
   }
@@ -1179,12 +1302,12 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
-    const eff = effectiveKind(r, c);
+    const cell = cellFor(tb, r.id, c.id);
+    const eff = effectiveKind(r, c, cell);
     if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     if (eff === 'text') {
-      const cell = cellFor(tb, r.id, c.id);
       const style = `background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};`;
       out.push(`<td${colspanAttr} class="cell text-td" style="${style}">${esc(cell.textContent || '')}</td>`);
     } else {
@@ -1278,7 +1401,7 @@ function walkHealerSlots(secs, cb) {
     for (const tb of tables) {
       for (const r of tb.rows) {
         if (r.kind === 'spacer' || !r.label) continue;
-        const dataCols = tb.columns.filter(c => effectiveKind(r, c) === 'general');
+        const dataCols = tb.columns.filter(c => effectiveKind(r, c, cellFor(tb, r.id, c.id)) === 'general');
         if (dataCols.length === 1) {
           cb(r.label, null, r, dataCols[0]);
         } else if (dataCols.length > 1) {
@@ -1455,6 +1578,40 @@ document.addEventListener('click', e => {
   if (!openKindPicker || e.target.closest('.kind-picker-wrap')) return;
   openKindPicker = null;
   render();
+});
+
+document.addEventListener('click', e => {
+  if (!openCellOverridePicker || e.target.closest('#layoutToolbarEl')) return;
+  openCellOverridePicker = false;
+  renderLayoutToolbar();
+});
+
+// Stamp tool: while a cell-override kind is picked, every click on a grid cell inside
+// the live editor (panelsEl) applies it instead of that cell's normal action, and stays
+// active for further clicks (multi-select) until a right-click clears the stamp.
+document.addEventListener('click', e => {
+  if (!cellOverrideStamp) return;
+  const td = e.target.closest('[data-row-id][data-col-id]');
+  if (!td || !document.getElementById('panelsEl').contains(td)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const rowId = parseInt(td.dataset.rowId, 10);
+  const columnId = parseInt(td.dataset.colId, 10);
+  call({ action: 'set_cell_kind_override', rowId, columnId, kindOverride: cellOverrideStamp });
+}, true);
+
+document.addEventListener('contextmenu', e => {
+  if (!cellOverrideStamp) return;
+  e.preventDefault();
+  cellOverrideStamp = null;
+  updateStampBadge();
+});
+
+document.addEventListener('mousemove', e => {
+  const badge = document.getElementById('stampBadge');
+  if (badge.hidden) return;
+  badge.style.left = (e.clientX + 16) + 'px';
+  badge.style.top = (e.clientY + 16) + 'px';
 });
 
 render();

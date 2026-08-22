@@ -819,8 +819,11 @@ const MAX_DATA_COLS = 10;
 
 // Spacer > Text > General: a cell is only a draggable toon slot when both its row and
 // column are General; if either is Text, the cell shows that row/column's own Text
-// content; if either is Spacer, the cell is blank.
-function effectiveKind(row, col) {
+// content; if either is Spacer, the cell is blank. A cell-level kindOverride (set via
+// "Add cell Override" in the designer) takes priority over all of that, forcing one
+// specific cell to a chosen kind regardless of its row/column.
+function effectiveKind(row, col, cell) {
+  if (cell && cell.kindOverride) return cell.kindOverride;
   if (row.kind === 'spacer' || col.kind === 'spacer') return 'spacer';
   if (row.kind === 'text' || col.kind === 'text') return 'text';
   return 'general';
@@ -840,9 +843,9 @@ function longestCellText(c, tb) {
   let longest = c.label || '';
   for (const r of tb.rows) {
     if (r.kind === 'spacer') continue;
-    const eff = effectiveKind(r, c);
-    if (eff === 'spacer') continue;
     const cell = tb.cells[r.id + '_' + c.id];
+    const eff = effectiveKind(r, c, cell);
+    if (eff === 'spacer') continue;
     const t = eff === 'text' ? (cell && cell.textContent) : (cell && cell.name);
     if (t && t.length > longest.length) longest = t;
   }
@@ -914,11 +917,11 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
-    const eff = effectiveKind(r, c);
+    const cell = tb.cells[r.id + '_' + c.id];
+    const eff = effectiveKind(r, c, cell);
     if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
-    const cell = tb.cells[r.id + '_' + c.id];
     if (eff === 'text') {
       const style = `background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};`;
       out.push(`<td${colspanAttr} class="cell text-cell" style="${style}">${esc(cell ? cell.textContent : '')}</td>`);
@@ -1371,9 +1374,9 @@ function drawTable(ctx, tb, m, startY) {
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.strokeRect(x0 + 0.5, y + 0.5, width - 1, rowH - 1);
       colBoxes.forEach(box => {
-        const eff = effectiveKind(r, box.c);
-        if (eff === 'spacer') return;
         const cell = tb.cells[r.id + '_' + box.c.id];
+        const eff = effectiveKind(r, box.c, cell);
+        if (eff === 'spacer') return;
         if (eff === 'text') {
           if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
           ctx.fillStyle = (cell && cell.textColor) || '#c7cfe8';
@@ -1493,7 +1496,7 @@ function walkHealerSlots(secs, cb) {
     for (const tb of tables) {
       for (const r of tb.rows) {
         if (r.kind === 'spacer' || !r.label) continue;
-        const dataCols = tb.columns.filter(c => effectiveKind(r, c) === 'general');
+        const dataCols = tb.columns.filter(c => effectiveKind(r, c, tb.cells[r.id + '_' + c.id]) === 'general');
         if (dataCols.length === 1) {
           cb(r.label, null, r, dataCols[0], tb);
         } else if (dataCols.length > 1) {
@@ -1623,6 +1626,7 @@ function _mrtBuildSectionNames(sec, homeServer) {
         generalRows.forEach((r, slotIdx) => {
           if (slotIdx >= 5) return;
           const cell = tb.cells[r.id + '_' + c.id];
+          if (effectiveKind(r, c, cell) !== 'general') return;
           const nm = _mrtToonName(cell, homeServer);
           if (nm) names[groupIdx * 5 + slotIdx + 1] = nm;
         });

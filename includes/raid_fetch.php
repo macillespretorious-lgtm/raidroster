@@ -36,7 +36,7 @@ function fetch_table_full($pdo, $tb) {
 
     $stmtCell = $pdo->prepare(
         'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.marked,
-                c.text_content, c.bg_color, c.text_color,
+                c.text_content, c.bg_color, c.text_color, c.kind_override,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class,
                 COALESCE(t.server, a.server) AS toon_server
@@ -62,6 +62,7 @@ function fetch_table_full($pdo, $tb) {
             'textContent' => $cell['text_content'],
             'bgColor'     => $cell['bg_color'],
             'textColor'   => $cell['text_color'],
+            'kindOverride' => $cell['kind_override'],
         ];
     }
 
