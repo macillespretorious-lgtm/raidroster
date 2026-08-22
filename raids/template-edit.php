@@ -162,8 +162,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .tbl-sizing { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; }
     .col-th-inner { display: flex; flex-direction: column; gap: 3px; align-items: center; min-width: 0; }
     .row-th-inner { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-    .row-th-top { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; cursor: grab; }
+    .row-th-top { display: flex; align-items: center; justify-content: center; gap: 3px; min-width: 0; cursor: grab; }
     .row-th-top:active { cursor: grabbing; }
+    .row-th-top .icon-btn { width: 18px; height: 18px; font-size: 10px; }
     .col-th-top { cursor: grab; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 2px 0; }
     .col-th-top:active { cursor: grabbing; }
     .col-th-row2 { display: flex; gap: 3px; align-items: center; width: 100%; min-width: 0; }
@@ -895,26 +896,14 @@ function groupStrip(tb) {
 
 function renderRowHeader(r, tb) {
   const dragHandle = `<span class="drag-handle">&#10021;</span>`;
+  const heightDec = `<button class="icon-btn" data-action="row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>`;
+  const heightInc = `<button class="icon-btn" data-action="row-height-inc" data-id="${r.id}" title="Taller">+</button>`;
   const deleteBtn = `<button class="icon-btn danger" data-action="delete-row" data-id="${r.id}" title="Delete">&times;</button>`;
   const dragAttrs = `draggable="true" data-drag-kind="row" data-drag-id="${r.id}" data-drag-parent="${tb.id}" title="Drag to reorder"`;
-  if (r.kind === 'spacer') {
-    return `<th class="spacer-th row-th" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
-      <div class="row-th-inner" data-flip-id="row:${r.id}">
-        <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
-        <div class="cell-actions">
-          <button class="icon-btn" data-action="row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>
-          <button class="icon-btn" data-action="row-height-inc" data-id="${r.id}" title="Taller">+</button>
-        </div>
-      </div>
-    </th>`;
-  }
-  return `<th class="row-th" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
+  const cls = r.kind === 'spacer' ? 'spacer-th row-th' : 'row-th';
+  return `<th class="${cls}" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
     <div class="row-th-inner" data-flip-id="row:${r.id}">
-      <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
-      <div class="cell-actions">
-        <button class="icon-btn" data-action="row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>
-        <button class="icon-btn" data-action="row-height-inc" data-id="${r.id}" title="Taller">+</button>
-      </div>
+      <div class="row-th-top" ${dragAttrs}>${dragHandle}${heightDec}${heightInc}${deleteBtn}</div>
     </div>
   </th>`;
 }
@@ -976,10 +965,10 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
   const colHeaders = headerCellsForChunk(chunkCols, tb, groupsEnabled);
   const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups) : '';
 
-  // 84px fits the row-action buttons (3 x 20px + gaps) on one line — narrower and they wrap
-  // onto stacked rows, which forces the whole body row taller since a <tr>'s height is driven
-  // by its tallest cell.
-  const rowHeaderColWidth = 84;
+  // 88px fits the drag handle + 3 row-action buttons (18px each + gaps) on one line —
+  // narrower and they wrap onto stacked rows, which forces the whole body row taller since
+  // a <tr>'s height is driven by its tallest cell.
+  const rowHeaderColWidth = 88;
   const colgroup = `<colgroup><col style="width:${rowHeaderColWidth}px;">` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
