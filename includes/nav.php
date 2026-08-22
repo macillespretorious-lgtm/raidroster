@@ -4,7 +4,8 @@
 require_once __DIR__ . '/db.php';
 
 function nav_asset_link() {
-    return '<link rel="stylesheet" href="/assets/nav.css">';
+    $v = (int)@filemtime(__DIR__ . '/../assets/nav.css');
+    return '<link rel="stylesheet" href="/assets/nav.css?v=' . $v . '">';
 }
 
 function nav_items_for_role($tenant, $role) {
