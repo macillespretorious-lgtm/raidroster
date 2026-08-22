@@ -735,6 +735,7 @@ function render() {
       if (act === 'rename-section') call({ action: 'update_section', id, title: node.value.trim() });
       if (act === 'toggle-section-note') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteEnabled: node.checked }); }
       if (act === 'section-note-text') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteText: node.value }); }
+      if (act === 'toggle-section-mrt-export') { call({ action: 'set_section_mrt_export', id, enabled: node.checked }); }
       if (act === 'preview-section') openPreview(id);
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
@@ -1150,6 +1151,10 @@ function renderSection(sec) {
         Cell markers (*)
       </label>
       ${sec.noteEnabled ? `<input type="text" class="note-text-input" data-action="section-note-text" data-id="${sec.id}" placeholder="Note shown under the section header" value="${escAttr(sec.noteText || '')}" maxlength="255">` : ''}
+      <label class="note-toggle-label">
+        <input type="checkbox" data-action="toggle-section-mrt-export" data-id="${sec.id}" ${sec.mrtExportEnabled ? 'checked' : ''}>
+        MRT export
+      </label>
     </div>
     <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section">
       ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled)).join('') || '<p class="empty">No tables yet.</p>'}

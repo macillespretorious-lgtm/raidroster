@@ -38,7 +38,8 @@ function fetch_table_full($pdo, $tb) {
         'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.marked,
                 c.text_content, c.bg_color, c.text_color,
                 COALESCE(t.main_name, a.name) AS toon_name,
-                COALESCE(t.class, a.class) AS toon_class
+                COALESCE(t.class, a.class) AS toon_class,
+                COALESCE(t.server, a.server) AS toon_server
          FROM raid_cells c
          LEFT JOIN toons t ON c.toon_kind = \'main\' AND t.id = c.toon_id
          LEFT JOIN toon_alts a ON c.toon_kind = \'alt\' AND a.id = c.toon_id
@@ -56,6 +57,7 @@ function fetch_table_full($pdo, $tb) {
             'pugClass'    => $cell['pug_class'],
             'name'        => $isPug ? $cell['pug_name'] : $cell['toon_name'],
             'class'       => $isPug ? $cell['pug_class'] : $cell['toon_class'],
+            'server'      => $isPug ? null : $cell['toon_server'],
             'marked'      => (bool)$cell['marked'],
             'textContent' => $cell['text_content'],
             'bgColor'     => $cell['bg_color'],
@@ -80,7 +82,12 @@ function fetch_table_full($pdo, $tb) {
 
 function fetch_raid_structure($pdo, $raidId) {
     $out = [];
-    $stmt = $pdo->prepare('SELECT * FROM raid_sections WHERE raid_id = ? ORDER BY sort_order, id');
+    $stmt = $pdo->prepare(
+        'SELECT rs.*, COALESCE(rts.mrt_export_enabled, 0) AS mrt_export_enabled
+         FROM raid_sections rs
+         LEFT JOIN raid_template_sections rts ON rts.id = rs.source_section_id
+         WHERE rs.raid_id = ? ORDER BY rs.sort_order, rs.id'
+    );
     $stmt->execute([$raidId]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $sec) {
         $stmtT = $pdo->prepare('SELECT * FROM raid_tables WHERE section_id = ? ORDER BY sort_order, id');
@@ -89,6 +96,7 @@ function fetch_raid_structure($pdo, $raidId) {
         $out[] = [
             'id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables,
             'noteEnabled' => (bool)$sec['note_enabled'], 'noteText' => $sec['note_text'],
+            'mrtExportEnabled' => (bool)$sec['mrt_export_enabled'],
         ];
     }
     return $out;

@@ -131,6 +131,32 @@ function fmtTime($t) {
     .section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
     .section-clear-btn { font-size: 10px; font-weight: 700; letter-spacing: normal; text-transform: none; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 5px 10px; border-radius: 999px; cursor: pointer; }
     .section-clear-btn:hover { background: rgba(0,0,0,0.4); }
+    .section-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .mrt-export-bar { display: flex; align-items: center; gap: 6px; }
+    .btn-mrt-export {
+      font-size: 10px; font-weight: 700; letter-spacing: normal; text-transform: none;
+      padding: 5px 10px; border-radius: 999px; cursor: pointer;
+      background: rgba(255,180,50,0.18); border: 1px solid rgba(255,180,50,0.4); color: #ffdb8a;
+    }
+    .btn-mrt-export:hover { background: rgba(255,180,50,0.3); }
+    .mrt-info {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; border-radius: 50%; font-size: 10px; font-weight: 700;
+      font-style: normal; text-transform: none; letter-spacing: normal;
+      background: rgba(255,180,50,0.2); border: 1px solid rgba(255,180,50,0.4);
+      color: #ffdb8a; cursor: default; position: relative; flex-shrink: 0;
+    }
+    .mrt-info::after {
+      content: attr(data-tip);
+      position: absolute; top: calc(100% + 8px); right: 0;
+      width: 240px; padding: 8px 10px;
+      background: #1a2340; border: 1px solid rgba(255,180,50,0.4);
+      border-radius: 6px; color: #d4b870; font-size: 11px; font-weight: 400;
+      line-height: 1.5; white-space: normal; text-align: left;
+      pointer-events: none; opacity: 0; transition: opacity 0.15s;
+      z-index: 99;
+    }
+    .mrt-info:hover::after { opacity: 1; }
     .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
     .tbl-wrap { min-width: 0; max-width: 100%; }
     .tbl-wrap .grid-scroll + .grid-scroll { margin-top: 2px; }
@@ -628,6 +654,10 @@ function render() {
   const el = document.getElementById('sectionsEl');
   el.innerHTML = sections.map(renderSection).join('');
 
+  el.querySelectorAll('[data-mrt-server]').forEach(btn => {
+    btn.addEventListener('click', () => doMrtExport(btn));
+  });
+
   if (CAN_MANAGE) {
     el.querySelectorAll('td.cell.editable').forEach(td => {
       td.addEventListener('dragover', e => { e.preventDefault(); td.classList.add('drop-hover'); });
@@ -972,10 +1002,14 @@ function renderTable(tb, noteEnabled) {
 function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
   const clearBtn = CAN_MANAGE ? `<button type="button" class="section-clear-btn" data-section-id="${sec.id}" title="Clear all assignments in this section">Clear section</button>` : '';
+  const mrtBar = sec.mrtExportEnabled ? `<div class="mrt-export-bar">
+      ${MRT_SERVERS.map(s => `<button type="button" class="btn-mrt-export" data-mrt-server="${s.key}" data-section-id="${sec.id}">${s.label}</button>`).join('')}
+      <span class="mrt-info" data-tip="${MRT_TIP}">i</span>
+    </div>` : '';
   const noteEnabled = !!sec.noteEnabled;
   const noteBar = (noteEnabled && sec.noteText) ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   return `<div class="section-card">
-    <div class="section-head" style="background:${meta.color};"><span>${meta.icon} ${esc(sec.title)}</span>${clearBtn}</div>
+    <div class="section-head" style="background:${meta.color};"><span>${meta.icon} ${esc(sec.title)}</span><div class="section-head-actions">${mrtBar}${clearBtn}</div></div>
     ${noteBar}
     <div class="section-body">
       ${sec.tables.map(tb => renderTable(tb, noteEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
@@ -1553,6 +1587,119 @@ function wireEraExport() {
       }).catch(() => { alert('Could not copy to clipboard.'); });
     });
   });
+}
+
+// MRT (Method Raid Tools) export: per-section, produces a compressed 'MRTRGR1...'
+// string importable via MRT's Raid Groups screen. Columns whose own kind is 'general'
+// are read as groups 1-8 (in column order across the section's tables, depth-first
+// through nested column groups); rows whose own kind is 'general' are read as slots
+// 1-5 within their own table. Offered per home server so same-server toons show as a
+// bare name and other-server toons get a '-ServerName' suffix.
+const MRT_SERVERS = [
+  { key: 'PyrewoodVillage',  label: 'MRT (Pyrewood)' },
+  { key: 'MirageRaceway',    label: 'MRT (Mirage)'   },
+  { key: 'NethergardeKeep',  label: 'MRT (Nethergar)'},
+];
+const MRT_TIP = 'Use the export that matches the server your character is on. '
+  + 'Toons on the same server as you will appear as just their name; '
+  + 'toons on the other two servers will include their server name (e.g. Name-MirageRaceway).';
+
+const _MRT6 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789()';
+
+function _mrtEncode(bytes) {
+  const out = [];
+  const n = bytes.length;
+  let i = 0;
+  while (i + 2 < n) {
+    let c = bytes[i] + bytes[i+1]*256 + bytes[i+2]*65536; i += 3;
+    const b1=c%64; c=(c-b1)/64;
+    const b2=c%64; c=(c-b2)/64;
+    const b3=c%64; const b4=(c-b3)/64;
+    out.push(_MRT6[b1],_MRT6[b2],_MRT6[b3],_MRT6[b4]);
+  }
+  let c=0, bits=0;
+  while (i < n) { c += bytes[i]*Math.pow(2,bits); bits+=8; i++; }
+  while (bits > 0) { const b=c%64; out.push(_MRT6[b]); c=(c-b)/64; bits-=6; }
+  return out.join('');
+}
+
+async function _mrtDeflate(str) {
+  const raw = new TextEncoder().encode(str);
+  const ds = new CompressionStream('deflate-raw');
+  const w = ds.writable.getWriter();
+  w.write(raw); w.close();
+  const chunks = []; const r = ds.readable.getReader();
+  while (true) { const {done,value}=await r.read(); if(done)break; chunks.push(value); }
+  let len=0; for(const c of chunks) len+=c.length;
+  const out=new Uint8Array(len); let off=0;
+  for(const c of chunks){out.set(c,off);off+=c.length;}
+  return out;
+}
+
+function _mrtToonName(cell, homeServer) {
+  if (!cell || !cell.name) return null;
+  const srv = cell.server || '';
+  if (!srv || srv === homeServer) return cell.name;
+  return cell.name + '-' + srv;
+}
+
+function _mrtBuildSectionNames(sec, homeServer) {
+  const names = {};
+  let groupIdx = 0;
+  function walk(tables) {
+    for (const tb of tables) {
+      const generalCols = tb.columns.filter(c => c.kind === 'general');
+      const generalRows = tb.rows.filter(r => r.kind === 'general');
+      for (const c of generalCols) {
+        if (groupIdx >= 8) break;
+        generalRows.forEach((r, slotIdx) => {
+          if (slotIdx >= 5) return;
+          const cell = tb.cells[r.id + '_' + c.id];
+          const nm = _mrtToonName(cell, homeServer);
+          if (nm) names[groupIdx * 5 + slotIdx + 1] = nm;
+        });
+        groupIdx++;
+      }
+      for (const g of tb.columnGroups) walk(g.tables);
+    }
+  }
+  walk(sec.tables);
+  return names;
+}
+
+function _mrtBuildTable(sec, homeServer) {
+  const names = _mrtBuildSectionNames(sec, homeServer);
+  const keys = Object.keys(names).map(Number).sort((a, b) => a - b);
+  if (!keys.length) return null;
+
+  let seqEnd = 0;
+  while (names[seqEnd + 1] !== undefined) seqEnd++;
+
+  const q = s => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const parts = [];
+  for (let i = 1; i <= seqEnd; i++) parts.push(`"${q(names[i])}"`);
+  keys.filter(k => k > seqEnd).forEach(k => parts.push(`[${k}]="${q(names[k])}"`));
+
+  return '0,{' + parts.join(',') + '}';
+}
+
+async function doMrtExport(btn) {
+  const sectionId = parseInt(btn.dataset.sectionId, 10);
+  const homeServer = btn.dataset.mrtServer;
+  const sec = sections.find(s => s.id === sectionId);
+  if (!sec) return;
+  const table = _mrtBuildTable(sec, homeServer);
+  if (!table) { alert('No roster assignments to export.'); return; }
+  const compressed = await _mrtDeflate(table);
+  const result = 'MRTRGR1' + _mrtEncode(compressed);
+  try {
+    await navigator.clipboard.writeText(result);
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1800);
+  } catch {
+    prompt('Copy the MRT export string:', result);
+  }
 }
 
 function wireClearAll() {

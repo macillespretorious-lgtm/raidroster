@@ -253,6 +253,7 @@ function fetch_structure($pdo, $templateId) {
             'tables' => $tablesOut,
             'noteEnabled' => (bool)$sec['note_enabled'],
             'noteText' => $sec['note_text'],
+            'mrtExportEnabled' => (bool)$sec['mrt_export_enabled'],
         ];
     }
 
@@ -468,6 +469,15 @@ if ($action === 'update_section') {
     if ($noteText === '') $noteText = null;
     $stmt = $pdo->prepare('UPDATE raid_template_sections SET title = ?, note_enabled = ?, note_text = ? WHERE id = ?');
     $stmt->execute([$title, $noteEnabled, $noteText, $sec['id']]);
+    respond_structure($pdo, $sec['template_id']);
+}
+
+if ($action === 'set_section_mrt_export') {
+    $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
+    if (!$sec) fail(404, 'Section not found');
+    $enabled = !empty($body['enabled']) ? 1 : 0;
+    $stmt = $pdo->prepare('UPDATE raid_template_sections SET mrt_export_enabled = ? WHERE id = ?');
+    $stmt->execute([$enabled, $sec['id']]);
     respond_structure($pdo, $sec['template_id']);
 }
 
