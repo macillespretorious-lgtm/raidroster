@@ -917,7 +917,8 @@ function renderColumnBlock(chunkCols, tb, noteEnabled) {
     if (r.kind === 'spacer') {
       return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
     }
-    return `<tr>${bodyCellsForRow(r, chunkCols, tb, noteEnabled)}</tr>`;
+    const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
+    return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled)}</tr>`;
   }).join('');
 
   const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb);

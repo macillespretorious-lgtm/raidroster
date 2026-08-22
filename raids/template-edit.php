@@ -685,8 +685,8 @@ function render() {
       if (act === 'add-row') { openKindPicker = null; call({ action: 'add_row', tableId: id, kind: node.dataset.kind, label: '' }); }
       if (act === 'spacer-col-width-dec') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: Math.max(20, (c.width || 20) - 20) }); }
       if (act === 'spacer-col-width-inc') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: (c.width || 20) + 20 }); }
-      if (act === 'spacer-row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
-      if (act === 'spacer-row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
+      if (act === 'row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
+      if (act === 'row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
       if (act === 'table-header-color') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, headerColor: node.value }); }
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
       if (act === 'cell-text') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: node.value, bgColor: cell.bgColor, textColor: cell.textColor }); }
@@ -902,8 +902,8 @@ function renderRowHeader(r, tb) {
       <div class="row-th-inner" data-flip-id="row:${r.id}">
         <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
         <div class="cell-actions">
-          <button class="icon-btn" data-action="spacer-row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>
-          <button class="icon-btn" data-action="spacer-row-height-inc" data-id="${r.id}" title="Taller">+</button>
+          <button class="icon-btn" data-action="row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>
+          <button class="icon-btn" data-action="row-height-inc" data-id="${r.id}" title="Taller">+</button>
         </div>
       </div>
     </th>`;
@@ -911,6 +911,10 @@ function renderRowHeader(r, tb) {
   return `<th class="row-th" data-drop-kind="row" data-drop-id="${r.id}" data-drop-parent="${tb.id}">
     <div class="row-th-inner" data-flip-id="row:${r.id}">
       <div class="row-th-top" ${dragAttrs}>${dragHandle}${deleteBtn}</div>
+      <div class="cell-actions">
+        <button class="icon-btn" data-action="row-height-dec" data-id="${r.id}" title="Shorter">&minus;</button>
+        <button class="icon-btn" data-action="row-height-inc" data-id="${r.id}" title="Taller">+</button>
+      </div>
     </div>
   </th>`;
 }
@@ -988,7 +992,8 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
       const spacerCells = chunkCols.map(() => `<td class="spacer-cell"></td>`).join('');
       return `<tr style="height:${r.height || 20}px;">${rowHeader}${spacerCells}</tr>`;
     }
-    return `<tr>${rowHeader}${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
+    return `<tr${heightAttr}>${rowHeader}${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
@@ -1135,7 +1140,8 @@ function previewColumnBlock(chunkCols, tb) {
     if (r.kind === 'spacer') {
       return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
     }
-    return `<tr>${previewBodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
+    return `<tr${heightAttr}>${previewBodyCellsForRow(r, chunkCols, tb)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
