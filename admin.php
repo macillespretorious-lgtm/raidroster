@@ -129,14 +129,13 @@ if (!$webhookDays) {
     $webhookDays = array_map(fn($n) => ['name' => $n, 'webhook' => ''], $WEBHOOK_DAY_DEFAULTS);
 }
 
-$stmt = $pdo->prepare('SELECT id, name, description, assignment_style, default_start_time, default_duration_minutes FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $raidTemplates = array_map(function ($t) {
     return [
         'id'                     => (int)$t['id'],
         'name'                   => $t['name'],
         'description'            => $t['description'],
-        'assignmentStyle'        => $t['assignment_style'],
         'defaultStartTime'       => $t['default_start_time'],
         'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
     ];

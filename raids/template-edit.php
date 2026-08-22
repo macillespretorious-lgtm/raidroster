@@ -92,6 +92,29 @@ function fetch_structure($pdo, $templateId) {
 }
 $sections = fetch_structure($pdo, $templateId);
 
+// AngryERA export config is per-tab (per distinct section `kind` on this template), not
+// global — a template may have zero, one, or several kinds with export configured.
+function fetch_tab_exports($pdo, $templateId) {
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_tab_exports WHERE template_id = ?');
+    $stmt->execute([$templateId]);
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $te) {
+        $stmt2 = $pdo->prepare('SELECT id, name, template FROM raid_template_export_pages WHERE tab_export_id = ? ORDER BY sort_order, id');
+        $stmt2->execute([$te['id']]);
+        $pages = array_map(fn($p) => [
+            'id' => (int)$p['id'], 'name' => $p['name'], 'template' => $p['template'],
+        ], $stmt2->fetchAll(PDO::FETCH_ASSOC));
+        $out[$te['kind']] = [
+            'enabled'    => (bool)$te['enabled'],
+            'singlePage' => (bool)$te['single_page'],
+            'exportName' => $te['export_name'],
+            'pages'      => $pages,
+        ];
+    }
+    return $out;
+}
+$tabExports = fetch_tab_exports($pdo, $templateId);
+
 function h($s) { return htmlspecialchars($s ?? ''); }
 ?>
 <!doctype html>
@@ -233,9 +256,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .export-modal .preview-note code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
     .export-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
     .export-tokens span { background: rgba(76,175,106,0.15); border: 1px solid rgba(76,175,106,0.35); color: #8fe0a8; font-size: 11px; padding: 3px 8px; border-radius: 999px; font-family: 'Courier New', monospace; }
-    .export-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .export-layout textarea { width: 100%; min-height: 260px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #e8ecff; font: 12.5px/1.5 'Courier New', monospace; padding: 10px; resize: vertical; }
-    .export-preview { min-height: 260px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; color: #c7cfe8; font: 12.5px/1.5 'Courier New', monospace; padding: 10px; white-space: pre-wrap; word-break: break-word; overflow-y: auto; }
+    .angry-page-pane textarea { width: 100%; min-height: 260px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #e8ecff; font: 12.5px/1.5 'Courier New', monospace; padding: 10px; resize: vertical; }
     .export-status { font-size: 12px; color: #4caf6a; margin-top: 8px; min-height: 16px; }
     .export-modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .preview-modal .section-card { border-radius: 12px; overflow: hidden; margin: 0; border: 1px solid rgba(255,255,255,0.08); }
@@ -255,6 +276,15 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .preview-modal .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
     .preview-modal .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
+    .angry-page-pane { display: flex; gap: 14px; }
+    .angry-page-list { display: flex; flex-direction: column; gap: 4px; width: 160px; flex-shrink: 0; }
+    .angry-page-btn { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: #c7cef2; text-align: left; padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer; }
+    .angry-page-btn.active { background: rgba(88,101,242,0.15); border-color: rgba(88,101,242,0.4); color: #a3adfa; }
+    .angry-page-btn:hover { border-color: rgba(255,255,255,0.3); }
+    .angry-meta-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .angry-meta-row input[type=text] { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 12.5px; padding: 7px 9px; border-radius: 6px; }
+    #angryPageName { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 12.5px; padding: 7px 9px; border-radius: 6px; }
+
     .add-section-bar { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
     .add-section-bar select { background: #111827; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 6px; }
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
@@ -266,20 +296,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <a class="back" href="/<?= h($slug) ?>/design">&larr; Back to templates</a>
     <h1><?= h($template['name']) ?></h1>
     <div class="lock-bar" id="lockBar"></div>
-
-    <div class="tpl-mgmt-section" id="tplMgmtSection">
-      <div class="tpl-mgmt-row">
-        <div class="tpl-mgmt-info">
-          <div class="tpl-mgmt-name">AngryERA Template Edit</div>
-          <div class="tpl-mgmt-desc">Export a text template for AngryERA-style raid assignments.</div>
-        </div>
-        <label class="lock-toggle" style="gap:8px;">
-          <input type="checkbox" id="angryEraToggle" <?= $template['era_export_enabled'] ? 'checked' : '' ?>>
-          <span class="lock-switch"></span>
-        </label>
-        <button class="btn" type="button" id="exportTemplateBtn" <?= $template['era_export_enabled'] ? '' : 'disabled' ?>>Edit</button>
-      </div>
-    </div>
 
     <div class="tabs" id="tabsEl"></div>
     <div id="panelsEl"></div>
@@ -296,21 +312,34 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     </div>
   </div>
 
-  <div class="modal-backdrop" id="exportModalBackdrop">
+  <div class="modal-backdrop" id="angryModalBackdrop">
     <div class="modal export-modal">
       <div class="preview-head">
-        <h2>Export template (healing)</h2>
-        <button class="icon-btn" id="exportModalClose" type="button" title="Close">&times;</button>
+        <h2 id="angryModalTitle">AngryERA export</h2>
+        <button class="icon-btn" id="angryModalClose" type="button" title="Close">&times;</button>
       </div>
-      <p class="preview-note">Write a text template for healing assignments. Use <code>{{Row Label}}</code> to insert a healer-section slot named by its row label (or <code>{{Row Label|Column Label}}</code> when that table has more than one data column). <code>{{*a,b,c}}</code> joins several slots with commas, skipping empty ones; <code>{{#a,b,c}}</code> numbers them. On a raid page, this resolves against real assignments &mdash; here it previews against this template's own labels.</p>
-      <div class="export-tokens" id="exportTokensList"></div>
-      <div class="export-layout">
-        <textarea id="exportTemplateInput" placeholder="e.g. MT Healing:&#10;- {{*Healer 1,Healer 2,Healer 3}}"></textarea>
-        <pre class="export-preview" id="exportPreviewOut"></pre>
+      <p class="preview-note">Use <code>{{Row Label}}</code> to insert a slot named by its row label (or <code>{{Row Label|Column Label}}</code> when that row has more than one data column). <code>{{*a,b,c}}</code> joins several slots with commas, skipping empty ones; <code>{{#a,b,c}}</code> numbers them. This resolves against real assignments on the raid page &mdash; here it just lists the available tokens.</p>
+      <div class="export-tokens" id="angryTokensList"></div>
+      <div class="angry-meta-row">
+        <label class="lock-toggle" style="gap:6px;">
+          <input type="checkbox" id="angrySinglePage">
+          <span class="lock-switch"></span>
+          Single page mode
+        </label>
+        <input type="text" id="angryExportName" placeholder="Export name (JSON &quot;name&quot; field)" style="flex:1; min-width:160px;">
       </div>
-      <div class="export-status" id="exportStatus"></div>
+      <div class="angry-page-pane" id="angryPagePane">
+        <div class="angry-page-list" id="angryPageList"></div>
+        <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;">
+          <input type="text" id="angryPageName" placeholder="Page name">
+          <textarea id="angryPageTemplate" placeholder="e.g. MT Healing:&#10;- {{*Healer 1,Healer 2,Healer 3}}"></textarea>
+        </div>
+      </div>
+      <div class="export-status" id="angryStatus"></div>
       <div class="modal-actions">
-        <button class="btn" type="button" id="exportSaveBtn">Save</button>
+        <button class="btn btn-cancel-tpl" type="button" id="angryExportJsonBtn">Copy JSON export</button>
+        <button class="btn btn-cancel-tpl" type="button" id="angryDeletePageBtn">Delete page</button>
+        <button class="btn" type="button" id="angryAddPageBtn">+ Add page</button>
       </div>
     </div>
   </div>
@@ -320,8 +349,7 @@ const SLUG = <?= json_encode($slug) ?>;
 const TEMPLATE_ID = <?= json_encode($templateId) ?>;
 const SAVE_URL = <?= json_encode('/raids/template-structure-save.php?slug=' . $slug) ?>;
 const USER_ID = <?= json_encode($user['id']) ?>;
-let EXPORT_TEMPLATE = <?= json_encode($template['export_template']) ?>;
-let ERA_EXPORT_ENABLED = <?= json_encode((bool)$template['era_export_enabled']) ?>;
+let tabExports = <?= json_encode($tabExports) ?>;
 let sections = <?= json_encode($sections) ?>;
 
 // Editing lock: purely advisory (everyone on this page already passed the admin
@@ -638,7 +666,7 @@ function finalizeDrop() {
 function call(payload) {
   return fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(r => r.json())
-    .then(d => { if (!d.success) throw new Error(d.error || 'Failed'); sections = d.sections; render(); return d; })
+    .then(d => { if (!d.success) throw new Error(d.error || 'Failed'); sections = d.sections; if (d.tabExports) tabExports = d.tabExports; render(); return d; })
     .catch(e => alert(e.message));
 }
 
@@ -674,7 +702,23 @@ function render() {
     const body = secs.length
       ? secs.map(sec => renderSection(sec)).join('')
       : '<p class="empty">No section yet — add one below to start building this tab.</p>';
+    const te = tabExportFor(k);
+    const pageCount = te.pages.length;
+    const angryBar = `<div class="tpl-mgmt-section">
+      <div class="tpl-mgmt-row">
+        <div class="tpl-mgmt-info">
+          <div class="tpl-mgmt-name">AngryERA export</div>
+          <div class="tpl-mgmt-desc">${pageCount} page${pageCount === 1 ? '' : 's'} &middot; ${te.singlePage ? 'single page' : 'multi-page'}${te.exportName ? ' &middot; "' + esc(te.exportName) + '"' : ''}</div>
+        </div>
+        <label class="lock-toggle" style="gap:8px;">
+          <input type="checkbox" data-action="toggle-tab-export" data-kind="${escAttr(k)}" ${te.enabled ? 'checked' : ''}>
+          <span class="lock-switch"></span>
+        </label>
+        <button class="btn" type="button" data-action="edit-tab-export" data-kind="${escAttr(k)}" ${te.enabled ? '' : 'disabled'}>Edit</button>
+      </div>
+    </div>`;
     return `<div class="tab-panel ${k === activeTab ? 'active' : ''}" data-panel="${escAttr(k)}">
+      ${angryBar}
       ${body}
       <div class="add-section-bar">
         <button class="btn" data-action="add-section-for-kind" data-kind="${escAttr(k)}">+ Add section to this tab</button>
@@ -703,6 +747,8 @@ function render() {
         const msg = `⚠ PERMANENTLY DELETE the "${tabLabel(k)}" tab?\n\nThis removes ${count} section${count === 1 ? '' : 's'} and everything inside — every table, column, row and cell. This cannot be undone.`;
         if (confirm(msg)) call({ action: 'delete_tab', templateId: TEMPLATE_ID, kind: k });
       }
+      if (act === 'toggle-tab-export') call({ action: 'set_tab_export_enabled', templateId: TEMPLATE_ID, kind: node.dataset.kind, enabled: node.checked });
+      if (act === 'edit-tab-export') openAngryEditor(node.dataset.kind);
       if (act === 'add-table-to-group') {
         const title = prompt('Table name, e.g. a boss name:');
         if (title && title.trim()) call({ action: 'add_table', groupId: id, title: title.trim() });
@@ -1229,12 +1275,12 @@ document.getElementById('previewBackdrop').addEventListener('click', e => {
   if (e.target.id === 'previewBackdrop') closePreview();
 });
 
-// AngryERA export: a {{token}} text template resolved against every row (across every
-// tab) that has a label — row, or row|column when its table has more than one General
-// column. Kind is freeform now, so there's no privileged "healer" tab any more; the
-// AngryERA Feature toggle (ERA_EXPORT_ENABLED/era_export_enabled) is the feature's only
-// gate. Editing here only ever sees the template's own labels as placeholder values; the
-// raid page (view.php) resolves the same grammar against that raid's real assignments.
+// AngryERA export: a {{token}} text template resolved against every row on a given tab
+// that has a label — row, or row|column when its table has more than one General column.
+// Kind is freeform now, so export config is per-tab (per distinct kind), not global — each
+// tab has its own enabled flag, singlePage flag, exportName, and list of named pages.
+// Editing here only ever sees the template's own labels as placeholder values; the raid
+// page (view.php) resolves the same grammar against that raid's real assignments.
 function walkHealerSlots(secs, cb) {
   function walk(tables) {
     for (const tb of tables) {
@@ -1277,75 +1323,141 @@ function applyExportTemplate(tmpl, resolveFn, flagUnknown) {
   });
 }
 
-function renderExportTokens() {
-  const el = document.getElementById('exportTokensList');
-  if (!el) return;
+function tabExportFor(k) {
+  return tabExports[k] || { enabled: false, singlePage: false, exportName: '', pages: [] };
+}
+
+let angryKind = null;
+let angrySelectedPageId = null;
+
+function renderAngryTokens() {
+  const el = document.getElementById('angryTokensList');
+  const secs = sections.filter(s => s.kind === angryKind);
   const keys = [];
-  walkHealerSlots(sections, (rowLabel, colLabel) => keys.push(colLabel ? `${rowLabel}|${colLabel}` : rowLabel));
+  walkHealerSlots(secs, (rowLabel, colLabel) => keys.push(colLabel ? `${rowLabel}|${colLabel}` : rowLabel));
   el.innerHTML = keys.length
     ? keys.map(k => `<span>{{${esc(k)}}}</span>`).join('')
-    : '<span style="background:none;border-style:dashed;color:#7f8bad;">No labeled rows yet &mdash; add a row with a label somewhere in the template first.</span>';
+    : '<span style="background:none;border-style:dashed;color:#7f8bad;">No labeled rows yet on this tab.</span>';
 }
 
-function renderExportPreview() {
-  const ta = document.getElementById('exportTemplateInput');
-  const out = document.getElementById('exportPreviewOut');
-  if (!ta || !out) return;
-  const map = healerSlotMap(sections, (r, c) => c ? `${r.label} (${c.label})` : r.label);
-  out.textContent = applyExportTemplate(ta.value, k => map[k.trim().toLowerCase()] ?? null, true);
-}
+function renderAngryPageList() {
+  const te = tabExportFor(angryKind);
+  const single = document.getElementById('angrySinglePage').checked;
+  document.getElementById('angryPageList').style.display = single ? 'none' : 'flex';
+  document.getElementById('angryPageName').style.display = single ? 'none' : '';
+  document.getElementById('angryAddPageBtn').style.display = single ? 'none' : '';
+  document.getElementById('angryDeletePageBtn').style.display = single ? 'none' : '';
+  if (single) return;
 
-function wireAngryEraToggle() {
-  const toggle = document.getElementById('angryEraToggle');
-  const btn = document.getElementById('exportTemplateBtn');
-  if (!toggle || !btn) return;
-  toggle.addEventListener('change', () => {
-    const enabled = toggle.checked;
-    fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_era_export_enabled', templateId: TEMPLATE_ID, enabled }) })
-      .then(r => r.json()).then(d => {
-        if (!d.success) { toggle.checked = !enabled; return; }
-        ERA_EXPORT_ENABLED = d.eraExportEnabled;
-        btn.disabled = !ERA_EXPORT_ENABLED;
-      })
-      .catch(() => { toggle.checked = !enabled; });
+  const el = document.getElementById('angryPageList');
+  el.innerHTML = te.pages.length
+    ? te.pages.map(p => `<button type="button" class="angry-page-btn ${p.id === angrySelectedPageId ? 'active' : ''}" data-page-id="${p.id}">${esc(p.name)}</button>`).join('')
+    : '<span class="hint">No pages yet.</span>';
+  el.querySelectorAll('[data-page-id]').forEach(pbtn => {
+    pbtn.addEventListener('click', () => {
+      angrySelectedPageId = parseInt(pbtn.dataset.pageId, 10);
+      renderAngryPageList();
+      loadAngrySelectedPage();
+    });
   });
 }
-wireAngryEraToggle();
 
-function wireExportControls() {
-  const btn = document.getElementById('exportTemplateBtn');
-  const backdrop = document.getElementById('exportModalBackdrop');
-  if (!btn || !backdrop) return;
-  const closeBtn = document.getElementById('exportModalClose');
-  const saveBtn = document.getElementById('exportSaveBtn');
-  const ta = document.getElementById('exportTemplateInput');
-  const statusEl = document.getElementById('exportStatus');
+function loadAngrySelectedPage() {
+  const te = tabExportFor(angryKind);
+  const single = document.getElementById('angrySinglePage').checked;
+  let page = single ? te.pages[0] : te.pages.find(p => p.id === angrySelectedPageId);
+  if (single && !page) {
+    call({ action: 'add_export_page', templateId: TEMPLATE_ID, kind: angryKind, name: 'Export' }).then(() => {
+      const te2 = tabExportFor(angryKind);
+      angrySelectedPageId = te2.pages[0] ? te2.pages[0].id : null;
+      loadAngrySelectedPage();
+    });
+    return;
+  }
+  angrySelectedPageId = page ? page.id : null;
+  document.getElementById('angryPageName').value = page ? page.name : '';
+  document.getElementById('angryPageTemplate').value = page ? (page.template || '') : '';
+}
 
-  btn.addEventListener('click', () => {
-    ta.value = EXPORT_TEMPLATE || '';
-    renderExportTokens();
-    renderExportPreview();
-    statusEl.textContent = '';
-    backdrop.classList.add('open');
+function openAngryEditor(k) {
+  angryKind = k;
+  const te = tabExportFor(k);
+  angrySelectedPageId = te.pages.length ? te.pages[0].id : null;
+  document.getElementById('angryModalTitle').textContent = 'AngryERA export — ' + tabLabel(k);
+  document.getElementById('angrySinglePage').checked = te.singlePage;
+  document.getElementById('angryExportName').value = te.exportName || tabLabel(k);
+  document.getElementById('angryStatus').textContent = '';
+  renderAngryTokens();
+  renderAngryPageList();
+  loadAngrySelectedPage();
+  document.getElementById('angryModalBackdrop').classList.add('open');
+}
+function closeAngryEditor() {
+  document.getElementById('angryModalBackdrop').classList.remove('open');
+  angryKind = null;
+}
+
+function angryBuildJSON(k) {
+  const te = tabExportFor(k);
+  const secs = sections.filter(s => s.kind === k);
+  const map = healerSlotMap(secs, (r, c) => c ? `${r.label} (${c.label})` : r.label);
+  const resolve = tmpl => applyExportTemplate(tmpl, key => map[key.trim().toLowerCase()] ?? null);
+  const name = te.exportName || tabLabel(k);
+  if (te.singlePage) {
+    const p = te.pages[0];
+    return { content: resolve(p ? p.template : ''), name };
+  }
+  return { name, pages: te.pages.map(p => ({ name: p.name, content: resolve(p.template) })) };
+}
+
+function wireAngryEditor() {
+  const backdrop = document.getElementById('angryModalBackdrop');
+  document.getElementById('angryModalClose').addEventListener('click', closeAngryEditor);
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) closeAngryEditor(); });
+
+  document.getElementById('angrySinglePage').addEventListener('change', e => {
+    call({ action: 'set_tab_export_meta', templateId: TEMPLATE_ID, kind: angryKind, singlePage: e.target.checked, exportName: document.getElementById('angryExportName').value.trim() })
+      .then(() => { renderAngryPageList(); loadAngrySelectedPage(); });
   });
-  if (closeBtn) closeBtn.addEventListener('click', () => backdrop.classList.remove('open'));
-  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.classList.remove('open'); });
-  ta.addEventListener('input', renderExportPreview);
-
-  saveBtn.addEventListener('click', () => {
-    saveBtn.disabled = true;
-    fetch(SAVE_URL, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'save_export_template', templateId: TEMPLATE_ID, exportTemplate: ta.value }),
-    }).then(r => r.json()).then(d => {
-      saveBtn.disabled = false;
-      if (!d.success) { statusEl.textContent = d.error || 'Save failed'; return; }
-      EXPORT_TEMPLATE = d.exportTemplate;
-      statusEl.textContent = 'Saved.';
-    }).catch(() => { saveBtn.disabled = false; statusEl.textContent = 'Save failed'; });
+  document.getElementById('angryExportName').addEventListener('change', e => {
+    call({ action: 'set_tab_export_meta', templateId: TEMPLATE_ID, kind: angryKind, singlePage: document.getElementById('angrySinglePage').checked, exportName: e.target.value.trim() });
+  });
+  document.getElementById('angryPageName').addEventListener('change', e => {
+    if (!angrySelectedPageId) return;
+    call({ action: 'update_export_page', id: angrySelectedPageId, name: e.target.value.trim() }).then(() => renderAngryPageList());
+  });
+  document.getElementById('angryPageTemplate').addEventListener('change', e => {
+    if (!angrySelectedPageId) return;
+    call({ action: 'update_export_page', id: angrySelectedPageId, template: e.target.value });
+  });
+  document.getElementById('angryAddPageBtn').addEventListener('click', () => {
+    call({ action: 'add_export_page', templateId: TEMPLATE_ID, kind: angryKind, name: 'New page' }).then(() => {
+      const te = tabExportFor(angryKind);
+      angrySelectedPageId = te.pages.length ? te.pages[te.pages.length - 1].id : null;
+      renderAngryPageList();
+      loadAngrySelectedPage();
+    });
+  });
+  document.getElementById('angryDeletePageBtn').addEventListener('click', () => {
+    if (!angrySelectedPageId) return;
+    if (!confirm('Delete this page?')) return;
+    call({ action: 'delete_export_page', id: angrySelectedPageId }).then(() => {
+      const te = tabExportFor(angryKind);
+      angrySelectedPageId = te.pages.length ? te.pages[0].id : null;
+      renderAngryPageList();
+      loadAngrySelectedPage();
+    });
+  });
+  document.getElementById('angryExportJsonBtn').addEventListener('click', () => {
+    const json = angryBuildJSON(angryKind);
+    const statusEl = document.getElementById('angryStatus');
+    navigator.clipboard.writeText(JSON.stringify(json, null, 2)).then(() => {
+      statusEl.textContent = 'Copied!';
+      setTimeout(() => { statusEl.textContent = ''; }, 2000);
+    }).catch(() => { statusEl.textContent = 'Copy failed — select and copy manually.'; });
   });
 }
-wireExportControls();
+wireAngryEditor();
 
 document.addEventListener('click', e => {
   if (!openKindPicker || e.target.closest('.kind-picker-wrap')) return;

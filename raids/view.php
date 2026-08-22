@@ -30,15 +30,24 @@ $canManage = role_at_least($role, 'raid_management');
 $isAdmin = role_at_least($role, 'admin');
 $templateId = $raid['template_id'] !== null ? (int)$raid['template_id'] : null;
 
-$exportTemplate = null;
-$eraExportEnabled = false;
+// AngryERA export config is per-tab (per distinct section `kind`) and, unlike the rest of
+// this page's editing tools, is available to anyone with at least readonly access — not
+// gated behind $canManage. Only enabled tabs are exposed here.
+$tabExports = [];
 if ($templateId !== null) {
-    $stmt = $pdo->prepare('SELECT export_template, era_export_enabled FROM raid_templates WHERE id = ? AND guild_id = ?');
-    $stmt->execute([$templateId, $tenant['id']]);
-    $tplRow = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($tplRow) {
-        $exportTemplate = $tplRow['export_template'] ?: null;
-        $eraExportEnabled = (bool)$tplRow['era_export_enabled'];
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_tab_exports WHERE template_id = ? AND enabled = 1');
+    $stmt->execute([$templateId]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $te) {
+        $stmt2 = $pdo->prepare('SELECT id, name, template FROM raid_template_export_pages WHERE tab_export_id = ? ORDER BY sort_order, id');
+        $stmt2->execute([$te['id']]);
+        $pages = array_map(fn($p) => [
+            'id' => (int)$p['id'], 'name' => $p['name'], 'template' => $p['template'],
+        ], $stmt2->fetchAll(PDO::FETCH_ASSOC));
+        $tabExports[$te['kind']] = [
+            'singlePage' => (bool)$te['single_page'],
+            'exportName' => $te['export_name'],
+            'pages'      => $pages,
+        ];
     }
 }
 
@@ -279,8 +288,14 @@ function fmtTime($t) {
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
     <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
     <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
-    <?php $exportEnabled = $exportTemplate !== null && $eraExportEnabled; ?>
-    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="eraExportBtn"<?= $exportEnabled ? '' : ' disabled title="Enable the AngryERA feature and configure an export template on this raid\'s template first"' ?>>Era export (healing)</button> <button type="button" class="btn-pool-toggle" id="attendanceLockBtn">Attendance lock-in</button> <span id="attendanceStatus" class="attendance-status"></span> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
+    <?php if ($tabExports): ?>
+    <div class="pool-toolbar" id="eraExportToolbar">
+      <?php foreach ($tabExports as $k => $te): ?>
+        <button type="button" class="btn-pool-toggle" data-era-kind="<?= h($k) ?>">Export: <?= h($te['exportName'] ?: $k) ?></button>
+      <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="attendanceLockBtn">Attendance lock-in</button> <span id="attendanceStatus" class="attendance-status"></span> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -379,7 +394,7 @@ let pool = <?= json_encode($pool) ?>;
 const POOL_SAVE_URL = <?= json_encode('/raids/pool-save.php?slug=' . $slug) ?>;
 const IMPORT_URL = <?= json_encode('/raids/import-signups.php?slug=' . $slug) ?>;
 const WEBHOOKS = <?= json_encode($webhooks) ?>;
-const EXPORT_TEMPLATE = <?= json_encode($exportTemplate) ?>;
+const TAB_EXPORTS = <?= json_encode($tabExports) ?>;
 const ATTENDANCE_SAVE_URL = <?= json_encode('/raids/attendance-save.php?slug=' . $slug) ?>;
 let stampToon = null;
 let importRows = [];
@@ -1465,13 +1480,12 @@ function wireDiscordControls() {
   });
 }
 
-// AngryERA export: resolves the template's {{token}} export template against this raid's
-// actual assignments (same slot-key grammar as template-edit.php's preview -- row label, or
+// AngryERA export: resolves a tab's pages ({{token}} templates) against this raid's actual
+// assignments (same slot-key grammar as template-edit.php's preview -- row label, or
 // row|column when a table has more than one data column -- but the value is the assigned
-// toon's name instead of a label placeholder), then copies the result to the clipboard,
-// matching IO's clipboard-export UX. Kind is freeform now (design.php tabs), so this scans
-// every tab's rows rather than a privileged "healer" kind -- the AngryERA Feature toggle on
-// the template (era_export_enabled, surfaced via $exportEnabled above) is the feature's gate.
+// toon's name instead of a label placeholder), builds the JSON shape AngryERA expects, and
+// copies it to the clipboard. Export config is per-tab (TAB_EXPORTS, keyed by kind) and
+// available to any readonly+ visitor -- there's no privileged "healer" kind any more.
 function walkHealerSlots(secs, cb) {
   function walk(tables) {
     for (const tb of tables) {
@@ -1513,17 +1527,31 @@ function applyExportTemplate(tmpl, resolveFn) {
   });
 }
 
+function buildEraExportJSON(k) {
+  const te = TAB_EXPORTS[k];
+  if (!te) return null;
+  const secs = sections.filter(s => s.kind === k);
+  const map = healerSlotMap(secs);
+  const resolve = tmpl => applyExportTemplate(tmpl, key => map[key.trim().toLowerCase()] ?? null);
+  const name = te.exportName || k;
+  if (te.singlePage) {
+    const p = te.pages[0];
+    return { content: resolve(p ? p.template : ''), name };
+  }
+  return { name, pages: te.pages.map(p => ({ name: p.name, content: resolve(p.template) })) };
+}
+
 function wireEraExport() {
-  const btn = document.getElementById('eraExportBtn');
-  if (!btn || btn.disabled) return;
-  btn.addEventListener('click', () => {
-    const map = healerSlotMap(sections);
-    const text = applyExportTemplate(EXPORT_TEMPLATE, k => map[k.trim().toLowerCase()] ?? null);
-    const orig = btn.textContent;
-    navigator.clipboard.writeText(text).then(() => {
-      btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = orig; }, 2000);
-    }).catch(() => { alert('Could not copy to clipboard.'); });
+  document.querySelectorAll('[data-era-kind]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const json = buildEraExportJSON(btn.dataset.eraKind);
+      if (!json) return;
+      const orig = btn.textContent;
+      navigator.clipboard.writeText(JSON.stringify(json, null, 2)).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 2000);
+      }).catch(() => { alert('Could not copy to clipboard.'); });
+    });
   });
 }
 
@@ -1575,7 +1603,8 @@ function wireAttendance() {
 }
 
 render();
-if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireDiscordControls(); wireEraExport(); wireAttendance(); wireClearAll(); }
+wireEraExport();
+if (CAN_MANAGE) { checkLock(); renderPool(); wirePoolControls(); wireImportControls(); wireDiscordControls(); wireAttendance(); wireClearAll(); }
 </script>
 </body>
 </html>

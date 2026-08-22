@@ -46,7 +46,7 @@ function fetch_template($pdo, $guildId, $templateId) {
 
 function fetch_section_owned($pdo, $guildId, $sectionId) {
     $stmt = $pdo->prepare(
-        'SELECT s.*, t.guild_id, t.assignment_style FROM raid_template_sections s
+        'SELECT s.*, t.guild_id FROM raid_template_sections s
          JOIN raid_templates t ON t.id = s.template_id
          WHERE s.id = ? AND t.guild_id = ?'
     );
@@ -259,8 +259,48 @@ function fetch_structure($pdo, $templateId) {
     return $out;
 }
 
+// AngryERA export config is per-tab (per distinct section `kind` on this template).
+function fetch_tab_exports($pdo, $templateId) {
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_tab_exports WHERE template_id = ?');
+    $stmt->execute([$templateId]);
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $te) {
+        $stmt2 = $pdo->prepare('SELECT id, name, template FROM raid_template_export_pages WHERE tab_export_id = ? ORDER BY sort_order, id');
+        $stmt2->execute([$te['id']]);
+        $pages = array_map(fn($p) => [
+            'id' => (int)$p['id'], 'name' => $p['name'], 'template' => $p['template'],
+        ], $stmt2->fetchAll(PDO::FETCH_ASSOC));
+        $out[$te['kind']] = [
+            'enabled'    => (bool)$te['enabled'],
+            'singlePage' => (bool)$te['single_page'],
+            'exportName' => $te['export_name'],
+            'pages'      => $pages,
+        ];
+    }
+    return $out;
+}
+
+// Resolves an export page id to its owning tab_export row, verifying the template it
+// belongs to is owned by $guildId. Returns null if the page doesn't exist or isn't owned.
+function fetch_page_owned($pdo, $guildId, $pageId) {
+    $stmt = $pdo->prepare(
+        'SELECT p.*, te.template_id, te.kind FROM raid_template_export_pages p
+         JOIN raid_template_tab_exports te ON te.id = p.tab_export_id
+         WHERE p.id = ?'
+    );
+    $stmt->execute([$pageId]);
+    $page = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$page) return null;
+    if (!fetch_template($pdo, $guildId, (int)$page['template_id'])) return null;
+    return $page;
+}
+
 function respond_structure($pdo, $templateId) {
-    echo json_encode(['success' => true, 'sections' => fetch_structure($pdo, $templateId)]);
+    echo json_encode([
+        'success'    => true,
+        'sections'   => fetch_structure($pdo, $templateId),
+        'tabExports' => fetch_tab_exports($pdo, $templateId),
+    ]);
     exit;
 }
 
@@ -297,16 +337,90 @@ if ($action === 'lock_status' || $action === 'lock_acquire' || $action === 'lock
     }
 }
 
-if ($action === 'save_export_template') {
+// AngryERA export config is per-tab: each distinct section `kind` on a template can
+// independently be enabled, run single-page or multi-page, and hold its own named pages.
+if ($action === 'set_tab_export_enabled') {
     $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
     $template = fetch_template($pdo, $tenant['id'], $templateId);
     if (!$template) fail(404, 'Template not found');
-    $text = isset($body['exportTemplate']) ? trim((string)$body['exportTemplate']) : '';
-    $text = $text !== '' ? substr($text, 0, 20000) : null;
-    $stmt = $pdo->prepare('UPDATE raid_templates SET export_template = ? WHERE id = ?');
-    $stmt->execute([$text, $templateId]);
-    echo json_encode(['success' => true, 'exportTemplate' => $text]);
-    exit;
+    $kind = substr(trim($body['kind'] ?? ''), 0, 50);
+    if (!$kind) fail(400, 'Invalid tab');
+    $enabled = !empty($body['enabled']) ? 1 : 0;
+    $stmt = $pdo->prepare(
+        'INSERT INTO raid_template_tab_exports (template_id, kind, enabled) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)'
+    );
+    $stmt->execute([$templateId, $kind, $enabled]);
+    respond_structure($pdo, $templateId);
+}
+
+if ($action === 'set_tab_export_meta') {
+    $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
+    $template = fetch_template($pdo, $tenant['id'], $templateId);
+    if (!$template) fail(404, 'Template not found');
+    $kind = substr(trim($body['kind'] ?? ''), 0, 50);
+    if (!$kind) fail(400, 'Invalid tab');
+    $singlePage = !empty($body['singlePage']) ? 1 : 0;
+    $exportName = substr(trim($body['exportName'] ?? ''), 0, 100);
+    $stmt = $pdo->prepare(
+        'INSERT INTO raid_template_tab_exports (template_id, kind, single_page, export_name) VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE single_page = VALUES(single_page), export_name = VALUES(export_name)'
+    );
+    $stmt->execute([$templateId, $kind, $singlePage, $exportName]);
+    respond_structure($pdo, $templateId);
+}
+
+function get_or_create_tab_export($pdo, $templateId, $kind) {
+    $stmt = $pdo->prepare('SELECT id FROM raid_template_tab_exports WHERE template_id = ? AND kind = ?');
+    $stmt->execute([$templateId, $kind]);
+    $id = $stmt->fetchColumn();
+    if ($id) return (int)$id;
+    $stmt = $pdo->prepare('INSERT INTO raid_template_tab_exports (template_id, kind) VALUES (?, ?)');
+    $stmt->execute([$templateId, $kind]);
+    return (int)$pdo->lastInsertId();
+}
+
+if ($action === 'add_export_page') {
+    $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
+    $template = fetch_template($pdo, $tenant['id'], $templateId);
+    if (!$template) fail(404, 'Template not found');
+    $kind = substr(trim($body['kind'] ?? ''), 0, 50);
+    if (!$kind) fail(400, 'Invalid tab');
+    $name = substr(trim($body['name'] ?? ''), 0, 100);
+    if (!$name) $name = 'New page';
+
+    $tabExportId = get_or_create_tab_export($pdo, $templateId, $kind);
+    $order = next_sort_order($pdo, 'raid_template_export_pages', 'tab_export_id', $tabExportId);
+    $stmt = $pdo->prepare('INSERT INTO raid_template_export_pages (tab_export_id, name, template, sort_order) VALUES (?, ?, ?, ?)');
+    $stmt->execute([$tabExportId, $name, '', $order]);
+    respond_structure($pdo, $templateId);
+}
+
+if ($action === 'update_export_page') {
+    $page = fetch_page_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
+    if (!$page) fail(404, 'Page not found');
+    $name = array_key_exists('name', $body) ? substr(trim((string)$body['name']), 0, 100) : $page['name'];
+    if (!$name) fail(400, 'Name is required');
+    $tmpl = array_key_exists('template', $body) ? substr((string)$body['template'], 0, 20000) : $page['template'];
+    $stmt = $pdo->prepare('UPDATE raid_template_export_pages SET name = ?, template = ? WHERE id = ?');
+    $stmt->execute([$name, $tmpl, $page['id']]);
+    respond_structure($pdo, $page['template_id']);
+}
+
+if ($action === 'delete_export_page') {
+    $page = fetch_page_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
+    if (!$page) fail(404, 'Page not found');
+    $templateId = (int)$page['template_id'];
+    $stmt = $pdo->prepare('DELETE FROM raid_template_export_pages WHERE id = ?');
+    $stmt->execute([$page['id']]);
+    respond_structure($pdo, $templateId);
+}
+
+if ($action === 'move_export_page') {
+    $page = fetch_page_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
+    if (!$page) fail(404, 'Page not found');
+    move_sibling($pdo, 'raid_template_export_pages', 'tab_export_id', $page['tab_export_id'], $page['id'], $body['direction'] ?? '');
+    respond_structure($pdo, $page['template_id']);
 }
 
 if ($action === 'add_section') {
@@ -337,18 +451,11 @@ if ($action === 'delete_tab') {
     if ($kind === '') fail(400, 'Invalid tab');
     $stmt = $pdo->prepare('DELETE FROM raid_template_sections WHERE template_id = ? AND kind = ?');
     $stmt->execute([$templateId, $kind]);
+    // Not FK-linked to sections (only by template_id+kind), so it needs its own cleanup;
+    // this cascades to raid_template_export_pages via fk_export_page_tab.
+    $stmt = $pdo->prepare('DELETE FROM raid_template_tab_exports WHERE template_id = ? AND kind = ?');
+    $stmt->execute([$templateId, $kind]);
     respond_structure($pdo, $templateId);
-}
-
-if ($action === 'set_era_export_enabled') {
-    $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
-    $template   = fetch_template($pdo, $tenant['id'], $templateId);
-    if (!$template) fail(404, 'Template not found');
-    $enabled = !empty($body['enabled']) ? 1 : 0;
-    $stmt = $pdo->prepare('UPDATE raid_templates SET era_export_enabled = ? WHERE id = ?');
-    $stmt->execute([$enabled, $templateId]);
-    echo json_encode(['success' => true, 'eraExportEnabled' => (bool)$enabled]);
-    exit;
 }
 
 if ($action === 'update_section') {
