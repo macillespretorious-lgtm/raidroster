@@ -165,11 +165,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .row-th-top { display: flex; align-items: center; justify-content: center; gap: 3px; min-width: 0; cursor: grab; }
     .row-th-top:active { cursor: grabbing; }
     .row-th-top .icon-btn { width: 18px; height: 18px; font-size: 10px; }
-    .col-th-top { cursor: grab; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 2px 0; }
+    .col-th-top { cursor: grab; display: flex; align-items: center; justify-content: center; gap: 3px; padding: 2px 0; }
     .col-th-top:active { cursor: grabbing; }
-    .col-th-row2 { display: flex; gap: 3px; align-items: center; width: 100%; min-width: 0; }
-    .col-th-row2 .swatch { flex-shrink: 0; }
-    .col-th-row2 .width-input { flex: 1 1 0; min-width: 0; width: 0; }
+    .col-th-top .icon-btn { width: 18px; height: 18px; font-size: 10px; }
     .group-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
     .group-pill { display: flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; cursor: grab; }
     .group-pill:active { cursor: grabbing; }
@@ -179,7 +177,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .add-group-btn:hover { border-color: rgba(255,255,255,0.5); color: #e8ecff; }
     .group-tables { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 14px; margin: 6px 0 12px 4px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,0.15); }
     td.spacer-cell, th.spacer-th { background: repeating-linear-gradient(135deg, rgba(255,255,255,0.03) 0 6px, transparent 6px 12px); border-style: dashed; }
-    .spacer-label, .kind-label { font-size: 9px; color: #55618a; text-transform: uppercase; letter-spacing: .05em; }
 
     .kind-picker-wrap { position: relative; }
     /* position: fixed (with top/left set in JS from the trigger button's rect) so the
@@ -492,6 +489,7 @@ function findColumn(id) {
   for (const tb of allTables()) for (const c of tb.columns) if (c.id === id) return c;
   return null;
 }
+function tableForColumn(id) { return allTables().find(tb => tb.columns.some(c => c.id === id)) || null; }
 function findGroup(id) {
   for (const tb of allTables()) for (const g of tb.columnGroups) if (g.id === id) return g;
   return null;
@@ -663,7 +661,6 @@ function render() {
       }
       if (act === 'rename-table') call({ action: 'update_table', id, title: node.value.trim() });
       if (act === 'delete-table') { if (confirm('Delete this table?')) call({ action: 'delete_table', id }); }
-      if (act === 'rename-col') call({ action: 'update_column', id, label: node.value.trim() });
       if (act === 'delete-col') call({ action: 'delete_column', id });
       if (act === 'rename-row') call({ action: 'update_row', id, label: node.value.trim() });
       if (act === 'delete-row') call({ action: 'delete_row', id });
@@ -684,8 +681,24 @@ function render() {
       }
       if (act === 'add-col') { openKindPicker = null; call({ action: 'add_column', tableId: id, kind: node.dataset.kind, label: '' }); }
       if (act === 'add-row') { openKindPicker = null; call({ action: 'add_row', tableId: id, kind: node.dataset.kind, label: '' }); }
-      if (act === 'spacer-col-width-dec') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: Math.max(20, (c.width || 20) - 20) }); }
-      if (act === 'spacer-col-width-inc') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: (c.width || 20) + 20 }); }
+      if (act === 'col-width-dec') {
+        const c = findColumn(id);
+        if (c.kind === 'spacer') { call({ action: 'update_column', id, label: c.label, width: Math.max(20, (c.width || 20) - 20) }); }
+        else {
+          const tb = tableForColumn(id);
+          const base = (c.width !== null && c.width !== undefined) ? c.width : (tb.defaultColumnWidth || DEFAULT_COL_UNITS * COL_UNIT_PX);
+          call({ action: 'update_column', id, label: c.label, width: Math.max(COL_UNIT_PX, base - COL_UNIT_PX) });
+        }
+      }
+      if (act === 'col-width-inc') {
+        const c = findColumn(id);
+        if (c.kind === 'spacer') { call({ action: 'update_column', id, label: c.label, width: (c.width || 20) + 20 }); }
+        else {
+          const tb = tableForColumn(id);
+          const base = (c.width !== null && c.width !== undefined) ? c.width : (tb.defaultColumnWidth || DEFAULT_COL_UNITS * COL_UNIT_PX);
+          call({ action: 'update_column', id, label: c.label, width: base + COL_UNIT_PX });
+        }
+      }
       if (act === 'row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
       if (act === 'row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
       if (act === 'table-header-color') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, headerColor: node.value }); }
@@ -693,8 +706,6 @@ function render() {
       if (act === 'cell-text') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: node.value, bgColor: cell.bgColor, textColor: cell.textColor }); }
       if (act === 'cell-bg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: node.value, textColor: cell.textColor }); }
       if (act === 'cell-fg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: node.value }); }
-      if (act === 'col-header-color') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, headerColor: node.value }); }
-      if (act === 'col-width') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, width: unitsToPx(node.value) }); }
       if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
       if (act === 'merge-header') call({ action: 'merge_header', id });
       if (act === 'split-header') call({ action: 'split_header', id });
@@ -815,22 +826,18 @@ function render() {
 }
 
 function colHeaderCell(c, tb, groupsEnabled, span) {
-  const dragBar = `<div class="col-th-top" draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}" title="Drag to reorder"><span class="drag-handle">&#10021;</span></div>`;
   const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+  const dragAttrs = `draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}" title="Drag to reorder"`;
+  const controls = `<div class="col-th-top" ${dragAttrs}>
+        <span class="drag-handle">&#10021;</span>
+        <button class="icon-btn" data-action="col-width-dec" data-id="${c.id}" title="Narrower">&minus;</button>
+        <button class="icon-btn" data-action="col-width-inc" data-id="${c.id}" title="Wider">+</button>
+        <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
+      </div>`;
   if (c.kind === 'spacer') {
     return `<th class="spacer-th" data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
       <div class="col-th-inner" data-flip-id="column:${c.id}">
-        <div class="col-th-top" draggable="true" data-drag-kind="column" data-drag-id="${c.id}" data-drag-parent="${tb.id}" title="Drag to reorder">
-          <span class="drag-handle">&#10021;</span>
-          <span class="spacer-label">spacer</span>
-        </div>
-        <div class="cell-actions">
-          <button class="icon-btn" data-action="spacer-col-width-dec" data-id="${c.id}" title="Narrower">&minus;</button>
-          <button class="icon-btn" data-action="spacer-col-width-inc" data-id="${c.id}" title="Wider">+</button>
-        </div>
-        <div class="cell-actions">
-          <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
-        </div>
+        ${controls}
       </div>
     </th>`;
   }
@@ -839,25 +846,10 @@ function colHeaderCell(c, tb, groupsEnabled, span) {
   const groupSelect = groupsEnabled
     ? `<select class="width-input" style="width:100%;" data-action="col-group" data-id="${c.id}" title="Column group">${groupOptions.join('')}</select>`
     : '';
-  const mergeBtn = `<button class="icon-btn" data-action="merge-header" data-id="${c.id}" title="Merge header with next column">&harr;</button>`;
-  const splitBtn = c.headerColspan > 1
-    ? `<button class="icon-btn" data-action="split-header" data-id="${c.id}" title="Unmerge header">&#8622;</button>`
-    : '';
   return `<th${colspanAttr} data-drop-kind="column" data-drop-id="${c.id}" data-drop-parent="${tb.id}">
       <div class="col-th-inner" data-flip-id="column:${c.id}">
-        ${dragBar}
-        <span class="kind-label">${c.kind}</span>
-        <input class="lbl-input" data-action="rename-col" data-id="${c.id}" placeholder="Label" value="${escAttr(c.label)}">
-        <div class="col-th-row2">
-          <input type="color" class="swatch" data-action="col-header-color" data-id="${c.id}" value="${c.headerColor || '#1a2338'}" title="Header color">
-          <input type="number" class="width-input" data-action="col-width" data-id="${c.id}" value="${pxToUnits(c.width)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content.">
-        </div>
+        ${controls}
         ${groupSelect}
-        <div class="cell-actions">
-          ${mergeBtn}
-          ${splitBtn}
-          <button class="icon-btn danger" data-action="delete-col" data-id="${c.id}" title="Delete">&times;</button>
-        </div>
       </div>
     </th>`;
 }
