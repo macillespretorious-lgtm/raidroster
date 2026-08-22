@@ -31,10 +31,15 @@ $isAdmin = role_at_least($role, 'admin');
 $templateId = $raid['template_id'] !== null ? (int)$raid['template_id'] : null;
 
 $exportTemplate = null;
+$eraExportEnabled = false;
 if ($templateId !== null) {
-    $stmt = $pdo->prepare('SELECT export_template FROM raid_templates WHERE id = ? AND guild_id = ?');
+    $stmt = $pdo->prepare('SELECT export_template, era_export_enabled FROM raid_templates WHERE id = ? AND guild_id = ?');
     $stmt->execute([$templateId, $tenant['id']]);
-    $exportTemplate = $stmt->fetchColumn() ?: null;
+    $tplRow = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($tplRow) {
+        $exportTemplate = $tplRow['export_template'] ?: null;
+        $eraExportEnabled = (bool)$tplRow['era_export_enabled'];
+    }
 }
 
 $sections = fetch_raid_structure($pdo, $raidId);
@@ -274,12 +279,8 @@ function fmtTime($t) {
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
     <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
     <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
-    <?php
-    $hasHealerSection = false;
-    foreach ($sections as $s) { if ($s['kind'] === 'healer') { $hasHealerSection = true; break; } }
-    $exportEnabled = $exportTemplate !== null && $hasHealerSection;
-    ?>
-    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="eraExportBtn"<?= $exportEnabled ? '' : ' disabled title="Configure an export template and a Healer Assignments section on this raid\'s template first"' ?>>Era export (healing)</button> <button type="button" class="btn-pool-toggle" id="attendanceLockBtn">Attendance lock-in</button> <span id="attendanceStatus" class="attendance-status"></span> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
+    <?php $exportEnabled = $exportTemplate !== null && $eraExportEnabled; ?>
+    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="eraExportBtn"<?= $exportEnabled ? '' : ' disabled title="Enable the AngryERA feature and configure an export template on this raid\'s template first"' ?>>Era export (healing)</button> <button type="button" class="btn-pool-toggle" id="attendanceLockBtn">Attendance lock-in</button> <span id="attendanceStatus" class="attendance-status"></span> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -1464,11 +1465,13 @@ function wireDiscordControls() {
   });
 }
 
-// Era export (healing): resolves the template's {{token}} export template against this
-// raid's actual healer-section assignments (same slot-key grammar as template-edit.php's
-// preview -- row label, or row|column when a table has more than one data column -- but
-// the value is the assigned toon's name instead of a label placeholder), then copies the
-// result to the clipboard, matching IO's clipboard-export UX.
+// AngryERA export: resolves the template's {{token}} export template against this raid's
+// actual assignments (same slot-key grammar as template-edit.php's preview -- row label, or
+// row|column when a table has more than one data column -- but the value is the assigned
+// toon's name instead of a label placeholder), then copies the result to the clipboard,
+// matching IO's clipboard-export UX. Kind is freeform now (design.php tabs), so this scans
+// every tab's rows rather than a privileged "healer" kind -- the AngryERA Feature toggle on
+// the template (era_export_enabled, surfaced via $exportEnabled above) is the feature's gate.
 function walkHealerSlots(secs, cb) {
   function walk(tables) {
     for (const tb of tables) {
@@ -1484,7 +1487,7 @@ function walkHealerSlots(secs, cb) {
       for (const g of tb.columnGroups) walk(g.tables);
     }
   }
-  walk(secs.filter(s => s.kind === 'healer').flatMap(s => s.tables));
+  walk(secs.flatMap(s => s.tables));
 }
 
 function healerSlotMap(secs) {

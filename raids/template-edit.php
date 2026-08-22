@@ -112,7 +112,17 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     p.sub { color: #a8b4d0; font-size: 13px; margin-bottom: 24px; }
     .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; font-weight: 700; background: rgba(255,255,255,0.08); color: #a8b4d0; }
 
-    .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .tpl-mgmt-section { border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 4px; margin: 14px 0 20px; max-width: 520px; }
+    .tpl-mgmt-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; }
+    .tpl-mgmt-info { flex: 1; min-width: 0; }
+    .tpl-mgmt-name { font-size: 13px; font-weight: 700; color: #e8ecff; }
+    .tpl-mgmt-desc { font-size: 11.5px; color: #7f8bad; margin-top: 1px; }
+
+    .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.08); flex-wrap: wrap; align-items: center; }
+    .tab-add-btn { background: none; border: 1px dashed rgba(255,255,255,0.25); color: #8fe0a8; border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; margin: 0 0 8px 8px; }
+    .tab-add-btn:hover { border-color: rgba(143,224,168,0.6); background: rgba(143,224,168,0.08); }
+    .tab-delete-btn { background: rgba(224,85,85,0.12); border: 1px solid rgba(224,85,85,0.3); color: #e88585; }
+    .tab-delete-btn:hover { background: rgba(224,85,85,0.25); }
     .tab-btn { background: none; border: none; font: inherit; cursor: pointer; color: #7f8bad; font-size: 13px; font-weight: 600; padding: 10px 16px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
     .tab-btn:hover { color: #c7cef2; }
     .tab-btn.active { color: #e8ecff; border-bottom-color: #5865f2; }
@@ -256,10 +266,20 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <a class="back" href="/<?= h($slug) ?>/design">&larr; Back to templates</a>
     <h1><?= h($template['name']) ?></h1>
     <div class="lock-bar" id="lockBar"></div>
-    <p class="sub"><span class="tag"><?= h($template['assignment_style']) ?></span> &middot; structure only &mdash; toon assignments happen per-raid</p>
-    <?php if ($template['assignment_style'] !== 'combined'): ?>
-    <button class="btn" type="button" id="exportTemplateBtn" style="margin-bottom: 14px;">Export template (healing)</button>
-    <?php endif; ?>
+
+    <div class="tpl-mgmt-section" id="tplMgmtSection">
+      <div class="tpl-mgmt-row">
+        <div class="tpl-mgmt-info">
+          <div class="tpl-mgmt-name">AngryERA Template Edit</div>
+          <div class="tpl-mgmt-desc">Export a text template for AngryERA-style raid assignments.</div>
+        </div>
+        <label class="lock-toggle" style="gap:8px;">
+          <input type="checkbox" id="angryEraToggle" <?= $template['era_export_enabled'] ? 'checked' : '' ?>>
+          <span class="lock-switch"></span>
+        </label>
+        <button class="btn" type="button" id="exportTemplateBtn" <?= $template['era_export_enabled'] ? '' : 'disabled' ?>>Edit</button>
+      </div>
+    </div>
 
     <div class="tabs" id="tabsEl"></div>
     <div id="panelsEl"></div>
@@ -276,7 +296,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     </div>
   </div>
 
-  <?php if ($template['assignment_style'] !== 'combined'): ?>
   <div class="modal-backdrop" id="exportModalBackdrop">
     <div class="modal export-modal">
       <div class="preview-head">
@@ -295,15 +314,14 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       </div>
     </div>
   </div>
-  <?php endif; ?>
 
 <script>
 const SLUG = <?= json_encode($slug) ?>;
 const TEMPLATE_ID = <?= json_encode($templateId) ?>;
-const STYLE = <?= json_encode($template['assignment_style']) ?>;
 const SAVE_URL = <?= json_encode('/raids/template-structure-save.php?slug=' . $slug) ?>;
 const USER_ID = <?= json_encode($user['id']) ?>;
 let EXPORT_TEMPLATE = <?= json_encode($template['export_template']) ?>;
+let ERA_EXPORT_ENABLED = <?= json_encode((bool)$template['era_export_enabled']) ?>;
 let sections = <?= json_encode($sections) ?>;
 
 // Editing lock: purely advisory (everyone on this page already passed the admin
@@ -390,7 +408,17 @@ const KIND_META = {
   misc:        { label: 'Misc Assignments',  color: '#9482c9' },
   assignments: { label: 'Assignments',       color: '#4ecdc4' },
 };
-const ALLOWED_KINDS = STYLE === 'combined' ? ['roster', 'assignments'] : ['roster', 'tank', 'healer', 'misc'];
+// Tabs are freeform now — a tab is just whatever distinct `kind` values exist among this
+// template's sections, in the order they first appear. KIND_META only supplies a nicer
+// label/color for the handful of legacy kind values still lying around in older templates;
+// anything else falls back to showing the kind string itself (see tabLabel/tabColor).
+function tabLabel(k) { return (KIND_META[k] && KIND_META[k].label) || k; }
+function tabColor(k) { return (KIND_META[k] && KIND_META[k].color) || '#5865f2'; }
+function currentTabs() {
+  const seen = [];
+  for (const s of sections) if (!seen.includes(s.kind)) seen.push(s.kind);
+  return seen;
+}
 
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttr(s) { return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
@@ -614,32 +642,46 @@ function call(payload) {
     .catch(e => alert(e.message));
 }
 
-let activeTab = ALLOWED_KINDS.includes(location.hash.slice(1)) ? location.hash.slice(1) : ALLOWED_KINDS[0];
+let activeTab = decodeURIComponent(location.hash.slice(1)) || null;
 
 function render() {
+  const TABS = currentTabs();
+  if (!TABS.includes(activeTab)) activeTab = TABS[0] || null;
+
   const tabsEl = document.getElementById('tabsEl');
-  tabsEl.innerHTML = ALLOWED_KINDS.map(k => `<button type="button" class="tab-btn ${k === activeTab ? 'active' : ''}" data-tab="${k}">${KIND_META[k].label}</button>`).join('');
-  tabsEl.querySelectorAll('.tab-btn').forEach(btn => {
+  tabsEl.innerHTML = TABS.map(k => `<button type="button" class="tab-btn ${k === activeTab ? 'active' : ''}" data-tab="${escAttr(k)}">${esc(tabLabel(k))}</button>`).join('')
+    + `<button type="button" class="tab-add-btn" id="addTabBtn">+ Add tab</button>`;
+  tabsEl.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
       activeTab = btn.dataset.tab;
-      history.replaceState(null, '', '#' + activeTab);
+      history.replaceState(null, '', '#' + encodeURIComponent(activeTab));
+      render();
+    });
+  });
+  document.getElementById('addTabBtn').addEventListener('click', () => {
+    const name = (prompt('Name this new tab, e.g. "Consumables":') || '').trim().slice(0, 50);
+    if (!name) return;
+    call({ action: 'add_section', templateId: TEMPLATE_ID, kind: name, title: name }).then(() => {
+      activeTab = name;
+      history.replaceState(null, '', '#' + encodeURIComponent(activeTab));
       render();
     });
   });
 
   const el = document.getElementById('panelsEl');
-  el.innerHTML = ALLOWED_KINDS.map(k => {
+  el.innerHTML = TABS.length ? TABS.map(k => {
     const secs = sections.filter(s => s.kind === k);
     const body = secs.length
       ? secs.map(sec => renderSection(sec)).join('')
       : '<p class="empty">No section yet — add one below to start building this tab.</p>';
-    return `<div class="tab-panel ${k === activeTab ? 'active' : ''}" data-panel="${k}">
+    return `<div class="tab-panel ${k === activeTab ? 'active' : ''}" data-panel="${escAttr(k)}">
       ${body}
       <div class="add-section-bar">
-        <button class="btn" data-action="add-section-for-kind" data-kind="${k}">+ Add ${KIND_META[k].label} section</button>
+        <button class="btn" data-action="add-section-for-kind" data-kind="${escAttr(k)}">+ Add section to this tab</button>
+        <button class="btn tab-delete-btn" data-action="delete-tab" data-kind="${escAttr(k)}">Delete this tab&hellip;</button>
       </div>
     </div>`;
-  }).join('');
+  }).join('') : '<p class="empty">No tabs yet &mdash; click "+ Add tab" above to start building this template.</p>';
 
   el.querySelectorAll('[data-action]').forEach(node => {
     const evt = (node.tagName === 'INPUT' || node.tagName === 'SELECT') ? 'change' : 'click';
@@ -654,7 +696,13 @@ function render() {
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
       if (act === 'add-table-to-section') call({ action: 'add_table', sectionId: id });
-      if (act === 'add-section-for-kind') { const k = node.dataset.kind; call({ action: 'add_section', templateId: TEMPLATE_ID, kind: k, title: KIND_META[k].label }); }
+      if (act === 'add-section-for-kind') { const k = node.dataset.kind; call({ action: 'add_section', templateId: TEMPLATE_ID, kind: k, title: tabLabel(k) }); }
+      if (act === 'delete-tab') {
+        const k = node.dataset.kind;
+        const count = sections.filter(s => s.kind === k).length;
+        const msg = `⚠ PERMANENTLY DELETE the "${tabLabel(k)}" tab?\n\nThis removes ${count} section${count === 1 ? '' : 's'} and everything inside — every table, column, row and cell. This cannot be undone.`;
+        if (confirm(msg)) call({ action: 'delete_tab', templateId: TEMPLATE_ID, kind: k });
+      }
       if (act === 'add-table-to-group') {
         const title = prompt('Table name, e.g. a boss name:');
         if (title && title.trim()) call({ action: 'add_table', groupId: id, title: title.trim() });
@@ -1181,10 +1229,12 @@ document.getElementById('previewBackdrop').addEventListener('click', e => {
   if (e.target.id === 'previewBackdrop') closePreview();
 });
 
-// Export template (healing): a {{token}} text template resolved against healer-kind
-// sections' row (or row|column, when a table has more than one data column) labels.
-// Editing here only ever sees the template's own labels as placeholder values; the raid
-// page (view.php) resolves the same grammar against that raid's real assignments.
+// AngryERA export: a {{token}} text template resolved against every row (across every
+// tab) that has a label — row, or row|column when its table has more than one General
+// column. Kind is freeform now, so there's no privileged "healer" tab any more; the
+// AngryERA Feature toggle (ERA_EXPORT_ENABLED/era_export_enabled) is the feature's only
+// gate. Editing here only ever sees the template's own labels as placeholder values; the
+// raid page (view.php) resolves the same grammar against that raid's real assignments.
 function walkHealerSlots(secs, cb) {
   function walk(tables) {
     for (const tb of tables) {
@@ -1200,7 +1250,7 @@ function walkHealerSlots(secs, cb) {
       for (const g of tb.columnGroups) walk(g.tables);
     }
   }
-  walk(secs.filter(s => s.kind === 'healer').flatMap(s => s.tables));
+  walk(secs.flatMap(s => s.tables));
 }
 
 function healerSlotMap(secs, valueFn) {
@@ -1234,7 +1284,7 @@ function renderExportTokens() {
   walkHealerSlots(sections, (rowLabel, colLabel) => keys.push(colLabel ? `${rowLabel}|${colLabel}` : rowLabel));
   el.innerHTML = keys.length
     ? keys.map(k => `<span>{{${esc(k)}}}</span>`).join('')
-    : '<span style="background:none;border-style:dashed;color:#7f8bad;">No healer-section rows yet &mdash; add one on the Healer Assignments tab first.</span>';
+    : '<span style="background:none;border-style:dashed;color:#7f8bad;">No labeled rows yet &mdash; add a row with a label somewhere in the template first.</span>';
 }
 
 function renderExportPreview() {
@@ -1244,6 +1294,23 @@ function renderExportPreview() {
   const map = healerSlotMap(sections, (r, c) => c ? `${r.label} (${c.label})` : r.label);
   out.textContent = applyExportTemplate(ta.value, k => map[k.trim().toLowerCase()] ?? null, true);
 }
+
+function wireAngryEraToggle() {
+  const toggle = document.getElementById('angryEraToggle');
+  const btn = document.getElementById('exportTemplateBtn');
+  if (!toggle || !btn) return;
+  toggle.addEventListener('change', () => {
+    const enabled = toggle.checked;
+    fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_era_export_enabled', templateId: TEMPLATE_ID, enabled }) })
+      .then(r => r.json()).then(d => {
+        if (!d.success) { toggle.checked = !enabled; return; }
+        ERA_EXPORT_ENABLED = d.eraExportEnabled;
+        btn.disabled = !ERA_EXPORT_ENABLED;
+      })
+      .catch(() => { toggle.checked = !enabled; });
+  });
+}
+wireAngryEraToggle();
 
 function wireExportControls() {
   const btn = document.getElementById('exportTemplateBtn');

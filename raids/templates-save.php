@@ -46,7 +46,10 @@ if ($action === 'save') {
     $id     = isset($body['id']) && $body['id'] ? (int)$body['id'] : null;
     $name   = substr(trim($body['name'] ?? ''), 0, 100);
     $desc   = isset($body['description']) ? substr(trim($body['description']), 0, 65000) : null;
-    $style  = ($body['assignmentStyle'] ?? '') === 'combined' ? 'combined' : 'separate';
+    // Assignment layout (Separate/Combined) is no longer a user-facing concept — the design
+    // page's tabs are freeform now, so every new template is created as 'separate'. The column
+    // is kept for existing templates' sake, not read from the client any more.
+    $style  = 'separate';
     $start  = $body['defaultStartTime'] ?? null;
     $dur    = isset($body['defaultDurationMinutes']) && $body['defaultDurationMinutes'] !== null ? (int)$body['defaultDurationMinutes'] : null;
 

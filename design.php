@@ -121,14 +121,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
           <label for="tplDesc">Description</label>
           <input type="text" id="tplDesc" placeholder="Optional notes">
         </div>
-        <div class="form-group" id="tplStyleGroup">
-          <label>Assignment layout</label>
-          <div class="mode-tabs" id="tplStyleTabs">
-            <button type="button" class="tab-btn-pill active" data-style="separate">Separate (Tank / Healer / Misc)</button>
-            <button type="button" class="tab-btn-pill" data-style="combined">Combined (one Assignments section)</button>
-          </div>
-          <p class="hint" id="tplStyleHint" style="margin-top:2px;">Locked once the template exists &mdash; it determines which section kinds its structure editor allows.</p>
-        </div>
         <div class="form-buttons" style="display:flex;gap:8px;margin-top:10px;">
           <button class="btn" id="tplSaveBtn">Save template</button>
           <button class="btn btn-cancel-tpl hidden" id="tplCancelEditBtn">Cancel edit</button>
@@ -143,11 +135,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     const TPL_SAVE_URL = <?= json_encode('/raids/templates-save.php?slug=' . $slug) ?>;
     let templates = <?= json_encode($raidTemplates) ?>;
     let editingTplId = null;
-    let selectedStyle = 'separate';
 
     function escH(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-    const STYLE_LABEL = { separate: 'Separate', combined: 'Combined' };
 
     function renderTemplateList() {
       const el = document.getElementById('templateList');
@@ -156,7 +145,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         const meta = [];
         if (t.defaultStartTime) meta.push(t.defaultStartTime.slice(0,5));
         if (t.defaultDurationMinutes) meta.push(t.defaultDurationMinutes + ' min');
-        meta.push(STYLE_LABEL[t.assignmentStyle] || t.assignmentStyle);
         return `<div class="card row tpl-item">
           <div class="name" onclick="editTemplate(${t.id})">${escH(t.name)}${meta.length ? ' <span class="tpl-meta">(' + meta.join(', ') + ')</span>' : ''}</div>
           <div class="tpl-actions">
@@ -168,14 +156,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       }).join('');
     }
 
-    function setStyleTabs(style, locked) {
-      selectedStyle = style;
-      document.querySelectorAll('#tplStyleTabs .tab-btn-pill').forEach(b => {
-        b.classList.toggle('active', b.dataset.style === style);
-        b.disabled = locked;
-      });
-    }
-
     function editTemplate(id) {
       const t = templates.find(x => x.id === id);
       if (!t) return;
@@ -184,7 +164,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       document.getElementById('tplStart').value = (t.defaultStartTime || '').slice(0, 5);
       document.getElementById('tplDuration').value = t.defaultDurationMinutes || '';
       document.getElementById('tplDesc').value = t.description || '';
-      setStyleTabs(t.assignmentStyle, true);
       document.getElementById('tplCancelEditBtn').classList.remove('hidden');
       const structBtn = document.getElementById('tplEditStructureBtn');
       structBtn.href = '/raids/template-edit.php?slug=' + encodeURIComponent(SLUG) + '&id=' + id;
@@ -197,14 +176,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       document.getElementById('tplStart').value = '';
       document.getElementById('tplDuration').value = '';
       document.getElementById('tplDesc').value = '';
-      setStyleTabs('separate', false);
       document.getElementById('tplCancelEditBtn').classList.add('hidden');
       document.getElementById('tplEditStructureBtn').classList.add('hidden');
     }
     document.getElementById('tplCancelEditBtn').addEventListener('click', resetTemplateForm);
-    document.querySelectorAll('#tplStyleTabs .tab-btn-pill').forEach(b => {
-      b.addEventListener('click', () => { if (!b.disabled) setStyleTabs(b.dataset.style, false); });
-    });
 
     document.getElementById('tplSaveBtn').addEventListener('click', function () {
       const name = document.getElementById('tplName').value.trim();
@@ -213,7 +188,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         action: 'save',
         id: editingTplId,
         name,
-        assignmentStyle: selectedStyle,
         defaultStartTime: document.getElementById('tplStart').value || null,
         defaultDurationMinutes: document.getElementById('tplDuration').value ? parseInt(document.getElementById('tplDuration').value, 10) : null,
         description: document.getElementById('tplDesc').value.trim() || null,

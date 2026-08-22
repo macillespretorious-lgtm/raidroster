@@ -32,11 +32,6 @@ $body   = json_decode(file_get_contents('php://input'), true);
 $action = is_array($body) ? ($body['action'] ?? '') : '';
 $pdo    = db_connect();
 
-$SECTION_KINDS = [
-    'combined' => ['roster', 'assignments'],
-    'separate' => ['roster', 'tank', 'healer', 'misc'],
-];
-
 function fail($code, $msg) {
     http_response_code($code);
     echo json_encode(['error' => $msg]);
@@ -316,18 +311,44 @@ if ($action === 'save_export_template') {
 
 if ($action === 'add_section') {
     $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
-    $kind       = $body['kind'] ?? '';
+    // A tab and its "kind" are the same freeform string now — sections sharing a kind value
+    // form one tab in the editor. See delete_tab below for the matching bulk-remove.
+    $kind       = substr(trim($body['kind'] ?? ''), 0, 50);
     $title      = substr(trim($body['title'] ?? ''), 0, 100);
     $template   = fetch_template($pdo, $tenant['id'], $templateId);
     if (!$template) fail(404, 'Template not found');
-    $allowed = $SECTION_KINDS[$template['assignment_style']] ?? [];
-    if (!in_array($kind, $allowed, true)) fail(400, 'Invalid section kind for this template\'s assignment style');
+    if (!$kind) fail(400, 'Tab name is required');
     if (!$title) fail(400, 'Title is required');
 
     $order = next_sort_order($pdo, 'raid_template_sections', 'template_id', $templateId);
     $stmt = $pdo->prepare('INSERT INTO raid_template_sections (template_id, kind, title, sort_order) VALUES (?, ?, ?, ?)');
     $stmt->execute([$templateId, $kind, $title, $order]);
     respond_structure($pdo, $templateId);
+}
+
+// Removes an entire tab: every section (and everything nested under them — tables, columns,
+// rows, cells) sharing that kind value on this template. The client shows an urgent warning
+// before sending this, since it's a single irreversible bulk delete.
+if ($action === 'delete_tab') {
+    $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
+    $kind       = $body['kind'] ?? '';
+    $template   = fetch_template($pdo, $tenant['id'], $templateId);
+    if (!$template) fail(404, 'Template not found');
+    if ($kind === '') fail(400, 'Invalid tab');
+    $stmt = $pdo->prepare('DELETE FROM raid_template_sections WHERE template_id = ? AND kind = ?');
+    $stmt->execute([$templateId, $kind]);
+    respond_structure($pdo, $templateId);
+}
+
+if ($action === 'set_era_export_enabled') {
+    $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
+    $template   = fetch_template($pdo, $tenant['id'], $templateId);
+    if (!$template) fail(404, 'Template not found');
+    $enabled = !empty($body['enabled']) ? 1 : 0;
+    $stmt = $pdo->prepare('UPDATE raid_templates SET era_export_enabled = ? WHERE id = ?');
+    $stmt->execute([$enabled, $templateId]);
+    echo json_encode(['success' => true, 'eraExportEnabled' => (bool)$enabled]);
+    exit;
 }
 
 if ($action === 'update_section') {
