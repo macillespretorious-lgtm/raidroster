@@ -62,12 +62,12 @@ function fetch_table_full($pdo, $tb) {
         'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
     ], $stmt6->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt7 = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, kind_override FROM raid_template_cells WHERE table_id = ?');
+    $stmt7 = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ?');
     $stmt7->execute([$tb['id']]);
     $cells = array_map(fn($c) => [
         'rowId' => (int)$c['row_id'], 'columnId' => (int)$c['column_id'],
         'textContent' => $c['text_content'], 'bgColor' => $c['bg_color'], 'textColor' => $c['text_color'],
-        'bold' => (bool)$c['bold'], 'font' => $c['font'],
+        'bold' => (bool)$c['bold'], 'font' => $c['font'], 'icon' => $c['icon'],
         'kindOverride' => $c['kind_override'],
     ], $stmt7->fetchAll(PDO::FETCH_ASSOC));
 
@@ -233,12 +233,24 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .kind-picker button:hover { background: rgba(255,255,255,0.1); }
 
     td.text-td { text-align: left; }
-    .cell-text-input { margin-bottom: 3px; }
-    .cell-format-row { display: flex; align-items: center; gap: 4px; }
-    .cell-format-row .swatch { width: 18px; height: 18px; }
     .cell-bold-btn { width: 20px; height: 18px; padding: 0; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); background: #0a0f1e; color: #a8b4d0; font-weight: 800; font-size: 11px; line-height: 1; cursor: pointer; }
     .cell-bold-btn.active { background: #5865f2; border-color: #5865f2; color: #fff; }
     .cell-font-select { flex: 1; min-width: 0; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font-size: 10.5px; border-radius: 4px; padding: 2px 2px; }
+
+    .cell-text-display { min-height: 20px; cursor: pointer; border-radius: 4px; padding: 3px 5px; margin: -3px -5px; }
+    .cell-text-display:hover { background: rgba(255,255,255,0.06); }
+    .cell-text-placeholder { color: #5c6785; font-style: italic; font-size: 11px; }
+    .inline-raid-icon { margin: 0 1px; }
+
+    td.icon-td { text-align: center; }
+    .cell-icon-wrap { display: inline-flex; }
+    .icon-pick-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px dashed rgba(255,255,255,0.25); background: rgba(255,255,255,0.03); color: #a8b4d0; font-size: 16px; line-height: 1; cursor: pointer; padding: 0; }
+    .icon-pick-btn:not(.empty) { border-style: solid; border-color: rgba(255,255,255,0.15); }
+    .icon-pick-btn:hover { border-color: rgba(255,255,255,0.5); }
+    .icon-picker { flex-direction: row !important; flex-wrap: wrap; max-width: 150px; }
+    .icon-swatch-btn { border: 1px solid rgba(255,255,255,0.15); border-radius: 5px; background: rgba(255,255,255,0.03); cursor: pointer; padding: 0; }
+    .icon-swatch-btn:hover { border-color: #5865f2; }
+    .raid-icon-cell { display: inline-block; }
 
     .drag-handle { cursor: grab; display: inline-block; color: #6b7595; font-size: 13px; line-height: 1; user-select: none; }
     .drag-handle:active { cursor: grabbing; }
@@ -272,6 +284,12 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .preview-modal h2 { font-size: 16px; }
     .preview-modal .preview-note { font-size: 12px; color: #7f8bad; margin-bottom: 16px; }
     .modal.export-modal { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 22px; width: 100%; max-width: 900px; max-height: 90vh; overflow-y: auto; }
+    .modal.cell-edit-modal { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 22px; width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 10px; }
+    #cellEditTextarea { width: 100%; min-height: 90px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #e8ecff; font: inherit; font-size: 13px; padding: 10px; resize: vertical; }
+    .cell-edit-icon-palette { display: flex; flex-wrap: wrap; gap: 6px; }
+    .cell-edit-format-row { display: flex; align-items: center; gap: 8px; }
+    .cell-edit-format-row .cell-font-select { flex: 1; padding: 6px; font-size: 12px; }
+    .cell-edit-format-row .cell-bold-btn { width: 28px; height: 28px; font-size: 13px; }
     .export-modal .preview-note code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
     .export-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
     .export-tokens span { background: rgba(76,175,106,0.15); border: 1px solid rgba(76,175,106,0.35); color: #8fe0a8; font-size: 11px; padding: 3px 8px; border-radius: 999px; font-family: 'Courier New', monospace; }
@@ -376,7 +394,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     body.stamp-mode-active .data-td:hover, body.stamp-mode-active .spacer-cell:hover, body.stamp-mode-active .text-td:hover {
       outline: 2px solid #f0c04a; outline-offset: -2px;
     }
-    body.stamp-mode-active .cell-text-input, body.stamp-mode-active .swatch, body.stamp-mode-active .cell-bold-btn, body.stamp-mode-active .cell-font-select { pointer-events: none; }
+    body.stamp-mode-active .cell-text-display, body.stamp-mode-active .icon-pick-btn, body.stamp-mode-active .swatch, body.stamp-mode-active .cell-bold-btn, body.stamp-mode-active .cell-font-select { pointer-events: none; }
     body.stamp-mode-active .kind-override-tag { pointer-events: none; }
     .cell-override-wrap { position: absolute; top: 1px; left: 2px; z-index: 3; }
     .kind-override-tag { background: none; border: none; padding: 0; font: inherit; font-size: 8.5px; font-weight: 800; letter-spacing: .03em; color: #f0c04a; text-transform: uppercase; cursor: pointer; }
@@ -451,6 +469,26 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         <button class="btn btn-cancel-tpl" type="button" id="angryExportJsonBtn">Copy JSON export</button>
         <button class="btn btn-cancel-tpl" type="button" id="angryDeletePageBtn">Delete page</button>
         <button class="btn" type="button" id="angryAddPageBtn">+ Add page</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="cellEditBackdrop">
+    <div class="modal cell-edit-modal">
+      <div class="preview-head">
+        <h2>Edit text</h2>
+        <button class="icon-btn" id="cellEditClose" type="button" title="Close">&times;</button>
+      </div>
+      <textarea id="cellEditTextarea" placeholder="Cell text" maxlength="500"></textarea>
+      <div class="cell-edit-icon-palette" id="cellEditIconPalette"></div>
+      <div class="cell-edit-format-row">
+        <button type="button" class="cell-bold-btn" id="cellEditBold" title="Bold">B</button>
+        <select class="cell-font-select" id="cellEditFont" title="Font"></select>
+        <input type="color" class="swatch" id="cellEditColor" title="Text color">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel-tpl" type="button" id="cellEditCancel">Cancel</button>
+        <button class="btn" type="button" id="cellEditSave">Save</button>
       </div>
     </div>
   </div>
@@ -620,6 +658,39 @@ function cellTextStyle(cell) {
   return weight + family;
 }
 
+// Raid-target icon sprite (assets/img/raid-icons.png, 8 x 64px frames in a single row).
+// Used both for the standalone Icon row/column/cell kind and for :key: shortcode tokens
+// inserted inline into Text-cell content. Mirrored in raids/view.php and includes/raid_icons.php.
+const RAID_ICON_KEYS = ['skull', 'cross', 'square', 'moon', 'triangle', 'diamond', 'circle', 'star'];
+function raidIconStyle(key, sizePx) {
+  const idx = RAID_ICON_KEYS.indexOf(key);
+  if (idx < 0) return '';
+  const pct = (idx / (RAID_ICON_KEYS.length - 1)) * 100;
+  const size = sizePx || 20;
+  return `width:${size}px;height:${size}px;background-image:url('/assets/img/raid-icons.png');background-position:${pct}% 0;background-size:${RAID_ICON_KEYS.length * 100}% 100%;background-repeat:no-repeat;display:inline-block;vertical-align:middle;`;
+}
+const ICON_TOKEN_RE = /:(skull|cross|square|moon|triangle|diamond|circle|star):/g;
+function parseCellText(text) {
+  const parts = [];
+  if (!text) return parts;
+  let last = 0, m;
+  ICON_TOKEN_RE.lastIndex = 0;
+  while ((m = ICON_TOKEN_RE.exec(text))) {
+    if (m.index > last) parts.push({ type: 'text', value: text.slice(last, m.index) });
+    parts.push({ type: 'icon', key: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ type: 'text', value: text.slice(last) });
+  return parts;
+}
+function renderCellTextHtml(text) {
+  return parseCellText(text).map(p => p.type === 'icon'
+    ? `<span class="inline-raid-icon" style="${raidIconStyle(p.key, 14)}" title="${p.key}"></span>`
+    : esc(p.value)).join('');
+}
+function kindOverrideLabel(k) { return k === 'spacer' ? 'Filler' : k === 'text' ? 'Text' : k === 'icon' ? 'Icon' : 'General'; }
+function kindOverrideBadge(k) { return k === 'spacer' ? 'F' : k === 'text' ? 'T' : k === 'icon' ? 'I' : 'G'; }
+
 function chunkColumns(columns) {
   const chunks = [];
   let current = [];
@@ -643,6 +714,7 @@ function chunkColumns(columns) {
 function effectiveKind(row, col, cell) {
   if (cell && cell.kindOverride) return cell.kindOverride;
   if (row.kind === 'spacer' || col.kind === 'spacer') return 'spacer';
+  if (row.kind === 'icon' || col.kind === 'icon') return 'icon';
   if (row.kind === 'text' || col.kind === 'text') return 'text';
   return 'general';
 }
@@ -655,7 +727,7 @@ function measureTextPx(text, font) {
 }
 
 function cellFor(tb, rowId, colId) {
-  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null, bold: false, font: null, kindOverride: null };
+  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null, bold: false, font: null, icon: null, kindOverride: null };
 }
 function tableForCell(rowId, colId) {
   return allTables().find(tb => tb.rows.some(r => r.id === rowId) && tb.columns.some(c => c.id === colId)) || null;
@@ -856,7 +928,7 @@ function updateStampBadge() {
   const badge = document.getElementById('stampBadge');
   document.body.classList.toggle('stamp-mode-active', !!cellOverrideStamp);
   if (!cellOverrideStamp) { badge.hidden = true; return; }
-  const label = cellOverrideStamp === 'spacer' ? 'Filler' : (cellOverrideStamp === 'text' ? 'Text' : 'General');
+  const label = kindOverrideLabel(cellOverrideStamp);
   badge.textContent = `Cell override: ${label} — click cells to apply, right-click to stop`;
   badge.hidden = false;
 }
@@ -1067,10 +1139,23 @@ function render() {
       if (act === 'row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
       if (act === 'row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
-      if (act === 'cell-text') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: node.value, bgColor: cell.bgColor, textColor: cell.textColor, bold: cell.bold, font: cell.font }); }
-      if (act === 'cell-fg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: node.value, bold: cell.bold, font: cell.font }); }
-      if (act === 'cell-bold') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: cell.textColor, bold: !cell.bold, font: cell.font }); }
-      if (act === 'cell-font') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: cell.textColor, bold: cell.bold, font: node.value || null }); }
+      if (act === 'open-cell-editor') { openKindPicker = null; openCellEditor(parseInt(node.dataset.rowId, 10), parseInt(node.dataset.colId, 10)); return; }
+      if (act === 'open-cell-icon-menu') {
+        const key = `cell-icon-${node.dataset.rowId}_${node.dataset.colId}`;
+        const wasOpen = openKindPicker === key;
+        const rect = node.getBoundingClientRect();
+        openKindPicker = wasOpen ? null : key;
+        render();
+        if (!wasOpen) {
+          const picker = el.querySelector('.kind-picker:not([hidden])');
+          if (picker) {
+            picker.style.top = `${rect.bottom + 4}px`;
+            picker.style.left = `${rect.left}px`;
+          }
+        }
+        return;
+      }
+      if (act === 'cell-icon') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); openKindPicker = null; call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: cell.textColor, bold: cell.bold, font: cell.font, icon: node.dataset.icon || null }); }
       if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
       if (act === 'merge-header') call({ action: 'merge_header', id });
       if (act === 'split-header') call({ action: 'split_header', id });
@@ -1298,10 +1383,11 @@ function bodyCellsForRow(r, chunkCols, tb) {
     const overrideKey = `cell-override-${r.id}_${c.id}`;
     const overrideTag = cell.kindOverride
       ? `<div class="cell-override-wrap kind-picker-wrap">
-          <button type="button" class="kind-override-tag" data-action="open-cell-override-menu" data-row-id="${r.id}" data-col-id="${c.id}" title="Cell override: ${cell.kindOverride === 'spacer' ? 'Filler' : (cell.kindOverride === 'text' ? 'Text' : 'General')} — click to change or remove">${cell.kindOverride === 'spacer' ? 'F' : (cell.kindOverride === 'text' ? 'T' : 'G')}</button>
+          <button type="button" class="kind-override-tag" data-action="open-cell-override-menu" data-row-id="${r.id}" data-col-id="${c.id}" title="Cell override: ${kindOverrideLabel(cell.kindOverride)} — click to change or remove">${kindOverrideBadge(cell.kindOverride)}</button>
           <div class="kind-picker" ${openKindPicker === overrideKey ? '' : 'hidden'}>
             <button type="button" data-action="pick-cell-override-single" data-kind="general" data-row-id="${r.id}" data-col-id="${c.id}">General</button>
             <button type="button" data-action="pick-cell-override-single" data-kind="text" data-row-id="${r.id}" data-col-id="${c.id}">Text</button>
+            <button type="button" data-action="pick-cell-override-single" data-kind="icon" data-row-id="${r.id}" data-col-id="${c.id}">Icon</button>
             <button type="button" data-action="pick-cell-override-single" data-kind="spacer" data-row-id="${r.id}" data-col-id="${c.id}">Filler</button>
             <button type="button" class="kind-picker-remove" data-action="remove-cell-override" data-row-id="${r.id}" data-col-id="${c.id}">Remove override</button>
           </div>
@@ -1318,14 +1404,25 @@ function bodyCellsForRow(r, chunkCols, tb) {
         ${splitBtn}
       </div>`;
     if (eff === 'text') {
-      const fontOptions = CELL_FONTS.map(f => `<option value="${f.key}"${(cell.font || '') === f.key ? ' selected' : ''}>${f.label}</option>`).join('');
+      const display = cell.textContent
+        ? renderCellTextHtml(cell.textContent)
+        : '<span class="cell-text-placeholder">Click to edit&hellip;</span>';
       out.push(`<td${colspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}">
         ${overrideTag}
-        <input class="lbl-input cell-text-input" data-action="cell-text" data-row-id="${r.id}" data-col-id="${c.id}" placeholder="Text" value="${escAttr(cell.textContent || '')}" style="${cellTextStyle(cell)}color:${cell.textColor || '#e8ecff'};">
-        <div class="cell-format-row">
-          <button type="button" class="cell-bold-btn${cell.bold ? ' active' : ''}" data-action="cell-bold" data-row-id="${r.id}" data-col-id="${c.id}" title="Bold">B</button>
-          <select class="cell-font-select" data-action="cell-font" data-row-id="${r.id}" data-col-id="${c.id}" title="Font">${fontOptions}</select>
-          <input type="color" class="swatch" data-action="cell-fg" data-row-id="${r.id}" data-col-id="${c.id}" value="${cell.textColor || '#e8ecff'}" title="Text color">
+        <div class="cell-text-display" data-action="open-cell-editor" data-row-id="${r.id}" data-col-id="${c.id}" title="Click to edit text" style="${cellTextStyle(cell)}color:${cell.textColor || '#e8ecff'};">${display}</div>
+        ${mergeActions}
+      </td>`);
+    } else if (eff === 'icon') {
+      const iconKey = `cell-icon-${r.id}_${c.id}`;
+      const swatches = RAID_ICON_KEYS.map(k => `<button type="button" class="icon-swatch-btn" data-action="cell-icon" data-icon="${k}" data-row-id="${r.id}" data-col-id="${c.id}" style="${raidIconStyle(k, 22)}" title="${k}"></button>`).join('');
+      out.push(`<td${colspanAttr} class="data-td icon-td" data-row-id="${r.id}" data-col-id="${c.id}">
+        ${overrideTag}
+        <div class="cell-icon-wrap kind-picker-wrap">
+          <button type="button" class="icon-pick-btn${cell.icon ? '' : ' empty'}" data-action="open-cell-icon-menu" data-row-id="${r.id}" data-col-id="${c.id}" style="${cell.icon ? raidIconStyle(cell.icon, 26) : ''}" title="Pick raid icon">${cell.icon ? '' : '+'}</button>
+          <div class="kind-picker icon-picker" ${openKindPicker === iconKey ? '' : 'hidden'}>
+            ${swatches}
+            <button type="button" class="kind-picker-remove" data-action="cell-icon" data-icon="" data-row-id="${r.id}" data-col-id="${c.id}">Clear</button>
+          </div>
         </div>
         ${mergeActions}
       </td>`);
@@ -1406,6 +1503,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
         <div class="kind-picker" ${openKindPicker === `row-${tb.id}` ? '' : 'hidden'}>
           <button data-action="add-row" data-kind="text" data-id="${tb.id}">Text Row</button>
           <button data-action="add-row" data-kind="general" data-id="${tb.id}">General Row</button>
+          <button data-action="add-row" data-kind="icon" data-id="${tb.id}">Icon Row</button>
           <button data-action="add-row" data-kind="spacer" data-id="${tb.id}">Spacer Row</button>
         </div>
       </div>
@@ -1414,6 +1512,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
         <div class="kind-picker" ${openKindPicker === `column-${tb.id}` ? '' : 'hidden'}>
           <button data-action="add-col" data-kind="spacer" data-id="${tb.id}">Spacer</button>
           <button data-action="add-col" data-kind="text" data-id="${tb.id}">Text</button>
+          <button data-action="add-col" data-kind="icon" data-id="${tb.id}">Icon</button>
           <button data-action="add-col" data-kind="general" data-id="${tb.id}">General</button>
         </div>
       </div>
@@ -1422,6 +1521,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
         <div class="kind-picker" ${openKindPicker === `cell-override-${tb.id}` ? '' : 'hidden'}>
           <button data-action="pick-cell-override" data-kind="general" data-id="${tb.id}">General</button>
           <button data-action="pick-cell-override" data-kind="text" data-id="${tb.id}">Text</button>
+          <button data-action="pick-cell-override" data-kind="icon" data-id="${tb.id}">Icon</button>
           <button data-action="pick-cell-override" data-kind="spacer" data-id="${tb.id}">Filler</button>
         </div>
       </div>
@@ -1483,7 +1583,11 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     if (eff === 'text') {
       const style = `background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
-      out.push(`<td${colspanAttr} class="cell text-td" style="${style}">${esc(cell.textContent || '')}</td>`);
+      out.push(`<td${colspanAttr} class="cell text-td" style="${style}">${renderCellTextHtml(cell.textContent)}</td>`);
+    } else if (eff === 'icon') {
+      const style = cell.bgColor ? `background:${cell.bgColor};` : '';
+      const icon = cell.icon ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '';
+      out.push(`<td${colspanAttr} class="cell icon-td" style="${style}">${icon}</td>`);
     } else {
       out.push(`<td${colspanAttr} class="cell"><span class="empty-slot">+</span></td>`);
     }
@@ -1584,7 +1688,11 @@ function colourBodyCellsForRow(r, chunkCols, tb) {
     const style = eff === 'text'
       ? `background:${bg || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
       : (bg ? `background:${bg};` : '');
-    const content = eff === 'text' ? esc(cell.textContent || '') : '<span class="empty-slot">+</span>';
+    const content = eff === 'text'
+      ? renderCellTextHtml(cell.textContent)
+      : (eff === 'icon'
+        ? (cell.icon ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '<span class="empty-slot">+</span>')
+        : '<span class="empty-slot">+</span>');
     out.push(`<td${colspanAttr} class="cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="${style}">${content}</td>`);
     i += span;
   }
@@ -1826,6 +1934,67 @@ function closePreview() {
 document.getElementById('previewClose').addEventListener('click', closePreview);
 document.getElementById('previewBackdrop').addEventListener('click', e => {
   if (e.target.id === 'previewBackdrop') closePreview();
+});
+
+// Text-cell WYSIWYG popup: opened by clicking a Text-kind cell (see bodyCellsForRow's
+// "open-cell-editor" action). A static modal, not part of the panelsEl render tree, so it
+// only needs its fields synced on open/save rather than on every render() pass.
+let cellEditRowId = null;
+let cellEditColId = null;
+
+function openCellEditor(rowId, colId) {
+  const tb = tableForCell(rowId, colId);
+  const cell = cellFor(tb, rowId, colId);
+  cellEditRowId = rowId;
+  cellEditColId = colId;
+  document.getElementById('cellEditTextarea').value = cell.textContent || '';
+  document.getElementById('cellEditBold').classList.toggle('active', !!cell.bold);
+  document.getElementById('cellEditFont').value = cell.font || '';
+  document.getElementById('cellEditColor').value = cell.textColor || '#e8ecff';
+  document.getElementById('cellEditBackdrop').classList.add('open');
+  document.getElementById('cellEditTextarea').focus();
+}
+function closeCellEditor() {
+  document.getElementById('cellEditBackdrop').classList.remove('open');
+  cellEditRowId = null;
+  cellEditColId = null;
+}
+document.getElementById('cellEditFont').innerHTML = CELL_FONTS.map(f => `<option value="${f.key}">${f.label}</option>`).join('');
+document.getElementById('cellEditIconPalette').innerHTML = RAID_ICON_KEYS.map(k => `<button type="button" class="icon-swatch-btn" data-icon="${k}" style="${raidIconStyle(k, 22)}" title="Insert :${k}:"></button>`).join('');
+document.getElementById('cellEditIconPalette').querySelectorAll('[data-icon]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const ta = document.getElementById('cellEditTextarea');
+    const token = `:${btn.dataset.icon}:`;
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    ta.value = ta.value.slice(0, start) + token + ta.value.slice(end);
+    const pos = start + token.length;
+    ta.focus();
+    ta.setSelectionRange(pos, pos);
+  });
+});
+document.getElementById('cellEditBold').addEventListener('click', () => {
+  document.getElementById('cellEditBold').classList.toggle('active');
+});
+document.getElementById('cellEditClose').addEventListener('click', closeCellEditor);
+document.getElementById('cellEditCancel').addEventListener('click', closeCellEditor);
+document.getElementById('cellEditBackdrop').addEventListener('click', e => {
+  if (e.target.id === 'cellEditBackdrop') closeCellEditor();
+});
+document.getElementById('cellEditSave').addEventListener('click', () => {
+  if (cellEditRowId === null || cellEditColId === null) return;
+  const cell = cellFor(tableForCell(cellEditRowId, cellEditColId), cellEditRowId, cellEditColId);
+  const rowId = cellEditRowId, colId = cellEditColId;
+  call({
+    action: 'update_cell',
+    rowId,
+    columnId: colId,
+    textContent: document.getElementById('cellEditTextarea').value,
+    bgColor: cell.bgColor,
+    textColor: document.getElementById('cellEditColor').value,
+    bold: document.getElementById('cellEditBold').classList.contains('active'),
+    font: document.getElementById('cellEditFont').value || null,
+    icon: cell.icon,
+  }).then(() => closeCellEditor());
 });
 
 // AngryERA export: a {{token}} text template resolved against every row on a given tab

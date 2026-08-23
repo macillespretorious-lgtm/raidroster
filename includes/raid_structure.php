@@ -71,7 +71,7 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
 
     // Template-authored cell text/colors, keyed by source row/column id so they can be
     // carried onto the freshly-created raid_cells rows below.
-    $stmtCells = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, kind_override FROM raid_template_cells WHERE table_id = ?');
+    $stmtCells = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ?');
     $stmtCells->execute([$tb['id']]);
     $tplCells = [];
     foreach ($stmtCells->fetchAll(PDO::FETCH_ASSOC) as $tc) {
@@ -79,13 +79,13 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     }
 
     // Spacer rows/columns never hold data, so no raid_cells row is created for either side.
-    $insCell = $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, kind_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $insCell = $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     foreach ($rows as $r) {
         if ($r['kind'] === 'spacer') continue;
         foreach ($columns as $c) {
             if ($c['kind'] === 'spacer') continue;
             $tc = $tplCells[$r['srcId'] . '_' . $c['srcId']] ?? null;
-            $insCell->execute([$newTableId, $r['id'], $c['id'], $tc['text_content'] ?? null, $tc['bg_color'] ?? null, $tc['text_color'] ?? null, $tc['bold'] ?? 0, $tc['font'] ?? null, $tc['kind_override'] ?? null]);
+            $insCell->execute([$newTableId, $r['id'], $c['id'], $tc['text_content'] ?? null, $tc['bg_color'] ?? null, $tc['text_color'] ?? null, $tc['bold'] ?? 0, $tc['font'] ?? null, $tc['icon'] ?? null, $tc['kind_override'] ?? null]);
         }
     }
 

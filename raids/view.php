@@ -170,8 +170,11 @@ function fmtTime($t) {
     table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
     table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
     table.grid td.text-cell { text-align: left; white-space: nowrap; }
+    table.grid td.icon-cell { text-align: center; }
     table.grid th.group-th { font-size: 13px; letter-spacing: .04em; }
     td.cell { min-width: 90px; }
+    .inline-raid-icon { margin: 0 1px; }
+    .raid-icon-cell { display: inline-block; }
     th.spacer-th, td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
 
     .toon-chip {
@@ -825,6 +828,7 @@ const MAX_DATA_COLS = 10;
 function effectiveKind(row, col, cell) {
   if (cell && cell.kindOverride) return cell.kindOverride;
   if (row.kind === 'spacer' || col.kind === 'spacer') return 'spacer';
+  if (row.kind === 'icon' || col.kind === 'icon') return 'icon';
   if (row.kind === 'text' || col.kind === 'text') return 'text';
   return 'general';
 }
@@ -840,6 +844,50 @@ function cellTextStyle(cell) {
   const weight = cell && cell.bold ? 'font-weight:700;' : '';
   const family = cell && CELL_FONT_STACKS[cell.font] ? `font-family:${CELL_FONT_STACKS[cell.font]};` : '';
   return weight + family;
+}
+
+// Raid-target icon sprite (assets/img/raid-icons.png, 8 x 64px frames in a single row).
+// Kept in sync with raids/template-edit.php's RAID_ICON_KEYS/raidIconStyle/parseCellText.
+const RAID_ICON_KEYS = ['skull', 'cross', 'square', 'moon', 'triangle', 'diamond', 'circle', 'star'];
+function raidIconStyle(key, sizePx) {
+  const idx = RAID_ICON_KEYS.indexOf(key);
+  if (idx < 0) return '';
+  const pct = (idx / (RAID_ICON_KEYS.length - 1)) * 100;
+  const size = sizePx || 20;
+  return `width:${size}px;height:${size}px;background-image:url('/assets/img/raid-icons.png');background-position:${pct}% 0;background-size:${RAID_ICON_KEYS.length * 100}% 100%;background-repeat:no-repeat;display:inline-block;vertical-align:middle;`;
+}
+const ICON_TOKEN_RE = /:(skull|cross|square|moon|triangle|diamond|circle|star):/g;
+function parseCellText(text) {
+  const parts = [];
+  if (!text) return parts;
+  let last = 0, m;
+  ICON_TOKEN_RE.lastIndex = 0;
+  while ((m = ICON_TOKEN_RE.exec(text))) {
+    if (m.index > last) parts.push({ type: 'text', value: text.slice(last, m.index) });
+    parts.push({ type: 'icon', key: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ type: 'text', value: text.slice(last) });
+  return parts;
+}
+function renderCellTextHtml(text) {
+  return parseCellText(text).map(p => p.type === 'icon'
+    ? `<span class="inline-raid-icon" style="${raidIconStyle(p.key, 14)}" title="${p.key}"></span>`
+    : esc(p.value)).join('');
+}
+
+// Canvas can't use CSS background-position sprite slicing, so the same sprite sheet is
+// preloaded as an Image and sliced via drawImage's source-rect args instead. Preloaded
+// eagerly at page load so it's already decoded by the time a Discord export is drawn
+// (renderRaidCanvas() below is synchronous, so this can't be awaited at draw time).
+const RAID_ICON_IMG = new Image();
+RAID_ICON_IMG.src = '/assets/img/raid-icons.png';
+function drawRaidIcon(ctx, key, x, y, size) {
+  const idx = RAID_ICON_KEYS.indexOf(key);
+  if (idx < 0 || !RAID_ICON_IMG.complete || !RAID_ICON_IMG.naturalWidth) return;
+  const frameW = RAID_ICON_IMG.naturalWidth / RAID_ICON_KEYS.length;
+  const frameH = RAID_ICON_IMG.naturalHeight;
+  ctx.drawImage(RAID_ICON_IMG, idx * frameW, 0, frameW, frameH, x, y, size, size);
 }
 
 let _measureCtx = null;
@@ -942,7 +990,11 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     if (eff === 'text') {
       const style = `background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
-      out.push(`<td${colspanAttr} class="cell text-cell" style="${style}">${esc(cell ? cell.textContent : '')}</td>`);
+      out.push(`<td${colspanAttr} class="cell text-cell" style="${style}">${renderCellTextHtml(cell ? cell.textContent : '')}</td>`);
+    } else if (eff === 'icon') {
+      const bgStyle = (cell && cell.bgColor) ? ` style="background:${cell.bgColor};"` : '';
+      const icon = (cell && cell.icon) ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '';
+      out.push(`<td${colspanAttr} class="cell icon-cell"${bgStyle}>${icon}</td>`);
     } else {
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
@@ -1427,7 +1479,28 @@ function drawTable(ctx, tb, m, startY) {
           ctx.fillStyle = (cell && cell.textColor) || '#c7cfe8';
           const fontFamily = (cell && CELL_FONT_STACKS[cell.font]) || 'Segoe UI, Arial, sans-serif';
           ctx.font = `${(cell && cell.bold) ? 'bold ' : ''}11px ${fontFamily}`;
-          ctx.fillText((cell && cell.textContent) || '', box.x + 6, y + rowH / 2, box.w - 10);
+          const parts = parseCellText(cell && cell.textContent);
+          const iconSize = 13;
+          const maxX = box.x + box.w - 4;
+          let tx = box.x + 6;
+          for (const p of parts) {
+            if (tx >= maxX) break;
+            if (p.type === 'icon') {
+              drawRaidIcon(ctx, p.key, tx, y + rowH / 2 - iconSize / 2, iconSize);
+              tx += iconSize + 2;
+            } else {
+              ctx.fillText(p.value, tx, y + rowH / 2, maxX - tx);
+              tx += measureTextPx(p.value, ctx.font);
+            }
+          }
+          return;
+        }
+        if (eff === 'icon') {
+          if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
+          if (cell && cell.icon) {
+            const size = Math.min(rowH - 8, 26);
+            drawRaidIcon(ctx, cell.icon, box.x + (box.w - size) / 2, y + (rowH - size) / 2, size);
+          }
           return;
         }
         if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }

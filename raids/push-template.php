@@ -360,14 +360,14 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
 
         // Sync template-authored cell text/colors down onto their matched raid cells, using
         // the row/column id maps built above (covers matched and newly-added rows/columns).
-        $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, kind_override FROM raid_template_cells WHERE table_id = ?');
+        $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ?');
         $stmt->execute([$tplTableId]);
-        $updCell = $pdo->prepare('UPDATE raid_cells SET text_content = ?, bg_color = ?, text_color = ?, bold = ?, font = ?, kind_override = ? WHERE table_id = ? AND row_id = ? AND column_id = ?');
+        $updCell = $pdo->prepare('UPDATE raid_cells SET text_content = ?, bg_color = ?, text_color = ?, bold = ?, font = ?, icon = ?, kind_override = ? WHERE table_id = ? AND row_id = ? AND column_id = ?');
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $tc) {
             $rId = $rowIdMap[(int)$tc['row_id']] ?? null;
             $cId = $columnIdMap[(int)$tc['column_id']] ?? null;
             if ($rId === null || $cId === null) continue;
-            $updCell->execute([$tc['text_content'], $tc['bg_color'], $tc['text_color'], $tc['bold'], $tc['font'], $tc['kind_override'], $raidTableId, $rId, $cId]);
+            $updCell->execute([$tc['text_content'], $tc['bg_color'], $tc['text_color'], $tc['bold'], $tc['font'], $tc['icon'], $tc['kind_override'], $raidTableId, $rId, $cId]);
         }
 
         // Cell merges carry no assignment data, so just wholesale-resync them from the

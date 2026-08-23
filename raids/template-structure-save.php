@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
 require_once __DIR__ . '/../includes/edit_lock.php';
+require_once __DIR__ . '/../includes/raid_icons.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -212,7 +213,7 @@ function fetch_table_full($pdo, $tb) {
         'colspan' => (int)$m['colspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, kind_override FROM raid_template_cells WHERE table_id = ?');
+    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ?');
     $stmt->execute([$tb['id']]);
     $cells = array_map(fn($c) => [
         'rowId' => (int)$c['row_id'],
@@ -222,6 +223,7 @@ function fetch_table_full($pdo, $tb) {
         'textColor' => $c['text_color'],
         'bold' => (bool)$c['bold'],
         'font' => $c['font'],
+        'icon' => $c['icon'],
         'kindOverride' => $c['kind_override'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
@@ -577,7 +579,7 @@ if ($action === 'add_column' || $action === 'add_row') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['tableId'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
     $kindIn = $body['kind'] ?? 'general';
-    $kind = in_array($kindIn, ['text', 'general', 'spacer'], true) ? $kindIn : 'general';
+    $kind = in_array($kindIn, ['text', 'general', 'spacer', 'icon'], true) ? $kindIn : 'general';
     $label = substr(trim($body['label'] ?? ''), 0, 60);
     $table = $isCol ? 'raid_template_columns' : 'raid_template_rows';
     $order = next_sort_order($pdo, $table, 'table_id', $tb['id']);
@@ -630,13 +632,14 @@ if ($action === 'update_cell') {
     $textColor = !empty($body['textColor']) ? $body['textColor'] : null;
     $bold = !empty($body['bold']) ? 1 : 0;
     $font = in_array($body['font'] ?? null, ['serif', 'mono', 'display'], true) ? $body['font'] : null;
+    $icon = in_array($body['icon'] ?? null, RAID_ICON_KEYS, true) ? $body['icon'] : null;
 
     $stmt = $pdo->prepare(
-        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color), bold = VALUES(bold), font = VALUES(font)'
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color), bold = VALUES(bold), font = VALUES(font), icon = VALUES(icon)'
     );
-    $stmt->execute([$col['table_id'], $row['id'], $col['id'], $textContent, $bgColor, $textColor, $bold, $font]);
+    $stmt->execute([$col['table_id'], $row['id'], $col['id'], $textContent, $bgColor, $textColor, $bold, $font, $icon]);
 
     respond_structure($pdo, $col['template_id']);
 }
@@ -649,7 +652,7 @@ if ($action === 'set_cell_kind_override') {
     if ((int)$col['table_id'] !== (int)$row['table_id']) fail(400, 'Row/column mismatch');
 
     $kindOverride = $body['kindOverride'] ?? null;
-    if ($kindOverride !== null && !in_array($kindOverride, ['general', 'text', 'spacer'], true)) {
+    if ($kindOverride !== null && !in_array($kindOverride, ['general', 'text', 'spacer', 'icon'], true)) {
         fail(400, 'Invalid kind override');
     }
 
