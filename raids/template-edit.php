@@ -316,7 +316,12 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       outline: 2px solid #f0c04a; outline-offset: -2px;
     }
     body.stamp-mode-active .cell-text-input, body.stamp-mode-active .swatch { pointer-events: none; }
-    .kind-override-tag { position: absolute; top: 1px; left: 2px; font-size: 8.5px; font-weight: 800; letter-spacing: .03em; color: #f0c04a; text-transform: uppercase; pointer-events: none; }
+    body.stamp-mode-active .kind-override-tag { pointer-events: none; }
+    .cell-override-wrap { position: absolute; top: 1px; left: 2px; z-index: 3; }
+    .kind-override-tag { background: none; border: none; padding: 0; font: inherit; font-size: 8.5px; font-weight: 800; letter-spacing: .03em; color: #f0c04a; text-transform: uppercase; cursor: pointer; }
+    .kind-override-tag:hover { color: #ffd876; text-decoration: underline; }
+    .kind-picker-remove { color: #e88585 !important; }
+    .kind-picker-remove:hover { background: rgba(224,85,85,0.15) !important; }
     .data-td, .text-td, .spacer-cell { position: relative; }
   </style>
 </head>
@@ -889,6 +894,29 @@ function render() {
       if (act === 'add-col') { openKindPicker = null; call({ action: 'add_column', tableId: id, kind: node.dataset.kind, label: '' }); }
       if (act === 'add-row') { openKindPicker = null; call({ action: 'add_row', tableId: id, kind: node.dataset.kind, label: '' }); }
       if (act === 'pick-cell-override') { openKindPicker = null; cellOverrideStamp = node.dataset.kind; updateStampBadge(); render(); }
+      if (act === 'open-cell-override-menu') {
+        const key = `cell-override-${node.dataset.rowId}_${node.dataset.colId}`;
+        const wasOpen = openKindPicker === key;
+        const rect = node.getBoundingClientRect();
+        openKindPicker = wasOpen ? null : key;
+        render();
+        if (!wasOpen) {
+          const picker = el.querySelector('.kind-picker:not([hidden])');
+          if (picker) {
+            picker.style.top = `${rect.bottom + 4}px`;
+            picker.style.left = `${rect.left}px`;
+          }
+        }
+        return;
+      }
+      if (act === 'pick-cell-override-single') {
+        openKindPicker = null;
+        call({ action: 'set_cell_kind_override', rowId: parseInt(node.dataset.rowId, 10), columnId: parseInt(node.dataset.colId, 10), kindOverride: node.dataset.kind });
+      }
+      if (act === 'remove-cell-override') {
+        openKindPicker = null;
+        call({ action: 'set_cell_kind_override', rowId: parseInt(node.dataset.rowId, 10), columnId: parseInt(node.dataset.colId, 10), kindOverride: null });
+      }
       if (act === 'col-width-dec') {
         const c = findColumn(id);
         if (c.kind === 'spacer') { call({ action: 'update_column', id, label: c.label, width: Math.max(20, (c.width || 20) - 20) }); }
@@ -1138,8 +1166,17 @@ function bodyCellsForRow(r, chunkCols, tb) {
     const c = chunkCols[i];
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
+    const overrideKey = `cell-override-${r.id}_${c.id}`;
     const overrideTag = cell.kindOverride
-      ? `<span class="kind-override-tag" title="Cell override: ${cell.kindOverride === 'spacer' ? 'Filler' : (cell.kindOverride === 'text' ? 'Text' : 'General')}">${cell.kindOverride === 'spacer' ? 'F' : (cell.kindOverride === 'text' ? 'T' : 'G')}</span>`
+      ? `<div class="cell-override-wrap kind-picker-wrap">
+          <button type="button" class="kind-override-tag" data-action="open-cell-override-menu" data-row-id="${r.id}" data-col-id="${c.id}" title="Cell override: ${cell.kindOverride === 'spacer' ? 'Filler' : (cell.kindOverride === 'text' ? 'Text' : 'General')} — click to change or remove">${cell.kindOverride === 'spacer' ? 'F' : (cell.kindOverride === 'text' ? 'T' : 'G')}</button>
+          <div class="kind-picker" ${openKindPicker === overrideKey ? '' : 'hidden'}>
+            <button type="button" data-action="pick-cell-override-single" data-kind="general" data-row-id="${r.id}" data-col-id="${c.id}">General</button>
+            <button type="button" data-action="pick-cell-override-single" data-kind="text" data-row-id="${r.id}" data-col-id="${c.id}">Text</button>
+            <button type="button" data-action="pick-cell-override-single" data-kind="spacer" data-row-id="${r.id}" data-col-id="${c.id}">Filler</button>
+            <button type="button" class="kind-picker-remove" data-action="remove-cell-override" data-row-id="${r.id}" data-col-id="${c.id}">Remove override</button>
+          </div>
+        </div>`
       : '';
     if (eff === 'spacer') { out.push(`<td class="spacer-cell" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}</td>`); i++; continue; }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
