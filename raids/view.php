@@ -920,7 +920,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
     const cell = tb.cells[r.id + '_' + c.id];
     const eff = effectiveKind(r, c, cell);
     if (eff === 'spacer') {
-      const spacerColor = (r.kind === 'spacer' && r.bgColor) ? r.bgColor : c.bgColor;
+      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
       const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
       out.push(`<td class="spacer-cell"${spacerStyle}></td>`);
       i++; continue;
@@ -1389,7 +1389,7 @@ function drawTable(ctx, tb, m, startY) {
         const cell = tb.cells[r.id + '_' + box.c.id];
         const eff = effectiveKind(r, box.c, cell);
         if (eff === 'spacer') {
-          const spacerColor = (r.kind === 'spacer' && r.bgColor) ? r.bgColor : box.c.bgColor;
+          const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || box.c.bgColor || null;
           if (spacerColor) { ctx.fillStyle = spacerColor; ctx.fillRect(box.x, y, box.w, rowH); }
           return;
         }

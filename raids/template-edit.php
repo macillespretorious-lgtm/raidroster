@@ -1442,7 +1442,7 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
     if (eff === 'spacer') {
-      const spacerColor = (r.kind === 'spacer' && r.bgColor) ? r.bgColor : c.bgColor;
+      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
       const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
       out.push(`<td class="spacer-cell"${spacerStyle}></td>`);
       i++; continue;
@@ -1538,7 +1538,14 @@ function colourBodyCellsForRow(r, chunkCols, tb) {
     }
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
-    if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    if (eff === 'spacer') {
+      // A cell-level "Filler" override (row/column themselves aren't spacer-kind) — it
+      // still owns a real raid_template_cells row, so it stays paintable like any other cell.
+      const bg = cell.bgColor || null;
+      const style = bg ? ` style="background:${bg};"` : '';
+      out.push(`<td class="cell spacer-cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${style} title="Paint this filler cell"></td>`);
+      i++; continue;
+    }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     const bg = cell.bgColor || null;
@@ -1638,7 +1645,10 @@ function renderPaintBar() {
     const swatchLabel = document.getElementById('paintCustomSwatch');
     if (swatchLabel) { swatchLabel.style.background = paintColor; swatchLabel.classList.add('active'); }
   });
-  document.getElementById('paintCustomColor').addEventListener('change', () => {
+  document.getElementById('paintCustomColor').addEventListener('change', e => {
+    // Some browsers (notably Safari) only fire 'change' on a color input, never 'input' --
+    // so 'change' must set the arm state itself rather than assume 'input' already did.
+    paintColor = e.target.value; paintErase = false; paintArmed = true; document.body.classList.add('paint-mode-active');
     renderPaintBar();
   });
 }
