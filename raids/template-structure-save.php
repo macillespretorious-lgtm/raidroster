@@ -114,6 +114,66 @@ function fetch_row_owned($pdo, $guildId, $rowId) {
     return $row;
 }
 
+const RULE_CLASSES = ['Warrior', 'Paladin', 'Priest', 'Druid', 'Rogue', 'Mage', 'Warlock', 'Shaman', 'Hunter'];
+
+function fetch_rule_owned($pdo, $guildId, $ruleId) {
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_rules WHERE id = ?');
+    $stmt->execute([$ruleId]);
+    $rule = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$rule) return null;
+    $tb = fetch_table_owned($pdo, $guildId, (int)$rule['table_id']);
+    if (!$tb) return null;
+    $rule['template_id'] = $tb['template_id'];
+    return $rule;
+}
+
+// Validates/normalizes the rule-type-specific fields shared by add_rule/update_rule, and
+// resolves+validates the cellRefs list (each ref's row/column must actually belong to the
+// rule's own table -- otherwise a rule could be wired to cross-table ids).
+function parse_rule_fields($pdo, $body, $tableId) {
+    $ruleType = $body['ruleType'] ?? null;
+    if (!in_array($ruleType, ['class_restrict', 'max_count'], true)) fail(400, 'Invalid rule type');
+
+    $scope = $body['scope'] ?? null;
+    if (!in_array($scope, ['cells', 'table'], true)) fail(400, 'Invalid scope');
+
+    $classes = null;
+    $maxCount = null;
+    if ($ruleType === 'class_restrict') {
+        $picked = is_array($body['classes'] ?? null) ? $body['classes'] : [];
+        $picked = array_values(array_intersect($picked, RULE_CLASSES));
+        if (!$picked) fail(400, 'Pick at least one class');
+        $classes = implode(',', $picked);
+    } else {
+        $maxCount = isset($body['maxCount']) ? (int)$body['maxCount'] : 1;
+        if ($maxCount < 1) $maxCount = 1;
+    }
+
+    $label = isset($body['label']) ? substr(trim((string)$body['label']), 0, 120) : '';
+    $label = $label !== '' ? $label : null;
+
+    $cellRefs = [];
+    if ($scope === 'cells') {
+        $refs = is_array($body['cellRefs'] ?? null) ? $body['cellRefs'] : [];
+        $stmtC = $pdo->prepare('SELECT id FROM raid_template_columns WHERE table_id = ?');
+        $stmtC->execute([$tableId]);
+        $validCols = array_map('intval', array_column($stmtC->fetchAll(PDO::FETCH_ASSOC), 'id'));
+        $stmtR = $pdo->prepare('SELECT id FROM raid_template_rows WHERE table_id = ?');
+        $stmtR->execute([$tableId]);
+        $validRows = array_map('intval', array_column($stmtR->fetchAll(PDO::FETCH_ASSOC), 'id'));
+        foreach ($refs as $ref) {
+            $rowId = (int)($ref['rowId'] ?? 0);
+            $colId = (int)($ref['columnId'] ?? 0);
+            if (in_array($rowId, $validRows, true) && in_array($colId, $validCols, true)) {
+                $cellRefs[] = [$rowId, $colId];
+            }
+        }
+        if (!$cellRefs) fail(400, 'Pick at least one cell');
+    }
+
+    return [$ruleType, $scope, $classes, $maxCount, $label, $cellRefs];
+}
+
 function fetch_group_owned($pdo, $guildId, $groupId) {
     $stmt = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE id = ?');
     $stmt->execute([$groupId]);
@@ -227,6 +287,29 @@ function fetch_table_full($pdo, $tb) {
         'kindOverride' => $c['kind_override'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
+    $stmt = $pdo->prepare('SELECT id, rule_type, scope, classes, max_count, label, sort_order FROM raid_template_rules WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt->execute([$tb['id']]);
+    $ruleRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $ruleCellsByRule = [];
+    if ($ruleRows) {
+        $ruleIds = array_column($ruleRows, 'id');
+        $placeholders = implode(',', array_fill(0, count($ruleIds), '?'));
+        $stmtRC = $pdo->prepare("SELECT rule_id, row_id, column_id FROM raid_template_rule_cells WHERE rule_id IN ($placeholders)");
+        $stmtRC->execute($ruleIds);
+        foreach ($stmtRC->fetchAll(PDO::FETCH_ASSOC) as $rc) {
+            $ruleCellsByRule[$rc['rule_id']][] = ['rowId' => (int)$rc['row_id'], 'columnId' => (int)$rc['column_id']];
+        }
+    }
+    $rules = array_map(fn($r) => [
+        'id' => (int)$r['id'],
+        'ruleType' => $r['rule_type'],
+        'scope' => $r['scope'],
+        'classes' => $r['classes'],
+        'maxCount' => $r['max_count'] !== null ? (int)$r['max_count'] : null,
+        'label' => $r['label'],
+        'cellRefs' => $ruleCellsByRule[$r['id']] ?? [],
+    ], $ruleRows);
+
     return [
         'id' => (int)$tb['id'],
         'title' => $tb['title'],
@@ -238,6 +321,7 @@ function fetch_table_full($pdo, $tb) {
         'columnGroups' => $columnGroups,
         'cellMerges' => $cellMerges,
         'cells' => $cells,
+        'rules' => $rules,
     ];
 }
 
@@ -664,6 +748,53 @@ if ($action === 'set_cell_kind_override') {
     $stmt->execute([$col['table_id'], $row['id'], $col['id'], $kindOverride]);
 
     respond_structure($pdo, $col['template_id']);
+}
+
+if ($action === 'add_rule') {
+    $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['tableId'] ?? 0));
+    if (!$tb) fail(404, 'Table not found');
+
+    [$ruleType, $scope, $classes, $maxCount, $label, $cellRefs] = parse_rule_fields($pdo, $body, $tb['id']);
+
+    $sortOrder = next_sort_order($pdo, 'raid_template_rules', 'table_id', $tb['id']);
+    $ins = $pdo->prepare('INSERT INTO raid_template_rules (table_id, rule_type, scope, classes, max_count, label, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    $ins->execute([$tb['id'], $ruleType, $scope, $classes, $maxCount, $label, $sortOrder]);
+    $ruleId = (int)$pdo->lastInsertId();
+
+    if ($cellRefs) {
+        $insC = $pdo->prepare('INSERT INTO raid_template_rule_cells (rule_id, row_id, column_id) VALUES (?, ?, ?)');
+        foreach ($cellRefs as [$rowId, $colId]) $insC->execute([$ruleId, $rowId, $colId]);
+    }
+
+    respond_structure($pdo, $tb['template_id']);
+}
+
+if ($action === 'update_rule') {
+    $rule = fetch_rule_owned($pdo, $tenant['id'], (int)($body['ruleId'] ?? 0));
+    if (!$rule) fail(404, 'Rule not found');
+
+    [$ruleType, $scope, $classes, $maxCount, $label, $cellRefs] = parse_rule_fields($pdo, $body, (int)$rule['table_id']);
+
+    $upd = $pdo->prepare('UPDATE raid_template_rules SET rule_type = ?, scope = ?, classes = ?, max_count = ?, label = ? WHERE id = ?');
+    $upd->execute([$ruleType, $scope, $classes, $maxCount, $label, $rule['id']]);
+
+    $pdo->prepare('DELETE FROM raid_template_rule_cells WHERE rule_id = ?')->execute([$rule['id']]);
+    if ($cellRefs) {
+        $insC = $pdo->prepare('INSERT INTO raid_template_rule_cells (rule_id, row_id, column_id) VALUES (?, ?, ?)');
+        foreach ($cellRefs as [$rowId, $colId]) $insC->execute([$rule['id'], $rowId, $colId]);
+    }
+
+    respond_structure($pdo, $rule['template_id']);
+}
+
+if ($action === 'delete_rule') {
+    $rule = fetch_rule_owned($pdo, $tenant['id'], (int)($body['ruleId'] ?? 0));
+    if (!$rule) fail(404, 'Rule not found');
+
+    $pdo->prepare('DELETE FROM raid_template_rule_cells WHERE rule_id = ?')->execute([$rule['id']]);
+    $pdo->prepare('DELETE FROM raid_template_rules WHERE id = ?')->execute([$rule['id']]);
+
+    respond_structure($pdo, $rule['template_id']);
 }
 
 if ($action === 'paint_cells') {

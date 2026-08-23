@@ -183,6 +183,7 @@ function fmtTime($t) {
     }
     td.cell.editable .toon-chip[draggable="true"] { cursor: grab; }
     td.cell.editable.drop-hover { background: rgba(88,101,242,0.18); }
+    td.cell.editable.drop-forbidden { background: rgba(220,80,80,0.28); outline: 2px solid #dc5050; outline-offset: -2px; }
     .chip-clear {
       display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;
       margin-left: 2px; border-radius: 50%; background: rgba(0,0,0,0.25); color: inherit; font-size: 11px;
@@ -428,6 +429,12 @@ const ATTENDANCE_SAVE_URL = <?= json_encode('/raids/attendance-save.php?slug=' .
 let stampToon = null;
 let importRows = [];
 
+// The in-flight drag payload, captured at dragstart so dragover can check assignment
+// rules against it -- dataTransfer.getData() is not readable during dragover in most
+// browsers, only at drop, so this same-page mirror is the only way to preview a
+// violation while the drag is still in progress.
+let dragPayload = null;
+
 // Editing lock: advisory only, warns concurrent raid managers off each
 // other's structural edits. Only relevant to users who can manage the raid.
 let lockHeldByMe = false;
@@ -663,11 +670,17 @@ function render() {
 
   if (CAN_MANAGE) {
     el.querySelectorAll('td.cell.editable').forEach(td => {
-      td.addEventListener('dragover', e => { e.preventDefault(); td.classList.add('drop-hover'); });
-      td.addEventListener('dragleave', () => td.classList.remove('drop-hover'));
+      td.addEventListener('dragover', e => {
+        e.preventDefault();
+        const violation = dragPayload ? clientRuleViolation(td, dragPayload) : null;
+        td.classList.toggle('drop-forbidden', !!violation);
+        td.classList.toggle('drop-hover', !violation);
+      });
+      td.addEventListener('dragleave', () => { td.classList.remove('drop-hover'); td.classList.remove('drop-forbidden'); });
       td.addEventListener('drop', e => {
         e.preventDefault();
         td.classList.remove('drop-hover');
+        td.classList.remove('drop-forbidden');
         handleDrop(td, e);
       });
       td.addEventListener('click', () => {
@@ -675,6 +688,8 @@ function render() {
         const cellId = parseInt(td.dataset.cellId, 10);
         const cur = findCellById(cellId);
         if (cur && cur.name) return; // stamp mode only fills empty slots
+        const violation = clientRuleViolation(td, { source: 'pool', toonKind: stampToon.toonKind, toonId: stampToon.toonId, pugName: stampToon.pugName, pugClass: stampToon.pugClass });
+        if (violation) { alert(violation); return; }
         saveCellPatch(cellId, { toonKind: stampToon.toonKind, toonId: stampToon.toonId, pugName: stampToon.pugName, pugClass: stampToon.pugClass });
       });
     });
@@ -688,9 +703,11 @@ function render() {
           pugName: chip.dataset.pugName || null,
           pugClass: chip.dataset.pugClass || null,
         };
+        dragPayload = payload;
         e.dataTransfer.setData('text/plain', JSON.stringify(payload));
         e.dataTransfer.effectAllowed = 'move';
       });
+      chip.addEventListener('dragend', () => { dragPayload = null; });
       chip.addEventListener('click', e => {
         if (!e.altKey) return;
         e.stopPropagation();
@@ -786,12 +803,66 @@ function handleDrop(td, e) {
   if (!payload) return;
   const toCellId = parseInt(td.dataset.cellId, 10);
   if (!toCellId) return;
+  const violation = clientRuleViolation(td, payload);
+  if (violation) { alert(violation); return; }
   if (payload.source === 'cell') {
     if (payload.cellId === toCellId) return;
     persistMove(payload.cellId, toCellId);
   } else if (payload.source === 'pool') {
     saveCellPatch(toCellId, { toonKind: payload.toonKind, toonId: payload.toonId, pugName: payload.pugName, pugClass: payload.pugClass });
   }
+}
+
+// Resolves a drag/stamp payload's class -- pool/pug payloads carry pugClass directly,
+// main/alt payloads need a roster lookup (mirrors cells-save.php's toon_class_for()).
+function toonClassForPayload(payload) {
+  if (payload.toonKind === 'pug') return payload.pugClass;
+  if (payload.toonKind === 'main') {
+    const m = roster.find(r => String(r.id) === String(payload.toonId));
+    return m ? m.class : null;
+  }
+  if (payload.toonKind === 'alt') {
+    for (const m of roster) {
+      const a = m.alts.find(x => String(x.id) === String(payload.toonId));
+      if (a) return a.class;
+    }
+    return null;
+  }
+  return null;
+}
+
+// Client-side mirror of cells-save.php's rule_violation() -- instant drag-over/drop
+// feedback only, not authoritative. The server re-checks on every assign/move and is
+// the real gate; this just avoids a round-trip and matches IO's instant-feedback feel.
+function clientRuleViolation(td, payload) {
+  const tb = findTable(parseInt(td.dataset.tableId, 10));
+  if (!tb || !tb.rules || !tb.rules.length) return null;
+  const rowId = parseInt(td.dataset.rowId, 10);
+  const columnId = parseInt(td.dataset.colId, 10);
+  const toonKind = payload.toonKind;
+  const toonId = payload.toonId;
+  const toonClass = toonClassForPayload(payload);
+  const toCellId = parseInt(td.dataset.cellId, 10) || 0;
+  const excludeCellIds = payload.source === 'cell' ? [payload.cellId, toCellId] : [toCellId];
+
+  for (const rule of tb.rules) {
+    const inScope = rule.scope === 'table' || rule.cellRefs.some(cr => cr.rowId === rowId && cr.columnId === columnId);
+    if (!inScope) continue;
+    if (rule.ruleType === 'class_restrict') {
+      const allowed = (rule.classes || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const cls = (toonClass || '').trim().toLowerCase();
+      if (!cls || !allowed.includes(cls)) return rule.label || `Only ${rule.classes} may be assigned here`;
+    } else if (rule.ruleType === 'max_count') {
+      if (toonKind === 'pug') continue; // no stable identity to count against
+      const max = rule.maxCount || 1;
+      const scopedCells = rule.scope === 'table'
+        ? Object.values(tb.cells)
+        : rule.cellRefs.map(cr => tb.cells[cr.rowId + '_' + cr.columnId]).filter(Boolean);
+      const count = scopedCells.filter(c => c && String(c.toonKind) === String(toonKind) && String(c.toonId) === String(toonId) && !excludeCellIds.includes(c.id)).length;
+      if (count >= max) return rule.label || `This toon can only be assigned ${max} time${max === 1 ? '' : 's'} here`;
+    }
+  }
+  return null;
 }
 
 // Ordered [main, alt1, alt2, ...] cycle list for whichever main/alt id owns this chip,
@@ -1123,9 +1194,11 @@ function renderPool() {
         pugName: chip.dataset.pugName || null,
         pugClass: chip.dataset.pugClass || null,
       };
+      dragPayload = payload;
       e.dataTransfer.setData('text/plain', JSON.stringify(payload));
       e.dataTransfer.effectAllowed = 'copy';
     });
+    chip.addEventListener('dragend', () => { dragPayload = null; });
     chip.addEventListener('click', e => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.stopPropagation();

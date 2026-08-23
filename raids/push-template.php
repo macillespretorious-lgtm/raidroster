@@ -310,6 +310,47 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
         }
     }
 
+    // --- Assignment rules ---
+    $stmt = $pdo->prepare('SELECT * FROM raid_rules WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt->execute([$raidTableId]);
+    $raidRules = array_map(fn($r) => $r + ['sourceId' => $r['source_rule_id'] !== null ? (int)$r['source_rule_id'] : null], $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmt = $pdo->prepare('SELECT * FROM raid_template_rules WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt->execute([$tplTableId]);
+    $tplRules = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    [$matchedRules, $ruleRaidOnly, $ruleTplOnly] = match_by_source($raidRules, $tplRules);
+
+    $ruleIdMap = []; // template rule id => raid rule id (matched + newly added)
+    foreach ($matchedRules as $raidRuleId => $tplRule) {
+        $ruleIdMap[(int)$tplRule['id']] = $raidRuleId;
+        $raidRule = null;
+        foreach ($raidRules as $r) { if ((int)$r['id'] === $raidRuleId) { $raidRule = $r; break; } }
+        $ruChanges = diff_scalar_fields($raidRule, $tplRule, ['rule_type', 'scope', 'classes', 'max_count', 'label', 'sort_order']);
+        if ($ruChanges) {
+            $diff['rules']['changed'][] = ['id' => $raidRuleId, 'label' => $raidRule['label'] ?: '(unlabeled rule)', 'changes' => array_keys($ruChanges)];
+            if ($apply) {
+                $pdo->prepare('UPDATE raid_rules SET rule_type = ?, scope = ?, classes = ?, max_count = ?, label = ?, sort_order = ? WHERE id = ?')
+                    ->execute([$tplRule['rule_type'], $tplRule['scope'], $tplRule['classes'], $tplRule['max_count'], $tplRule['label'], $tplRule['sort_order'], $raidRuleId]);
+            }
+        }
+    }
+    foreach ($ruleRaidOnly as $rr) {
+        $diff['rules']['removed'][] = ['id' => (int)$rr['id'], 'label' => $rr['label'] ?: '(unlabeled rule)'];
+        if ($apply && $confirmRemovals) {
+            $pdo->prepare('DELETE FROM raid_rule_cells WHERE rule_id = ?')->execute([$rr['id']]);
+            $pdo->prepare('DELETE FROM raid_rules WHERE id = ?')->execute([$rr['id']]);
+        }
+    }
+    foreach ($ruleTplOnly as $tr) {
+        $diff['rules']['added'][] = ['id' => (int)$tr['id'], 'label' => $tr['label'] ?: '(unlabeled rule)'];
+        if ($apply) {
+            $ins = $pdo->prepare('INSERT INTO raid_rules (table_id, rule_type, scope, classes, max_count, label, sort_order, source_rule_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            $ins->execute([$raidTableId, $tr['rule_type'], $tr['scope'], $tr['classes'], $tr['max_count'], $tr['label'], $tr['sort_order'], $tr['id']]);
+            $ruleIdMap[(int)$tr['id']] = (int)$pdo->lastInsertId();
+        }
+    }
+
     // --- Nested tables living inside each surviving group (matched or newly added) ---
     foreach ($groupIdMap as $tplGroupId => $raidGroupId) {
         $stmt = $pdo->prepare('SELECT * FROM raid_tables WHERE parent_group_id = ? ORDER BY sort_order, id');
@@ -382,6 +423,21 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
             if ($rId === null || $cId === null) continue;
             $insMerge->execute([$raidTableId, $rId, $cId, $m['colspan']]);
         }
+
+        // Rule cell scopes carry no assignment data either, so wholesale-resync them the
+        // same way, per matched/newly-added rule (ruleIdMap) using the row/column id maps.
+        foreach ($ruleIdMap as $tplRuleId => $raidRuleId) {
+            $pdo->prepare('DELETE FROM raid_rule_cells WHERE rule_id = ?')->execute([$raidRuleId]);
+            $stmt = $pdo->prepare('SELECT row_id, column_id FROM raid_template_rule_cells WHERE rule_id = ?');
+            $stmt->execute([$tplRuleId]);
+            $insRuleCell = $pdo->prepare('INSERT INTO raid_rule_cells (rule_id, row_id, column_id) VALUES (?, ?, ?)');
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $rc) {
+                $rId = $rowIdMap[(int)$rc['row_id']] ?? null;
+                $cId = $columnIdMap[(int)$rc['column_id']] ?? null;
+                if ($rId === null || $cId === null) continue;
+                $insRuleCell->execute([$raidRuleId, $rId, $cId]);
+            }
+        }
     }
 }
 
@@ -416,6 +472,7 @@ function sync_raid_from_template($pdo, $raid, $template, $apply, $confirmRemoval
         'groups'   => ['added' => [], 'removed' => [], 'changed' => []],
         'columns'  => ['added' => [], 'removed' => [], 'changed' => []],
         'rows'     => ['added' => [], 'removed' => [], 'changed' => []],
+        'rules'    => ['added' => [], 'removed' => [], 'changed' => []],
     ];
 
     $stmt = $pdo->prepare('SELECT * FROM raid_sections WHERE raid_id = ? ORDER BY sort_order, id');
@@ -489,7 +546,8 @@ if ($action === 'diff' || $action === 'apply') {
     }
 
     $hasRemovals = !empty($diff['sections']['removed']) || !empty($diff['tables']['removed'])
-        || !empty($diff['groups']['removed']) || !empty($diff['columns']['removed']) || !empty($diff['rows']['removed']);
+        || !empty($diff['groups']['removed']) || !empty($diff['columns']['removed']) || !empty($diff['rows']['removed'])
+        || !empty($diff['rules']['removed']);
 
     echo json_encode([
         'success' => true,

@@ -99,6 +99,23 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
         $insM->execute([$newTableId, $rowIdMap[$m['row_id']], $columnIdMap[$m['column_id']], $m['colspan']]);
     }
 
+    // Assignment rules (class-restrict / max-count), remapped the same way cell merges are above.
+    $stmtRule = $pdo->prepare('SELECT * FROM raid_template_rules WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtRule->execute([$tb['id']]);
+    $insRule = $pdo->prepare('INSERT INTO raid_rules (table_id, rule_type, scope, classes, max_count, label, sort_order, source_rule_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    $insRuleCell = $pdo->prepare('INSERT INTO raid_rule_cells (rule_id, row_id, column_id) VALUES (?, ?, ?)');
+    foreach ($stmtRule->fetchAll(PDO::FETCH_ASSOC) as $rule) {
+        $insRule->execute([$newTableId, $rule['rule_type'], $rule['scope'], $rule['classes'], $rule['max_count'], $rule['label'], $rule['sort_order'], $rule['id']]);
+        $newRuleId = (int)$pdo->lastInsertId();
+
+        $stmtRC = $pdo->prepare('SELECT row_id, column_id FROM raid_template_rule_cells WHERE rule_id = ?');
+        $stmtRC->execute([$rule['id']]);
+        foreach ($stmtRC->fetchAll(PDO::FETCH_ASSOC) as $rc) {
+            if (!isset($rowIdMap[$rc['row_id']]) || !isset($columnIdMap[$rc['column_id']])) continue;
+            $insRuleCell->execute([$newRuleId, $rowIdMap[$rc['row_id']], $columnIdMap[$rc['column_id']]]);
+        }
+    }
+
     // Nested boss-tables: for each column-group on this table, recurse into any template
     // tables parented to it (parent_group_id), attaching them under the newly-copied group.
     foreach ($groupRows as $grp) {

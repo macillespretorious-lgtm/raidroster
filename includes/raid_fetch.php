@@ -76,13 +76,36 @@ function fetch_table_full($pdo, $tb) {
         'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
     ], $stmtM->fetchAll(PDO::FETCH_ASSOC));
 
+    $stmtRule = $pdo->prepare('SELECT id, rule_type, scope, classes, max_count, label, sort_order FROM raid_rules WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtRule->execute([$tb['id']]);
+    $ruleRows = $stmtRule->fetchAll(PDO::FETCH_ASSOC);
+    $ruleCellsByRule = [];
+    if ($ruleRows) {
+        $ruleIds = array_column($ruleRows, 'id');
+        $placeholders = implode(',', array_fill(0, count($ruleIds), '?'));
+        $stmtRC = $pdo->prepare("SELECT rule_id, row_id, column_id FROM raid_rule_cells WHERE rule_id IN ($placeholders)");
+        $stmtRC->execute($ruleIds);
+        foreach ($stmtRC->fetchAll(PDO::FETCH_ASSOC) as $rc) {
+            $ruleCellsByRule[$rc['rule_id']][] = ['rowId' => (int)$rc['row_id'], 'columnId' => (int)$rc['column_id']];
+        }
+    }
+    $rules = array_map(fn($r) => [
+        'id' => (int)$r['id'],
+        'ruleType' => $r['rule_type'],
+        'scope' => $r['scope'],
+        'classes' => $r['classes'],
+        'maxCount' => $r['max_count'] !== null ? (int)$r['max_count'] : null,
+        'label' => $r['label'],
+        'cellRefs' => $ruleCellsByRule[$r['id']] ?? [],
+    ], $ruleRows);
+
     return [
         'id' => (int)$tb['id'], 'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
         'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
-        'cellMerges' => $cellMerges,
+        'cellMerges' => $cellMerges, 'rules' => $rules,
     ];
 }
 

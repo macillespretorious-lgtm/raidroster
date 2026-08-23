@@ -34,14 +34,81 @@ $action = $body['action'] ?? 'assign';
 
 function fetch_cell_owned($pdo, $cellId, $guildId) {
     $stmt = $pdo->prepare(
-        'SELECT c.id FROM raid_cells c
+        'SELECT c.id, c.table_id, c.row_id, c.column_id FROM raid_cells c
          JOIN raid_tables tb ON tb.id = c.table_id
          JOIN raid_sections s ON s.id = tb.section_id
          JOIN raids r ON r.id = s.raid_id
          WHERE c.id = ? AND r.guild_id = ?'
     );
     $stmt->execute([$cellId, $guildId]);
-    return $stmt->fetch();
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+function fetch_toon_class($pdo, $guildId, $toonKind, $toonId) {
+    if ($toonKind === 'main' && $toonId) {
+        $stmt = $pdo->prepare('SELECT class FROM toons WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$toonId, $guildId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? $row['class'] : null;
+    }
+    if ($toonKind === 'alt' && $toonId) {
+        $stmt = $pdo->prepare('SELECT class FROM toon_alts WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$toonId, $guildId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? $row['class'] : null;
+    }
+    return null;
+}
+
+function toon_class_for($pdo, $guildId, $toonKind, $toonId, $pugClass) {
+    if ($toonKind === 'pug') return $pugClass;
+    return fetch_toon_class($pdo, $guildId, $toonKind, $toonId);
+}
+
+// Checks class_restrict/max_count raid_rules scoped to (tableId, rowId, columnId) against the
+// toon about to occupy that cell. $excludeCellIds keeps a toon's own current cell(s) -- the one
+// being reassigned, or both sides of a move -- out of its own max_count tally.
+function rule_violation($pdo, $tableId, $rowId, $columnId, $toonKind, $toonId, $toonClass, array $excludeCellIds) {
+    if (!$toonKind || (!$toonId && $toonKind !== 'pug')) return null; // clearing a cell never violates a rule
+
+    $stmt = $pdo->prepare(
+        "SELECT r.* FROM raid_rules r
+         WHERE r.table_id = ?
+           AND (r.scope = 'table' OR EXISTS (
+               SELECT 1 FROM raid_rule_cells rc WHERE rc.rule_id = r.id AND rc.row_id = ? AND rc.column_id = ?
+           ))"
+    );
+    $stmt->execute([$tableId, $rowId, $columnId]);
+    $excludePlaceholders = implode(',', array_fill(0, count($excludeCellIds), '?'));
+
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $rule) {
+        if ($rule['rule_type'] === 'class_restrict') {
+            $allowed = array_map('strtolower', array_map('trim', explode(',', (string)$rule['classes'])));
+            $cls = strtolower(trim((string)$toonClass));
+            if ($cls === '' || !in_array($cls, $allowed, true)) {
+                return $rule['label'] ?: ('Only ' . $rule['classes'] . ' may be assigned here');
+            }
+        } elseif ($rule['rule_type'] === 'max_count') {
+            if ($toonKind === 'pug') continue; // no stable identity to count against
+            $max = $rule['max_count'] !== null ? (int)$rule['max_count'] : 1;
+            if ($rule['scope'] === 'table') {
+                $sql = "SELECT COUNT(*) FROM raid_cells WHERE table_id = ? AND toon_kind = ? AND toon_id = ? AND id NOT IN ($excludePlaceholders)";
+                $params = array_merge([$tableId, $toonKind, $toonId], $excludeCellIds);
+            } else {
+                $sql = "SELECT COUNT(*) FROM raid_cells c
+                        JOIN raid_rule_cells rc ON rc.row_id = c.row_id AND rc.column_id = c.column_id
+                        WHERE rc.rule_id = ? AND c.table_id = ? AND c.toon_kind = ? AND c.toon_id = ? AND c.id NOT IN ($excludePlaceholders)";
+                $params = array_merge([$rule['id'], $tableId, $toonKind, $toonId], $excludeCellIds);
+            }
+            $stmtCnt = $pdo->prepare($sql);
+            $stmtCnt->execute($params);
+            $count = (int)$stmtCnt->fetchColumn();
+            if ($count >= $max) {
+                return $rule['label'] ?: ('This toon can only be assigned ' . $max . ' time' . ($max === 1 ? '' : 's') . ' here');
+            }
+        }
+    }
+    return null;
 }
 
 // Resolves a client-supplied toon reference against the guild's own tables so a raid_cells
@@ -92,7 +159,9 @@ function fetch_cell_out($pdo, $cellId) {
 if ($action === 'move') {
     $fromCellId = isset($body['fromCellId']) ? (int)$body['fromCellId'] : 0;
     $toCellId   = isset($body['toCellId']) ? (int)$body['toCellId'] : 0;
-    if (!fetch_cell_owned($pdo, $fromCellId, $tenant['id']) || !fetch_cell_owned($pdo, $toCellId, $tenant['id'])) {
+    $fromCell = fetch_cell_owned($pdo, $fromCellId, $tenant['id']);
+    $toCell   = fetch_cell_owned($pdo, $toCellId, $tenant['id']);
+    if (!$fromCell || !$toCell) {
         http_response_code(404);
         echo json_encode(['error' => 'Cell not found']);
         exit;
@@ -103,6 +172,20 @@ if ($action === 'move') {
     $from = $stmt->fetch(PDO::FETCH_ASSOC);
     $stmt->execute([$toCellId]);
     $to = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    // 'to's occupant is moving into fromCell, and vice versa -- check each destination against
+    // the toon that's actually landing there, excluding both cells from the max_count tally.
+    $toClass = toon_class_for($pdo, $tenant['id'], $to['toon_kind'], $to['toon_id'], $to['pug_class']);
+    $fromClass = toon_class_for($pdo, $tenant['id'], $from['toon_kind'], $from['toon_id'], $from['pug_class']);
+
+    $violation = rule_violation($pdo, $fromCell['table_id'], $fromCell['row_id'], $fromCell['column_id'], $to['toon_kind'], $to['toon_id'], $toClass, [$fromCellId, $toCellId])
+        ?? rule_violation($pdo, $toCell['table_id'], $toCell['row_id'], $toCell['column_id'], $from['toon_kind'], $from['toon_id'], $fromClass, [$fromCellId, $toCellId]);
+    if ($violation) {
+        $pdo->rollBack();
+        http_response_code(422);
+        echo json_encode(['error' => $violation]);
+        exit;
+    }
 
     $upd = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ? WHERE id = ?');
     $upd->execute([$to['toon_id'], $to['toon_kind'], $to['pug_name'], $to['pug_class'], $fromCellId]);
@@ -180,12 +263,21 @@ if ($action === 'mark') {
 
 // default: assign
 $cellId = isset($body['cellId']) ? (int)$body['cellId'] : 0;
-if (!fetch_cell_owned($pdo, $cellId, $tenant['id'])) {
+$cell = fetch_cell_owned($pdo, $cellId, $tenant['id']);
+if (!$cell) {
     http_response_code(404);
     echo json_encode(['error' => 'Cell not found']);
     exit;
 }
 $resolved = resolve_toon_fields($pdo, $tenant['id'], $body['toonKind'] ?? null, $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null);
+
+$toonClass = toon_class_for($pdo, $tenant['id'], $resolved['toon_kind'], $resolved['toon_id'], $resolved['pug_class']);
+$violation = rule_violation($pdo, $cell['table_id'], $cell['row_id'], $cell['column_id'], $resolved['toon_kind'], $resolved['toon_id'], $toonClass, [$cellId]);
+if ($violation) {
+    http_response_code(422);
+    echo json_encode(['error' => $violation]);
+    exit;
+}
 
 $stmt = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ? WHERE id = ?');
 $stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_name'], $resolved['pug_class'], $cellId]);
