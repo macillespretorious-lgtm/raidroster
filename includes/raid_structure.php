@@ -7,8 +7,8 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
     $stmt = $pdo->prepare('SELECT * FROM raid_template_sections WHERE template_id = ? ORDER BY sort_order, id');
     $stmt->execute([$templateId]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $sec) {
-        $ins = $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order, note_enabled, note_text, color, source_section_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-        $ins->execute([$raidId, $sec['kind'], $sec['title'], $sec['sort_order'], $sec['note_enabled'], $sec['note_text'], $sec['color'], $sec['id']]);
+        $ins = $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order, note_enabled, note_text, color, bg_color, source_section_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $ins->execute([$raidId, $sec['kind'], $sec['title'], $sec['sort_order'], $sec['note_enabled'], $sec['note_text'], $sec['color'], $sec['bg_color'], $sec['id']]);
         $newSectionId = (int)$pdo->lastInsertId();
 
         $stmtT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
@@ -24,10 +24,10 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
 // $newParentGroupId is non-null, matching the section_id/parent_group_id invariant.
 function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $insT = $pdo->prepare(
-        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, default_column_width, source_table_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, bg_color, default_column_width, source_table_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['default_column_width'], $tb['id']]);
+    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['bg_color'], $tb['default_column_width'], $tb['id']]);
     $newTableId = (int)$pdo->lastInsertId();
 
     // Column groups first (columns FK into them), preserving parent_group_id links via an old->new id map.

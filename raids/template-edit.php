@@ -359,6 +359,11 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     body.paint-mode-active .colour-mode td.cell:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
     body.paint-mode-active .colour-mode .paint-section-head { cursor: crosshair; }
     body.paint-mode-active .colour-mode .paint-section-head:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
+    body.paint-mode-active .colour-mode .paint-section-body { cursor: crosshair; }
+    body.paint-mode-active .colour-mode .paint-table-title { cursor: crosshair; }
+    body.paint-mode-active .colour-mode .paint-table-title:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
+    body.paint-mode-active .colour-mode th.paint-corner { cursor: crosshair; }
+    body.paint-mode-active .colour-mode th.paint-corner:hover { background: rgba(240,192,74,0.25); }
 
     .stamp-badge { position: fixed; z-index: 4000; pointer-events: none; background: #f0c04a; color: #1a1400; font-size: 11.5px; font-weight: 800; padding: 4px 9px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); white-space: nowrap; }
     body.stamp-mode-active .data-td, body.stamp-mode-active .spacer-cell, body.stamp-mode-active .text-td {
@@ -1568,7 +1573,7 @@ function colourColumnBlock(chunkCols, tb) {
       return `<col${w ? ` style="width:${w}px;"` : ''}>`;
     }).join('') + `</colgroup>`;
 
-  const headerRow = `<tr><th class="paint-corner"></th>` + chunkCols.map(c =>
+  const headerRow = `<tr><th class="paint-corner" data-action="paint-table-bg" data-table-id="${tb.id}" title="Paint this table's background"></th>` + chunkCols.map(c =>
     `<th class="paint-col-th" data-action="paint-column" data-table-id="${tb.id}" data-col-id="${c.id}" title="Paint this ${c.kind === 'spacer' ? 'spacer column' : 'whole column'}">&#9632;</th>`
   ).join('') + `</tr>`;
 
@@ -1595,8 +1600,9 @@ function colourColumnBlock(chunkCols, tb) {
 function colourRenderTable(tb) {
   const blocks = chunkColumns(tb.columns).map(chunkCols => colourColumnBlock(chunkCols, tb)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
-  return `<div class="tbl-wrap">
-    ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
+  const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
+  return `<div class="tbl-wrap"${wrapStyle}>
+    ${tb.title ? `<div class="tbl-title paint-table-title" data-action="paint-table-header" data-table-id="${tb.id}"${titleStyle} title="Click to paint this table's title bar">${esc(tb.title)}</div>` : ''}
     ${blocks}
   </div>`;
 }
@@ -1605,10 +1611,11 @@ function renderColourSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
   const headColor = sec.color || meta.color;
   const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
+  const bodyStyle = sec.bgColor ? ` style="background:${sec.bgColor};"` : '';
   return `<div class="section-card">
     <div class="section-head paint-section-head" data-action="paint-section" data-section-id="${sec.id}" style="background:${headColor};" title="Click to paint this section header">${esc(sec.title)}</div>
     ${noteBar}
-    <div class="section-body">
+    <div class="section-body paint-section-body" data-action="paint-section-bg" data-section-id="${sec.id}"${bodyStyle} title="Click to paint this section's background">
       ${sec.tables.map(tb => colourRenderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
@@ -1668,7 +1675,37 @@ function wireColourPaint(el) {
       if (!paintArmed) return;
       const sectionId = parseInt(node.dataset.sectionId, 10);
       const color = paintErase ? null : paintColor;
-      call({ action: 'paint_section', id: sectionId, color });
+      call({ action: 'paint_section', id: sectionId, color, field: 'color' });
+    });
+  });
+
+  el.querySelectorAll('[data-action="paint-section-bg"]').forEach(node => {
+    node.addEventListener('click', e => {
+      // Guard against the section-body's own listener firing on a click that bubbled up
+      // from a child table/cell, which has already handled the click itself.
+      if (e.target !== node) return;
+      if (!paintArmed) return;
+      const sectionId = parseInt(node.dataset.sectionId, 10);
+      const color = paintErase ? null : paintColor;
+      call({ action: 'paint_section', id: sectionId, color, field: 'bgColor' });
+    });
+  });
+
+  el.querySelectorAll('[data-action="paint-table-header"]').forEach(node => {
+    node.addEventListener('click', () => {
+      if (!paintArmed) return;
+      const tableId = parseInt(node.dataset.tableId, 10);
+      const color = paintErase ? null : paintColor;
+      call({ action: 'paint_table', id: tableId, color, field: 'headerColor' });
+    });
+  });
+
+  el.querySelectorAll('[data-action="paint-table-bg"]').forEach(node => {
+    node.addEventListener('click', () => {
+      if (!paintArmed) return;
+      const tableId = parseInt(node.dataset.tableId, 10);
+      const color = paintErase ? null : paintColor;
+      call({ action: 'paint_table', id: tableId, color, field: 'bgColor' });
     });
   });
 

@@ -980,8 +980,9 @@ function renderTable(tb, noteEnabled) {
     </div>`).join('');
 
   const headBar = tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : '';
+  const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
 
-  return `<div class="tbl-wrap">
+  return `<div class="tbl-wrap"${wrapStyle}>
     ${headBar}
     ${blocks}
     ${nestedGroupsHtml}
@@ -1001,7 +1002,7 @@ function renderSection(sec) {
   return `<div class="section-card">
     <div class="section-head" style="background:${headColor};"><span>${meta.icon} ${esc(sec.title)}</span><div class="section-head-actions">${mrtBar}${clearBtn}</div></div>
     ${noteBar}
-    <div class="section-body">
+    <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
       ${sec.tables.map(tb => renderTable(tb, noteEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
@@ -1329,10 +1330,26 @@ function measureRaidCanvasHeight(m) {
   return h;
 }
 
+// Sums to the same height the render loop below actually draws for a section's table
+// stack, so a section-background fill (drawn before the tables, since canvas has no
+// transparency-to-parent like HTML's cascade) lines up with the real content bounds.
+function measureSectionBodyHeight(sec, m) {
+  const tables = flattenSectionTables(sec.tables);
+  if (!tables.length) return 24;
+  let h = 0;
+  for (const tb of tables) h += measureTableHeight(tb, m) + m.gapTable;
+  return h;
+}
+
 function drawTable(ctx, tb, m, startY) {
   let y = startY;
   const x0 = m.pad;
   const width = m.width - m.pad * 2;
+  const tableH = measureTableHeight(tb, m);
+  if (tableH > 0) {
+    ctx.fillStyle = tb.bgColor || '#141a2c';
+    ctx.fillRect(x0, y, width, tableH);
+  }
   if (tb.title) {
     ctx.fillStyle = tb.headerColor || '#1c2333';
     ctx.fillRect(x0, y, width, m.tableTitleH);
@@ -1382,8 +1399,6 @@ function drawTable(ctx, tb, m, startY) {
         continue;
       }
       const rowH = m.rowH;
-      ctx.fillStyle = '#141a2c';
-      ctx.fillRect(x0, y, width, rowH);
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.strokeRect(x0 + 0.5, y + 0.5, width - 1, rowH - 1);
       colBoxes.forEach(box => {
@@ -1444,6 +1459,11 @@ function renderRaidCanvas() {
     ctx.font = 'bold 15px Segoe UI, Arial, sans-serif';
     ctx.fillText(`${meta.icon} ${sec.title}`.trim(), m.pad + 10, y + m.sectionHeadH / 2);
     y += m.sectionHeadH + 6;
+
+    if (sec.bgColor) {
+      ctx.fillStyle = sec.bgColor;
+      ctx.fillRect(m.pad, y, m.width - m.pad * 2, measureSectionBodyHeight(sec, m));
+    }
 
     const tables = flattenSectionTables(sec.tables);
     if (!tables.length) {

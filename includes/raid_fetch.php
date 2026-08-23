@@ -76,6 +76,7 @@ function fetch_table_full($pdo, $tb) {
     return [
         'id' => (int)$tb['id'], 'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
+        'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
         'cellMerges' => $cellMerges,
@@ -96,7 +97,7 @@ function fetch_raid_structure($pdo, $raidId) {
         $stmtT->execute([$sec['id']]);
         $tables = array_map(fn($tb) => fetch_table_full($pdo, $tb), $stmtT->fetchAll(PDO::FETCH_ASSOC));
         $out[] = [
-            'id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'color' => $sec['color'], 'tables' => $tables,
+            'id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'color' => $sec['color'], 'bgColor' => $sec['bg_color'], 'tables' => $tables,
             'noteEnabled' => (bool)$sec['note_enabled'], 'noteText' => $sec['note_text'],
             'mrtExportEnabled' => (bool)$sec['mrt_export_enabled'],
         ];

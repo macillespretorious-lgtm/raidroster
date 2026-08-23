@@ -227,6 +227,7 @@ function fetch_table_full($pdo, $tb) {
         'id' => (int)$tb['id'],
         'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
+        'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'columns' => $columns,
         'rows' => $rows,
@@ -254,6 +255,7 @@ function fetch_structure($pdo, $templateId) {
             'kind' => $sec['kind'],
             'title' => $sec['title'],
             'color' => $sec['color'],
+            'bgColor' => $sec['bg_color'],
             'tables' => $tablesOut,
             'noteEnabled' => (bool)$sec['note_enabled'],
             'noteText' => $sec['note_text'],
@@ -488,11 +490,23 @@ if ($action === 'set_section_mrt_export') {
 if ($action === 'paint_section') {
     $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$sec) fail(404, 'Section not found');
+    $field = ($body['field'] ?? 'color') === 'bgColor' ? 'bg_color' : 'color';
     $color = $body['color'] ?? null;
     if ($color !== null && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) fail(400, 'Invalid color');
-    $stmt = $pdo->prepare('UPDATE raid_template_sections SET color = ? WHERE id = ?');
+    $stmt = $pdo->prepare("UPDATE raid_template_sections SET $field = ? WHERE id = ?");
     $stmt->execute([$color, $sec['id']]);
     respond_structure($pdo, $sec['template_id']);
+}
+
+if ($action === 'paint_table') {
+    $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
+    if (!$tb) fail(404, 'Table not found');
+    $field = ($body['field'] ?? 'headerColor') === 'bgColor' ? 'bg_color' : 'header_color';
+    $color = $body['color'] ?? null;
+    if ($color !== null && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) fail(400, 'Invalid color');
+    $stmt = $pdo->prepare("UPDATE raid_template_tables SET $field = ? WHERE id = ?");
+    $stmt->execute([$color, $tb['id']]);
+    respond_structure($pdo, $tb['template_id']);
 }
 
 if ($action === 'delete_section') {
