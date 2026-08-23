@@ -1042,10 +1042,8 @@ function render() {
       }
       if (act === 'row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
       if (act === 'row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
-      if (act === 'table-header-color') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, headerColor: node.value }); }
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
       if (act === 'cell-text') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: node.value, bgColor: cell.bgColor, textColor: cell.textColor }); }
-      if (act === 'cell-bg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: node.value, textColor: cell.textColor }); }
       if (act === 'cell-fg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: node.value }); }
       if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
       if (act === 'merge-header') call({ action: 'merge_header', id });
@@ -1298,7 +1296,6 @@ function bodyCellsForRow(r, chunkCols, tb) {
         ${overrideTag}
         <input class="lbl-input cell-text-input" data-action="cell-text" data-row-id="${r.id}" data-col-id="${c.id}" placeholder="Text" value="${escAttr(cell.textContent || '')}">
         <div class="cell-color-row">
-          <input type="color" class="swatch" data-action="cell-bg" data-row-id="${r.id}" data-col-id="${c.id}" value="${cell.bgColor || '#1a2338'}" title="Background color">
           <input type="color" class="swatch" data-action="cell-fg" data-row-id="${r.id}" data-col-id="${c.id}" value="${cell.textColor || '#e8ecff'}" title="Text color">
         </div>
         ${mergeActions}
@@ -1369,7 +1366,6 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
     <div class="tbl-head" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="${headerStyle}">
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
-      <input type="color" class="swatch" draggable="false" data-action="table-header-color" data-id="${tb.id}" value="${tb.headerColor || '#1a2338'}" title="Table header bar color">
       <div class="tbl-sizing">Col w<input type="number" class="width-input" draggable="false" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
