@@ -7,8 +7,8 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
     $stmt = $pdo->prepare('SELECT * FROM raid_template_sections WHERE template_id = ? ORDER BY sort_order, id');
     $stmt->execute([$templateId]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $sec) {
-        $ins = $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order, note_enabled, note_text, source_section_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        $ins->execute([$raidId, $sec['kind'], $sec['title'], $sec['sort_order'], $sec['note_enabled'], $sec['note_text'], $sec['id']]);
+        $ins = $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order, note_enabled, note_text, color, source_section_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $ins->execute([$raidId, $sec['kind'], $sec['title'], $sec['sort_order'], $sec['note_enabled'], $sec['note_text'], $sec['color'], $sec['id']]);
         $newSectionId = (int)$pdo->lastInsertId();
 
         $stmtT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');

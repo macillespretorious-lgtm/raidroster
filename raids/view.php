@@ -990,6 +990,7 @@ function renderTable(tb, noteEnabled) {
 
 function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
+  const headColor = sec.color || meta.color;
   const clearBtn = CAN_MANAGE ? `<button type="button" class="section-clear-btn" data-section-id="${sec.id}" title="Clear all assignments in this section">Clear section</button>` : '';
   const mrtBar = sec.mrtExportEnabled ? `<div class="mrt-export-bar">
       ${MRT_SERVERS.map(s => `<button type="button" class="btn-mrt-export" data-mrt-server="${s.key}" data-section-id="${sec.id}">${s.label}</button>`).join('')}
@@ -998,7 +999,7 @@ function renderSection(sec) {
   const noteEnabled = !!sec.noteEnabled;
   const noteBar = (noteEnabled && sec.noteText) ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   return `<div class="section-card">
-    <div class="section-head" style="background:${meta.color};"><span>${meta.icon} ${esc(sec.title)}</span><div class="section-head-actions">${mrtBar}${clearBtn}</div></div>
+    <div class="section-head" style="background:${headColor};"><span>${meta.icon} ${esc(sec.title)}</span><div class="section-head-actions">${mrtBar}${clearBtn}</div></div>
     ${noteBar}
     <div class="section-body">
       ${sec.tables.map(tb => renderTable(tb, noteEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
@@ -1436,9 +1437,10 @@ function renderRaidCanvas() {
   let y = m.pad;
   for (const sec of sections) {
     const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
-    ctx.fillStyle = meta.color;
+    const headColor = sec.color || meta.color;
+    ctx.fillStyle = headColor;
     ctx.fillRect(m.pad, y, m.width - m.pad * 2, m.sectionHeadH);
-    ctx.fillStyle = contrastText(meta.color);
+    ctx.fillStyle = contrastText(headColor);
     ctx.font = 'bold 15px Segoe UI, Arial, sans-serif';
     ctx.fillText(`${meta.icon} ${sec.title}`.trim(), m.pad + 10, y + m.sectionHeadH / 2);
     y += m.sectionHeadH + 6;

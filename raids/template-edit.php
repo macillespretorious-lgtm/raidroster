@@ -357,6 +357,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       cursor: crosshair !important;
     }
     body.paint-mode-active .colour-mode td.cell:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
+    body.paint-mode-active .colour-mode .paint-section-head { cursor: crosshair; }
+    body.paint-mode-active .colour-mode .paint-section-head:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
 
     .stamp-badge { position: fixed; z-index: 4000; pointer-events: none; background: #f0c04a; color: #1a1400; font-size: 11.5px; font-weight: 800; padding: 4px 9px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); white-space: nowrap; }
     body.stamp-mode-active .data-td, body.stamp-mode-active .spacer-cell, body.stamp-mode-active .text-td {
@@ -1601,9 +1603,10 @@ function colourRenderTable(tb) {
 
 function renderColourSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
+  const headColor = sec.color || meta.color;
   const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   return `<div class="section-card">
-    <div class="section-head" style="background:${meta.color};">${esc(sec.title)}</div>
+    <div class="section-head paint-section-head" data-action="paint-section" data-section-id="${sec.id}" style="background:${headColor};" title="Click to paint this section header">${esc(sec.title)}</div>
     ${noteBar}
     <div class="section-body">
       ${sec.tables.map(tb => colourRenderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
@@ -1660,6 +1663,15 @@ function renderPaintBar() {
 // mouseup listeners below, registered once outside render() since this element is rebuilt
 // on every render()).
 function wireColourPaint(el) {
+  el.querySelectorAll('[data-action="paint-section"]').forEach(node => {
+    node.addEventListener('click', () => {
+      if (!paintArmed) return;
+      const sectionId = parseInt(node.dataset.sectionId, 10);
+      const color = paintErase ? null : paintColor;
+      call({ action: 'paint_section', id: sectionId, color });
+    });
+  });
+
   el.querySelectorAll('[data-action="paint-row"], [data-action="paint-column"]').forEach(node => {
     node.addEventListener('click', () => {
       if (!paintArmed) return;
