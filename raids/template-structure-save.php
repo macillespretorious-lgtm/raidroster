@@ -632,6 +632,38 @@ if ($action === 'set_cell_kind_override') {
     respond_structure($pdo, $col['template_id']);
 }
 
+if ($action === 'paint_cells') {
+    $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['tableId'] ?? 0));
+    if (!$tb) fail(404, 'Table not found');
+
+    $color = $body['color'] ?? null;
+    if ($color !== null && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) fail(400, 'Invalid color');
+
+    $cells = is_array($body['cells'] ?? null) ? $body['cells'] : [];
+    if (!$cells) respond_structure($pdo, $tb['template_id']);
+
+    $stmtR = $pdo->prepare('SELECT id FROM raid_template_rows WHERE table_id = ? AND kind != \'spacer\'');
+    $stmtR->execute([$tb['id']]);
+    $validRows = array_flip(array_map('intval', $stmtR->fetchAll(PDO::FETCH_COLUMN)));
+    $stmtC = $pdo->prepare('SELECT id FROM raid_template_columns WHERE table_id = ? AND kind != \'spacer\'');
+    $stmtC->execute([$tb['id']]);
+    $validCols = array_flip(array_map('intval', $stmtC->fetchAll(PDO::FETCH_COLUMN)));
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, bg_color)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE bg_color = VALUES(bg_color)'
+    );
+    foreach ($cells as $c) {
+        $rowId = (int)($c['rowId'] ?? 0);
+        $colId = (int)($c['columnId'] ?? 0);
+        if (!isset($validRows[$rowId]) || !isset($validCols[$colId])) continue;
+        $stmt->execute([$tb['id'], $rowId, $colId, $color]);
+    }
+
+    respond_structure($pdo, $tb['template_id']);
+}
+
 if ($action === 'merge_header' || $action === 'split_header') {
     $col = fetch_column_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$col) fail(404, 'Column not found');

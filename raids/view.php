@@ -928,7 +928,8 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
     } else {
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
-      out.push(`<td${colspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}">${chipHtml(cell, noteEnabled)}</td>`);
+      const bgStyle = (cell && cell.bgColor) ? ` style="background:${cell.bgColor};"` : '';
+      out.push(`<td${colspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
     }
     i += span;
   }
@@ -1384,6 +1385,7 @@ function drawTable(ctx, tb, m, startY) {
           ctx.fillText((cell && cell.textContent) || '', box.x + 6, y + rowH / 2, box.w - 10);
           return;
         }
+        if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
         if (cell && cell.name) {
           const color = classColor(cell.class);
           const pad = 3;

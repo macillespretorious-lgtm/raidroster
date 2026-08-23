@@ -308,6 +308,49 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .mode-placeholder h2 { color: #e8ecff; font-size: 18px; margin-bottom: 6px; }
     .mode-placeholder p { font-size: 13.5px; }
 
+    /* Colour/Merge mode: read-only rendering ported from raids/view.php, scoped under
+       .colour-mode so its class names don't collide with the Layout-mode editing styles
+       (same rationale as .preview-modal above). Tables render "as they will appear on a
+       raid page" -- no drag handles, rename inputs, or add/delete controls -- with a thin
+       row/column header strip added purely as paint-target affordances for this tool. */
+    .paint-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
+    .paint-bar-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #7f8bad; }
+    .paint-swatches { display: flex; gap: 5px; flex-wrap: wrap; }
+    .paint-swatch { width: 22px; height: 22px; border-radius: 6px; border: 2px solid rgba(255,255,255,0.15); padding: 0; cursor: pointer; }
+    .paint-swatch:hover { border-color: rgba(255,255,255,0.4); }
+    .paint-swatch.active { border-color: #fff; box-shadow: 0 0 0 2px #5865f2; }
+    .paint-tool-btn { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #c7cef2; border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+    .paint-tool-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
+    .paint-tool-btn.active { background: #e05555; border-color: #e05555; color: #fff; }
+    .paint-bar-hint, .paint-armed-hint { font-size: 11.5px; color: #7f8bad; }
+    .paint-stop-btn { background: none; border: 1px solid rgba(255,255,255,0.25); color: #e8ecff; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; margin-left: 4px; }
+    .paint-stop-btn:hover { border-color: rgba(255,255,255,0.5); }
+
+    .colour-mode .section-card { border-radius: 12px; overflow: hidden; margin-bottom: 18px; border: 1px solid rgba(255,255,255,0.08); }
+    .colour-mode .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
+    .colour-mode .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .colour-mode .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
+    .colour-mode .tbl-wrap { min-width: 0; max-width: 100%; }
+    .colour-mode .tbl-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0; }
+    .colour-mode .grid-scroll { overflow-x: auto; }
+    .colour-mode .grid-scroll + .grid-scroll { margin-top: 2px; }
+    .colour-mode table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
+    .colour-mode table.grid th, .colour-mode table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
+    .colour-mode table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
+    .colour-mode td.cell { min-width: 90px; user-select: none; }
+    .colour-mode td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
+    .colour-mode .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
+    .colour-mode .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
+    .colour-mode th.paint-corner { background: none; border-color: transparent; }
+    .colour-mode th.paint-row-th, .colour-mode th.paint-col-th { color: #6b7595; font-size: 12px; }
+    .colour-mode th.paint-row-th { width: 22px; padding: 8px 4px; }
+    body.paint-mode-active .colour-mode th.paint-row-th, body.paint-mode-active .colour-mode th.paint-col-th { cursor: pointer; }
+    body.paint-mode-active .colour-mode th.paint-row-th:hover, body.paint-mode-active .colour-mode th.paint-col-th:hover { background: rgba(88,101,242,0.18); color: #c7cef2; }
+    body.paint-mode-active .colour-mode td.cell, body.paint-mode-active .colour-mode th.paint-row-th, body.paint-mode-active .colour-mode th.paint-col-th {
+      cursor: crosshair !important;
+    }
+    body.paint-mode-active .colour-mode td.cell:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
+
     .stamp-badge { position: fixed; z-index: 4000; pointer-events: none; background: #f0c04a; color: #1a1400; font-size: 11.5px; font-weight: 800; padding: 4px 9px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); white-space: nowrap; }
     body.stamp-mode-active .data-td, body.stamp-mode-active .spacer-cell, body.stamp-mode-active .text-td {
       cursor: crosshair !important;
@@ -340,6 +383,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         <div class="tabs" id="tabsEl"></div>
         <div class="angry-inline" id="angryInlineEl"></div>
       </div>
+      <div class="paint-bar" id="paintBarEl" hidden></div>
     </div>
 
     <div id="modeBodyEl">
@@ -411,6 +455,16 @@ let editMode = 'layout';
 // is picked, cellOverrideStamp holds it and every click on a template grid cell applies
 // it (multi-select), until a right-click clears the stamp and exits the tool.
 let cellOverrideStamp = null;
+
+// Colour/Merge mode's paint tool: once armed (a palette swatch or the eraser picked),
+// every click/drag on a read-only grid cell, or click on a row/column paint header, applies
+// paintColor (or clears it, when paintErase) via the paint_cells action. paintErase and
+// paintColor are independent so the last-picked color is remembered across an erase.
+let paintArmed = false;
+let paintColor = '#e05555';
+let paintErase = false;
+let paintDragging = false;
+let paintDragTouched = null; // Set of "tableId_rowId_colId" strings touched this drag gesture
 
 // Editing lock: purely advisory (everyone on this page already passed the admin
 // role check), it exists to warn concurrent admins off each other's edits, not
@@ -745,6 +799,8 @@ function setMode(m) {
   editMode = m;
   cellOverrideStamp = null;
   updateStampBadge();
+  paintArmed = false;
+  document.body.classList.remove('paint-mode-active');
   render();
 }
 
@@ -795,13 +851,48 @@ function render() {
   const tabsRowEl = document.getElementById('tabsRowEl');
   const panelsEl0 = document.getElementById('panelsEl');
   const placeholderEl = document.getElementById('modePlaceholderEl');
-  if (editMode !== 'layout') {
-    tabsRowEl.hidden = true; panelsEl0.hidden = true;
+  const paintBarEl = document.getElementById('paintBarEl');
+
+  if (editMode === 'logic') {
+    tabsRowEl.hidden = true; panelsEl0.hidden = true; paintBarEl.hidden = true;
     placeholderEl.hidden = false;
     const modeInfo = EDIT_MODES.find(m => m.key === editMode);
     placeholderEl.innerHTML = `<h2>${esc(modeInfo.label)}</h2><p>Coming soon — we'll add these tools shortly.</p>`;
     return;
   }
+
+  if (editMode === 'colourMerge') {
+    placeholderEl.hidden = true;
+    paintBarEl.hidden = false;
+    renderPaintBar();
+
+    const TABS = currentTabs();
+    if (!TABS.includes(activeTab)) activeTab = TABS[0] || null;
+
+    tabsRowEl.hidden = false;
+    document.getElementById('angryInlineEl').innerHTML = '';
+    const tabsEl = document.getElementById('tabsEl');
+    tabsEl.innerHTML = TABS.map(k => `<button type="button" class="tab-btn ${k === activeTab ? 'active' : ''}" data-tab="${escAttr(k)}">${esc(tabLabel(k))}</button>`).join('');
+    tabsEl.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        history.replaceState(null, '', '#' + encodeURIComponent(activeTab));
+        render();
+      });
+    });
+
+    panelsEl0.hidden = false;
+    panelsEl0.innerHTML = TABS.length ? TABS.map(k => {
+      const secs = sections.filter(s => s.kind === k);
+      const body = secs.length ? secs.map(sec => renderColourSection(sec)).join('') : '<p class="empty">No sections in this tab.</p>';
+      return `<div class="tab-panel colour-mode ${k === activeTab ? 'active' : ''}" data-panel="${escAttr(k)}">${body}</div>`;
+    }).join('') : '<p class="empty">No tabs yet &mdash; switch to Layout mode to start building this template.</p>';
+
+    wireColourPaint(panelsEl0);
+    return;
+  }
+
+  paintBarEl.hidden = true;
   tabsRowEl.hidden = false; panelsEl0.hidden = false; placeholderEl.hidden = true;
 
   const TABS = currentTabs();
@@ -1414,6 +1505,186 @@ function renderPreviewSection(sec) {
   </div>`;
 }
 
+// Colour/Merge mode: same read-only rendering as the preview above (tables "as they will
+// appear on a raid page", no editing controls), but with data-row-id/data-col-id/data-table-id
+// kept on every paintable cell, plus a thin row/column header strip whose only job is to be
+// a click target for "paint this whole row/column" -- an affordance that doesn't exist on the
+// raid page itself, added here purely for the paint tool.
+function colourBodyCellsForRow(r, chunkCols, tb) {
+  const mergeByCol = {};
+  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+  const out = [];
+  let i = 0;
+  while (i < chunkCols.length) {
+    const c = chunkCols[i];
+    const cell = cellFor(tb, r.id, c.id);
+    const eff = effectiveKind(r, c, cell);
+    if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
+    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const bg = cell.bgColor || null;
+    const style = eff === 'text'
+      ? `background:${bg || 'transparent'};color:${cell.textColor || 'inherit'};`
+      : (bg ? `background:${bg};` : '');
+    const content = eff === 'text' ? esc(cell.textContent || '') : '<span class="empty-slot">+</span>';
+    out.push(`<td${colspanAttr} class="cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="${style}">${content}</td>`);
+    i += span;
+  }
+  return out.join('');
+}
+
+function colourColumnBlock(chunkCols, tb) {
+  const colgroup = `<colgroup><col style="width:22px;">` +
+    chunkCols.map(c => {
+      const w = colWidthPx(c, tb);
+      return `<col${w ? ` style="width:${w}px;"` : ''}>`;
+    }).join('') + `</colgroup>`;
+
+  const headerRow = `<tr><th class="paint-corner"></th>` + chunkCols.map(c => c.kind === 'spacer'
+    ? `<th class="spacer-th"></th>`
+    : `<th class="paint-col-th" data-action="paint-column" data-table-id="${tb.id}" data-col-id="${c.id}" title="Paint this whole column">${esc(c.label || '·')}</th>`
+  ).join('') + `</tr>`;
+
+  const bodyRows = tb.rows.map(r => {
+    if (r.kind === 'spacer') {
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell"></td><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
+    }
+    const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
+    const rowHeader = `<th class="paint-row-th" data-action="paint-row" data-table-id="${tb.id}" data-row-id="${r.id}" title="Paint this whole row">&#9632;</th>`;
+    return `<tr${heightAttr}>${rowHeader}${colourBodyCellsForRow(r, chunkCols, tb)}</tr>`;
+  }).join('');
+
+  return `<div class="grid-scroll">
+      <table class="grid">
+        ${colgroup}
+        ${headerRow}
+        ${bodyRows}
+      </table>
+    </div>`;
+}
+
+function colourRenderTable(tb) {
+  const blocks = chunkColumns(tb.columns).map(chunkCols => colourColumnBlock(chunkCols, tb)).join('');
+  const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
+  return `<div class="tbl-wrap">
+    ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
+    ${blocks}
+  </div>`;
+}
+
+function renderColourSection(sec) {
+  const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
+  const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
+  return `<div class="section-card">
+    <div class="section-head" style="background:${meta.color};">${esc(sec.title)}</div>
+    ${noteBar}
+    <div class="section-body">
+      ${sec.tables.map(tb => colourRenderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
+    </div>
+  </div>`;
+}
+
+const PAINT_PRESETS = ['#e05555', '#f0a030', '#f0c04a', '#4caf6a', '#4ac0c0', '#5865f2', '#9b59d0', '#e86ec2', '#c7cef2', '#1a2338'];
+
+function renderPaintBar() {
+  const el = document.getElementById('paintBarEl');
+  const swatches = PAINT_PRESETS.map(c =>
+    `<button type="button" class="paint-swatch ${paintArmed && !paintErase && paintColor.toLowerCase() === c ? 'active' : ''}" data-action="pick-paint-color" data-color="${c}" style="background:${c};" title="${c}"></button>`
+  ).join('');
+  const hint = paintArmed
+    ? `<span class="paint-armed-hint">${paintErase ? 'Erasing' : 'Painting'} — click, drag, or click a row/column header below. <button type="button" class="paint-stop-btn" data-action="stop-paint">Stop</button></span>`
+    : `<span class="paint-bar-hint">Pick a color, then click, drag, or click a row/column header on the tables below.</span>`;
+  el.innerHTML = `
+    <span class="paint-bar-label">Paint</span>
+    <div class="paint-swatches">${swatches}</div>
+    <input type="color" class="swatch" id="paintCustomColor" value="${paintColor}" title="Custom color">
+    <button type="button" class="paint-tool-btn ${paintArmed && paintErase ? 'active' : ''}" data-action="pick-paint-erase" title="Clear color from painted cells">Eraser</button>
+    ${hint}`;
+  el.querySelectorAll('[data-action]').forEach(node => {
+    node.addEventListener('click', () => {
+      const act = node.dataset.action;
+      if (act === 'pick-paint-color') { paintColor = node.dataset.color; paintErase = false; paintArmed = true; document.body.classList.add('paint-mode-active'); renderPaintBar(); }
+      if (act === 'pick-paint-erase') { paintErase = true; paintArmed = true; document.body.classList.add('paint-mode-active'); renderPaintBar(); }
+      if (act === 'stop-paint') { paintArmed = false; document.body.classList.remove('paint-mode-active'); renderPaintBar(); }
+    });
+  });
+  document.getElementById('paintCustomColor').addEventListener('input', e => {
+    // Only update state while the native picker is open -- re-rendering (which rebuilds
+    // this very input) is deferred to 'change' below so it doesn't interrupt the picker.
+    paintColor = e.target.value; paintErase = false; paintArmed = true; document.body.classList.add('paint-mode-active');
+  });
+  document.getElementById('paintCustomColor').addEventListener('change', () => {
+    renderPaintBar();
+  });
+}
+
+// Paint tool wiring for the read-only Colour/Merge grid: row/column headers apply on a
+// single click (no drag); individual cells support both a plain click and a click-drag
+// gesture that accumulates every cell the cursor passes over, applying color to all of them
+// in one batched paint_cells call per table on mouseup (see the document-level mousemove/
+// mouseup listeners below, registered once outside render() since this element is rebuilt
+// on every render()).
+function wireColourPaint(el) {
+  el.querySelectorAll('[data-action="paint-row"], [data-action="paint-column"]').forEach(node => {
+    node.addEventListener('click', () => {
+      if (!paintArmed) return;
+      const tb = findTable(parseInt(node.dataset.tableId, 10));
+      if (!tb) return;
+      const color = paintErase ? null : paintColor;
+      let cells;
+      if (node.dataset.action === 'paint-row') {
+        const rowId = parseInt(node.dataset.rowId, 10);
+        const row = tb.rows.find(r => r.id === rowId);
+        cells = tb.columns.filter(c => c.kind !== 'spacer').map(c => ({ rowId, columnId: c.id }));
+        if (row && row.kind === 'spacer') cells = [];
+      } else {
+        const columnId = parseInt(node.dataset.colId, 10);
+        cells = tb.rows.filter(r => r.kind !== 'spacer').map(r => ({ rowId: r.id, columnId }));
+      }
+      if (cells.length) call({ action: 'paint_cells', tableId: tb.id, color, cells });
+    });
+  });
+
+  el.querySelectorAll('td.cell[data-row-id][data-col-id]').forEach(td => {
+    td.addEventListener('mousedown', e => {
+      if (!paintArmed || e.button !== 0) return;
+      e.preventDefault();
+      paintDragging = true;
+      paintDragTouched = new Set();
+      paintCell(td);
+    });
+  });
+}
+
+function paintCell(td) {
+  const key = `${td.dataset.tableId}_${td.dataset.rowId}_${td.dataset.colId}`;
+  if (paintDragTouched.has(key)) return;
+  paintDragTouched.add(key);
+  td.style.background = paintErase ? 'transparent' : paintColor;
+}
+
+document.addEventListener('mousemove', e => {
+  if (!paintDragging) return;
+  const td = e.target.closest('td.cell[data-row-id][data-col-id]');
+  if (td && document.getElementById('panelsEl').contains(td)) paintCell(td);
+});
+
+document.addEventListener('mouseup', () => {
+  if (!paintDragging) return;
+  paintDragging = false;
+  const touched = paintDragTouched;
+  paintDragTouched = null;
+  if (!touched || !touched.size) return;
+  const byTable = new Map();
+  touched.forEach(key => {
+    const [tableId, rowId, columnId] = key.split('_').map(Number);
+    if (!byTable.has(tableId)) byTable.set(tableId, []);
+    byTable.get(tableId).push({ rowId, columnId });
+  });
+  const color = paintErase ? null : paintColor;
+  byTable.forEach((cells, tableId) => call({ action: 'paint_cells', tableId, color, cells }));
+});
+
 function openPreview(secId) {
   const sec = sections.find(s => s.id === secId);
   if (!sec) return;
@@ -1638,6 +1909,16 @@ document.addEventListener('contextmenu', e => {
   e.preventDefault();
   cellOverrideStamp = null;
   updateStampBadge();
+});
+
+document.addEventListener('contextmenu', e => {
+  if (!paintArmed) return;
+  e.preventDefault();
+  paintArmed = false;
+  paintDragging = false;
+  paintDragTouched = null;
+  document.body.classList.remove('paint-mode-active');
+  renderPaintBar();
 });
 
 document.addEventListener('mousemove', e => {
