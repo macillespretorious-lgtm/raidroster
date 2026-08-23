@@ -829,6 +829,19 @@ function effectiveKind(row, col, cell) {
   return 'general';
 }
 
+// Kept in sync with raids/template-edit.php's CELL_FONT_STACKS -- small preset of generic
+// web-safe stacks so the HTML page and the canvas export (drawn client-side below) render identically.
+const CELL_FONT_STACKS = {
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: 'Consolas, "Courier New", monospace',
+  display: 'Impact, "Arial Black", sans-serif',
+};
+function cellTextStyle(cell) {
+  const weight = cell && cell.bold ? 'font-weight:700;' : '';
+  const family = cell && CELL_FONT_STACKS[cell.font] ? `font-family:${CELL_FONT_STACKS[cell.font]};` : '';
+  return weight + family;
+}
+
 let _measureCtx = null;
 function measureTextPx(text, font) {
   if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
@@ -928,7 +941,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     if (eff === 'text') {
-      const style = `background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};`;
+      const style = `background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr} class="cell text-cell" style="${style}">${esc(cell ? cell.textContent : '')}</td>`);
     } else {
       const cellIdAttr = cell ? cell.id : '';
@@ -1412,7 +1425,8 @@ function drawTable(ctx, tb, m, startY) {
         if (eff === 'text') {
           if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
           ctx.fillStyle = (cell && cell.textColor) || '#c7cfe8';
-          ctx.font = '11px Segoe UI, Arial, sans-serif';
+          const fontFamily = (cell && CELL_FONT_STACKS[cell.font]) || 'Segoe UI, Arial, sans-serif';
+          ctx.font = `${(cell && cell.bold) ? 'bold ' : ''}11px ${fontFamily}`;
           ctx.fillText((cell && cell.textContent) || '', box.x + 6, y + rowH / 2, box.w - 10);
           return;
         }

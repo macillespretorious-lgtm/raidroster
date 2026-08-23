@@ -212,7 +212,7 @@ function fetch_table_full($pdo, $tb) {
         'colspan' => (int)$m['colspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, kind_override FROM raid_template_cells WHERE table_id = ?');
+    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, kind_override FROM raid_template_cells WHERE table_id = ?');
     $stmt->execute([$tb['id']]);
     $cells = array_map(fn($c) => [
         'rowId' => (int)$c['row_id'],
@@ -220,6 +220,8 @@ function fetch_table_full($pdo, $tb) {
         'textContent' => $c['text_content'],
         'bgColor' => $c['bg_color'],
         'textColor' => $c['text_color'],
+        'bold' => (bool)$c['bold'],
+        'font' => $c['font'],
         'kindOverride' => $c['kind_override'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
@@ -626,13 +628,15 @@ if ($action === 'update_cell') {
     $textContent = array_key_exists('textContent', $body) ? substr(trim((string)$body['textContent']), 0, 500) : '';
     $bgColor = !empty($body['bgColor']) ? $body['bgColor'] : null;
     $textColor = !empty($body['textColor']) ? $body['textColor'] : null;
+    $bold = !empty($body['bold']) ? 1 : 0;
+    $font = in_array($body['font'] ?? null, ['serif', 'mono', 'display'], true) ? $body['font'] : null;
 
     $stmt = $pdo->prepare(
-        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color)'
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color), bold = VALUES(bold), font = VALUES(font)'
     );
-    $stmt->execute([$col['table_id'], $row['id'], $col['id'], $textContent, $bgColor, $textColor]);
+    $stmt->execute([$col['table_id'], $row['id'], $col['id'], $textContent, $bgColor, $textColor, $bold, $font]);
 
     respond_structure($pdo, $col['template_id']);
 }

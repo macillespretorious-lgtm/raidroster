@@ -62,11 +62,12 @@ function fetch_table_full($pdo, $tb) {
         'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
     ], $stmt6->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt7 = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, kind_override FROM raid_template_cells WHERE table_id = ?');
+    $stmt7 = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, kind_override FROM raid_template_cells WHERE table_id = ?');
     $stmt7->execute([$tb['id']]);
     $cells = array_map(fn($c) => [
         'rowId' => (int)$c['row_id'], 'columnId' => (int)$c['column_id'],
         'textContent' => $c['text_content'], 'bgColor' => $c['bg_color'], 'textColor' => $c['text_color'],
+        'bold' => (bool)$c['bold'], 'font' => $c['font'],
         'kindOverride' => $c['kind_override'],
     ], $stmt7->fetchAll(PDO::FETCH_ASSOC));
 
@@ -233,8 +234,11 @@ function h($s) { return htmlspecialchars($s ?? ''); }
 
     td.text-td { text-align: left; }
     .cell-text-input { margin-bottom: 3px; }
-    .cell-color-row { display: flex; gap: 4px; }
-    .cell-color-row .swatch { width: 18px; height: 18px; }
+    .cell-format-row { display: flex; align-items: center; gap: 4px; }
+    .cell-format-row .swatch { width: 18px; height: 18px; }
+    .cell-bold-btn { width: 20px; height: 18px; padding: 0; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); background: #0a0f1e; color: #a8b4d0; font-weight: 800; font-size: 11px; line-height: 1; cursor: pointer; }
+    .cell-bold-btn.active { background: #5865f2; border-color: #5865f2; color: #fff; }
+    .cell-font-select { flex: 1; min-width: 0; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font-size: 10.5px; border-radius: 4px; padding: 2px 2px; }
 
     .drag-handle { cursor: grab; display: inline-block; color: #6b7595; font-size: 13px; line-height: 1; user-select: none; }
     .drag-handle:active { cursor: grabbing; }
@@ -372,7 +376,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     body.stamp-mode-active .data-td:hover, body.stamp-mode-active .spacer-cell:hover, body.stamp-mode-active .text-td:hover {
       outline: 2px solid #f0c04a; outline-offset: -2px;
     }
-    body.stamp-mode-active .cell-text-input, body.stamp-mode-active .swatch { pointer-events: none; }
+    body.stamp-mode-active .cell-text-input, body.stamp-mode-active .swatch, body.stamp-mode-active .cell-bold-btn, body.stamp-mode-active .cell-font-select { pointer-events: none; }
     body.stamp-mode-active .kind-override-tag { pointer-events: none; }
     .cell-override-wrap { position: absolute; top: 1px; left: 2px; z-index: 3; }
     .kind-override-tag { background: none; border: none; padding: 0; font: inherit; font-size: 8.5px; font-weight: 800; letter-spacing: .03em; color: #f0c04a; text-transform: uppercase; cursor: pointer; }
@@ -596,6 +600,26 @@ const DEFAULT_COL_UNITS = 2;
 function pxToUnits(px) { return (px === null || px === undefined) ? '' : Math.round(px / COL_UNIT_PX); }
 function unitsToPx(units) { return (units === '' || units === null || units === undefined) ? null : parseInt(units, 10) * COL_UNIT_PX; }
 
+// Text-cell font choices, kept to a small preset of generic web-safe stacks so the HTML page
+// and the Discord canvas export (raids/view.php, drawn client-side, no custom font loading)
+// render identically. null/'' means "default" -- the page's own inherited font.
+const CELL_FONT_STACKS = {
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: 'Consolas, "Courier New", monospace',
+  display: 'Impact, "Arial Black", sans-serif',
+};
+const CELL_FONTS = [
+  { key: '', label: 'Default' },
+  { key: 'serif', label: 'Serif' },
+  { key: 'mono', label: 'Monospace' },
+  { key: 'display', label: 'Display' },
+];
+function cellTextStyle(cell) {
+  const weight = cell && cell.bold ? 'font-weight:700;' : '';
+  const family = cell && CELL_FONT_STACKS[cell.font] ? `font-family:${CELL_FONT_STACKS[cell.font]};` : '';
+  return weight + family;
+}
+
 function chunkColumns(columns) {
   const chunks = [];
   let current = [];
@@ -631,7 +655,7 @@ function measureTextPx(text, font) {
 }
 
 function cellFor(tb, rowId, colId) {
-  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null, kindOverride: null };
+  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null, bold: false, font: null, kindOverride: null };
 }
 function tableForCell(rowId, colId) {
   return allTables().find(tb => tb.rows.some(r => r.id === rowId) && tb.columns.some(c => c.id === colId)) || null;
@@ -1043,8 +1067,10 @@ function render() {
       if (act === 'row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
       if (act === 'row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
-      if (act === 'cell-text') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: node.value, bgColor: cell.bgColor, textColor: cell.textColor }); }
-      if (act === 'cell-fg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: node.value }); }
+      if (act === 'cell-text') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: node.value, bgColor: cell.bgColor, textColor: cell.textColor, bold: cell.bold, font: cell.font }); }
+      if (act === 'cell-fg') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: node.value, bold: cell.bold, font: cell.font }); }
+      if (act === 'cell-bold') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: cell.textColor, bold: !cell.bold, font: cell.font }); }
+      if (act === 'cell-font') { const rowId = parseInt(node.dataset.rowId, 10), colId = parseInt(node.dataset.colId, 10); const cell = cellFor(tableForCell(rowId, colId), rowId, colId); call({ action: 'update_cell', rowId, columnId: colId, textContent: cell.textContent, bgColor: cell.bgColor, textColor: cell.textColor, bold: cell.bold, font: node.value || null }); }
       if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
       if (act === 'merge-header') call({ action: 'merge_header', id });
       if (act === 'split-header') call({ action: 'split_header', id });
@@ -1292,10 +1318,13 @@ function bodyCellsForRow(r, chunkCols, tb) {
         ${splitBtn}
       </div>`;
     if (eff === 'text') {
+      const fontOptions = CELL_FONTS.map(f => `<option value="${f.key}"${(cell.font || '') === f.key ? ' selected' : ''}>${f.label}</option>`).join('');
       out.push(`<td${colspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}">
         ${overrideTag}
-        <input class="lbl-input cell-text-input" data-action="cell-text" data-row-id="${r.id}" data-col-id="${c.id}" placeholder="Text" value="${escAttr(cell.textContent || '')}">
-        <div class="cell-color-row">
+        <input class="lbl-input cell-text-input" data-action="cell-text" data-row-id="${r.id}" data-col-id="${c.id}" placeholder="Text" value="${escAttr(cell.textContent || '')}" style="${cellTextStyle(cell)}color:${cell.textColor || '#e8ecff'};">
+        <div class="cell-format-row">
+          <button type="button" class="cell-bold-btn${cell.bold ? ' active' : ''}" data-action="cell-bold" data-row-id="${r.id}" data-col-id="${c.id}" title="Bold">B</button>
+          <select class="cell-font-select" data-action="cell-font" data-row-id="${r.id}" data-col-id="${c.id}" title="Font">${fontOptions}</select>
           <input type="color" class="swatch" data-action="cell-fg" data-row-id="${r.id}" data-col-id="${c.id}" value="${cell.textColor || '#e8ecff'}" title="Text color">
         </div>
         ${mergeActions}
@@ -1453,7 +1482,7 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     if (eff === 'text') {
-      const style = `background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};`;
+      const style = `background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr} class="cell text-td" style="${style}">${esc(cell.textContent || '')}</td>`);
     } else {
       out.push(`<td${colspanAttr} class="cell"><span class="empty-slot">+</span></td>`);
@@ -1553,7 +1582,7 @@ function colourBodyCellsForRow(r, chunkCols, tb) {
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     const bg = cell.bgColor || null;
     const style = eff === 'text'
-      ? `background:${bg || 'transparent'};color:${cell.textColor || 'inherit'};`
+      ? `background:${bg || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
       : (bg ? `background:${bg};` : '');
     const content = eff === 'text' ? esc(cell.textContent || '') : '<span class="empty-slot">+</span>';
     out.push(`<td${colspanAttr} class="cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="${style}">${content}</td>`);
