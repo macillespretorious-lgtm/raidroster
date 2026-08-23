@@ -71,12 +71,35 @@ function fetch_table_full($pdo, $tb) {
         'kindOverride' => $c['kind_override'],
     ], $stmt7->fetchAll(PDO::FETCH_ASSOC));
 
+    $stmt8 = $pdo->prepare('SELECT id, rule_type, scope, classes, max_count, label, sort_order FROM raid_template_rules WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt8->execute([$tb['id']]);
+    $ruleRows = $stmt8->fetchAll(PDO::FETCH_ASSOC);
+    $ruleCellsByRule = [];
+    if ($ruleRows) {
+        $ruleIds = array_column($ruleRows, 'id');
+        $placeholders = implode(',', array_fill(0, count($ruleIds), '?'));
+        $stmtRC = $pdo->prepare("SELECT rule_id, row_id, column_id FROM raid_template_rule_cells WHERE rule_id IN ($placeholders)");
+        $stmtRC->execute($ruleIds);
+        foreach ($stmtRC->fetchAll(PDO::FETCH_ASSOC) as $rc) {
+            $ruleCellsByRule[$rc['rule_id']][] = ['rowId' => (int)$rc['row_id'], 'columnId' => (int)$rc['column_id']];
+        }
+    }
+    $rules = array_map(fn($r) => [
+        'id' => (int)$r['id'],
+        'ruleType' => $r['rule_type'],
+        'scope' => $r['scope'],
+        'classes' => $r['classes'],
+        'maxCount' => $r['max_count'] !== null ? (int)$r['max_count'] : null,
+        'label' => $r['label'],
+        'cellRefs' => $ruleCellsByRule[$r['id']] ?? [],
+    ], $ruleRows);
+
     return [
         'id' => (int)$tb['id'], 'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
-        'cellMerges' => $cellMerges, 'cells' => $cells,
+        'cellMerges' => $cellMerges, 'cells' => $cells, 'rules' => $rules,
     ];
 }
 
@@ -2093,6 +2116,7 @@ function renderLogicMode(el) {
     logicDraft = null;
   }
   const tb = logicActiveTableId ? findTable(logicActiveTableId) : null;
+  if (tb && !tb.rules) tb.rules = []; // defensive: older cached data shapes may lack this field
 
   const tableOptions = tables.map(t => `<option value="${t.id}" ${t.id === logicActiveTableId ? 'selected' : ''}>${esc(t.title || '(untitled table)')}</option>`).join('');
   const draftHtml = logicDraft ? renderRuleDraftForm() : `<button type="button" class="btn" data-action="logic-add-rule" ${tb ? '' : 'disabled'}>+ Add Rule</button>`;
