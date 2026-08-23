@@ -164,7 +164,7 @@ function reorder_siblings($pdo, $table, $fkCol, $fkVal, $orderedIds) {
 }
 
 function fetch_table_full($pdo, $tb) {
-    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, width, header_color, group_id, header_colspan FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, width, header_color, bg_color, group_id, header_colspan FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmt->execute([$tb['id']]);
     $columns = array_map(fn($c) => [
         'id' => (int)$c['id'],
@@ -172,17 +172,19 @@ function fetch_table_full($pdo, $tb) {
         'kind' => $c['kind'],
         'width' => $c['width'] !== null ? (int)$c['width'] : null,
         'headerColor' => $c['header_color'],
+        'bgColor' => $c['bg_color'],
         'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
         'headerColspan' => (int)$c['header_colspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, height FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt = $pdo->prepare('SELECT id, label, sort_order, kind, height, bg_color FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
     $stmt->execute([$tb['id']]);
     $rows = array_map(fn($r) => [
         'id' => (int)$r['id'],
         'label' => $r['label'],
         'kind' => $r['kind'],
         'height' => $r['height'] !== null ? (int)$r['height'] : null,
+        'bgColor' => $r['bg_color'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
@@ -640,25 +642,52 @@ if ($action === 'paint_cells') {
     if ($color !== null && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) fail(400, 'Invalid color');
 
     $cells = is_array($body['cells'] ?? null) ? $body['cells'] : [];
-    if (!$cells) respond_structure($pdo, $tb['template_id']);
+    $spacerRows = is_array($body['spacerRows'] ?? null) ? array_map('intval', $body['spacerRows']) : [];
+    $spacerCols = is_array($body['spacerColumns'] ?? null) ? array_map('intval', $body['spacerColumns']) : [];
 
-    $stmtR = $pdo->prepare('SELECT id FROM raid_template_rows WHERE table_id = ? AND kind != \'spacer\'');
-    $stmtR->execute([$tb['id']]);
-    $validRows = array_flip(array_map('intval', $stmtR->fetchAll(PDO::FETCH_COLUMN)));
-    $stmtC = $pdo->prepare('SELECT id FROM raid_template_columns WHERE table_id = ? AND kind != \'spacer\'');
-    $stmtC->execute([$tb['id']]);
-    $validCols = array_flip(array_map('intval', $stmtC->fetchAll(PDO::FETCH_COLUMN)));
+    if ($cells) {
+        $stmtR = $pdo->prepare('SELECT id FROM raid_template_rows WHERE table_id = ? AND kind != \'spacer\'');
+        $stmtR->execute([$tb['id']]);
+        $validRows = array_flip(array_map('intval', $stmtR->fetchAll(PDO::FETCH_COLUMN)));
+        $stmtC = $pdo->prepare('SELECT id FROM raid_template_columns WHERE table_id = ? AND kind != \'spacer\'');
+        $stmtC->execute([$tb['id']]);
+        $validCols = array_flip(array_map('intval', $stmtC->fetchAll(PDO::FETCH_COLUMN)));
 
-    $stmt = $pdo->prepare(
-        'INSERT INTO raid_template_cells (table_id, row_id, column_id, bg_color)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE bg_color = VALUES(bg_color)'
-    );
-    foreach ($cells as $c) {
-        $rowId = (int)($c['rowId'] ?? 0);
-        $colId = (int)($c['columnId'] ?? 0);
-        if (!isset($validRows[$rowId]) || !isset($validCols[$colId])) continue;
-        $stmt->execute([$tb['id'], $rowId, $colId, $color]);
+        $stmt = $pdo->prepare(
+            'INSERT INTO raid_template_cells (table_id, row_id, column_id, bg_color)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE bg_color = VALUES(bg_color)'
+        );
+        foreach ($cells as $c) {
+            $rowId = (int)($c['rowId'] ?? 0);
+            $colId = (int)($c['columnId'] ?? 0);
+            if (!isset($validRows[$rowId]) || !isset($validCols[$colId])) continue;
+            $stmt->execute([$tb['id'], $rowId, $colId, $color]);
+        }
+    }
+
+    // Spacer rows/columns hold no cells at all (skipped entirely at raid-creation time), so
+    // their color lives directly on raid_template_rows/columns instead of raid_template_cells.
+    if ($spacerRows) {
+        $stmtSR = $pdo->prepare('SELECT id FROM raid_template_rows WHERE table_id = ? AND kind = \'spacer\'');
+        $stmtSR->execute([$tb['id']]);
+        $validSpacerRows = array_flip(array_map('intval', $stmtSR->fetchAll(PDO::FETCH_COLUMN)));
+        $updR = $pdo->prepare('UPDATE raid_template_rows SET bg_color = ? WHERE id = ?');
+        foreach ($spacerRows as $rowId) {
+            if (!isset($validSpacerRows[$rowId])) continue;
+            $updR->execute([$color, $rowId]);
+        }
+    }
+
+    if ($spacerCols) {
+        $stmtSC = $pdo->prepare('SELECT id FROM raid_template_columns WHERE table_id = ? AND kind = \'spacer\'');
+        $stmtSC->execute([$tb['id']]);
+        $validSpacerCols = array_flip(array_map('intval', $stmtSC->fetchAll(PDO::FETCH_COLUMN)));
+        $updC = $pdo->prepare('UPDATE raid_template_columns SET bg_color = ? WHERE id = ?');
+        foreach ($spacerCols as $colId) {
+            if (!isset($validSpacerCols[$colId])) continue;
+            $updC->execute([$color, $colId]);
+        }
     }
 
     respond_structure($pdo, $tb['template_id']);

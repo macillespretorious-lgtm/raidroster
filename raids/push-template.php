@@ -241,12 +241,12 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
         $columnIdMap[(int)$tplCol['id']] = $raidColId;
         $raidCol = null;
         foreach ($raidCols as $c) { if ((int)$c['id'] === $raidColId) { $raidCol = $c; break; } }
-        $cChanges = diff_scalar_fields($raidCol, $tplCol, ['label', 'width', 'header_color', 'header_colspan', 'sort_order']);
+        $cChanges = diff_scalar_fields($raidCol, $tplCol, ['label', 'width', 'header_color', 'bg_color', 'header_colspan', 'sort_order']);
         if ($cChanges) {
             $diff['columns']['changed'][] = ['id' => $raidColId, 'label' => $raidCol['label'] ?: '(unlabeled column)', 'changes' => array_keys($cChanges)];
             if ($apply) {
-                $pdo->prepare('UPDATE raid_columns SET label = ?, width = ?, header_color = ?, header_colspan = ?, sort_order = ? WHERE id = ?')
-                    ->execute([$tplCol['label'], $tplCol['width'], $tplCol['header_color'], $tplCol['header_colspan'], $tplCol['sort_order'], $raidColId]);
+                $pdo->prepare('UPDATE raid_columns SET label = ?, width = ?, header_color = ?, bg_color = ?, header_colspan = ?, sort_order = ? WHERE id = ?')
+                    ->execute([$tplCol['label'], $tplCol['width'], $tplCol['header_color'], $tplCol['bg_color'], $tplCol['header_colspan'], $tplCol['sort_order'], $raidColId]);
             }
         }
     }
@@ -262,8 +262,8 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
         $diff['columns']['added'][] = ['id' => (int)$tc['id'], 'label' => $tc['label'] ?: '(unlabeled column)'];
         if ($apply) {
             $groupId = $tc['group_id'] !== null ? ($groupIdMap[(int)$tc['group_id']] ?? null) : null;
-            $ins = $pdo->prepare('INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, group_id, header_colspan, source_column_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-            $ins->execute([$raidTableId, $tc['label'], $tc['sort_order'], $tc['kind'], $tc['width'], $tc['header_color'], $groupId, $tc['header_colspan'], $tc['id']]);
+            $ins = $pdo->prepare('INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, bg_color, group_id, header_colspan, source_column_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $ins->execute([$raidTableId, $tc['label'], $tc['sort_order'], $tc['kind'], $tc['width'], $tc['header_color'], $tc['bg_color'], $groupId, $tc['header_colspan'], $tc['id']]);
             $columnIdMap[(int)$tc['id']] = (int)$pdo->lastInsertId();
         }
     }
@@ -284,12 +284,12 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
         $rowIdMap[(int)$tplRow['id']] = $raidRowId;
         $raidRow = null;
         foreach ($raidRows as $r) { if ((int)$r['id'] === $raidRowId) { $raidRow = $r; break; } }
-        $rChanges = diff_scalar_fields($raidRow, $tplRow, ['label', 'height', 'sort_order']);
+        $rChanges = diff_scalar_fields($raidRow, $tplRow, ['label', 'height', 'bg_color', 'sort_order']);
         if ($rChanges) {
             $diff['rows']['changed'][] = ['id' => $raidRowId, 'label' => $raidRow['label'] ?: '(unlabeled row)', 'changes' => array_keys($rChanges)];
             if ($apply) {
-                $pdo->prepare('UPDATE raid_rows SET label = ?, height = ?, sort_order = ? WHERE id = ?')
-                    ->execute([$tplRow['label'], $tplRow['height'], $tplRow['sort_order'], $raidRowId]);
+                $pdo->prepare('UPDATE raid_rows SET label = ?, height = ?, bg_color = ?, sort_order = ? WHERE id = ?')
+                    ->execute([$tplRow['label'], $tplRow['height'], $tplRow['bg_color'], $tplRow['sort_order'], $raidRowId]);
             }
         }
     }
@@ -304,8 +304,8 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
     foreach ($rowTplOnly as $tr) {
         $diff['rows']['added'][] = ['id' => (int)$tr['id'], 'label' => $tr['label'] ?: '(unlabeled row)'];
         if ($apply) {
-            $ins = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind, height, source_row_id) VALUES (?, ?, ?, ?, ?, ?)');
-            $ins->execute([$raidTableId, $tr['label'], $tr['sort_order'], $tr['kind'], $tr['height'], $tr['id']]);
+            $ins = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind, height, bg_color, source_row_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            $ins->execute([$raidTableId, $tr['label'], $tr['sort_order'], $tr['kind'], $tr['height'], $tr['bg_color'], $tr['id']]);
             $rowIdMap[(int)$tr['id']] = (int)$pdo->lastInsertId();
         }
     }

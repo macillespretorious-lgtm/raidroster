@@ -198,6 +198,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     input[type=color].swatch { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; padding: 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; background: none; cursor: pointer; flex-shrink: 0; }
     input[type=color].swatch::-webkit-color-swatch-wrapper { padding: 2px; }
     input[type=color].swatch::-webkit-color-swatch { border: none; border-radius: 3px; }
+    .paint-custom-swatch { position: relative; width: 22px; height: 22px; border-radius: 6px; border: 2px dashed rgba(255,255,255,0.4); cursor: pointer; display: inline-block; overflow: hidden; flex-shrink: 0; }
+    .paint-custom-swatch:hover { border-color: rgba(255,255,255,0.7); }
+    .paint-custom-swatch.active { border-style: solid; border-color: #fff; box-shadow: 0 0 0 2px #5865f2; }
+    .paint-custom-swatch input[type=color] { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: none; opacity: 0; cursor: pointer; }
     .width-input { width: 52px; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 11px; padding: 4px 5px; border-radius: 5px; }
     .tbl-sizing { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; }
     .col-th-inner { display: flex; flex-direction: column; gap: 3px; align-items: center; min-width: 0; }
@@ -339,6 +343,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .colour-mode table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
     .colour-mode td.cell { min-width: 90px; user-select: none; }
     .colour-mode td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
+    .colour-mode td.spacer-cell.paint-spacer-row, .colour-mode td.spacer-cell.paint-spacer-col { border-color: rgba(255,255,255,0.15); border-style: dashed; }
+    body.paint-mode-active .colour-mode td.spacer-cell.paint-spacer-row, body.paint-mode-active .colour-mode td.spacer-cell.paint-spacer-col { cursor: crosshair !important; }
+    body.paint-mode-active .colour-mode td.spacer-cell.paint-spacer-row:hover, body.paint-mode-active .colour-mode td.spacer-cell.paint-spacer-col:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
     .colour-mode .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
     .colour-mode .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
     .colour-mode th.paint-corner { background: none; border-color: transparent; }
@@ -1434,7 +1441,12 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
     const c = chunkCols[i];
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
-    if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    if (eff === 'spacer') {
+      const spacerColor = (r.kind === 'spacer' && r.bgColor) ? r.bgColor : c.bgColor;
+      const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
+      out.push(`<td class="spacer-cell"${spacerStyle}></td>`);
+      i++; continue;
+    }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     if (eff === 'text') {
@@ -1459,7 +1471,8 @@ function previewColumnBlock(chunkCols, tb, groupsEnabled) {
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
+      const bgStyle = r.bgColor ? `background:${r.bgColor};` : '';
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="${bgStyle}"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
     return `<tr${heightAttr}>${previewBodyCellsForRow(r, chunkCols, tb)}</tr>`;
@@ -1517,6 +1530,12 @@ function colourBodyCellsForRow(r, chunkCols, tb) {
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
+    if (c.kind === 'spacer') {
+      const bg = c.bgColor || null;
+      const style = bg ? ` style="background:${bg};"` : '';
+      out.push(`<td class="spacer-cell paint-spacer-col" data-table-id="${tb.id}" data-spacer-col-id="${c.id}"${style} title="Paint this spacer column"></td>`);
+      i++; continue;
+    }
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
     if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
@@ -1540,14 +1559,15 @@ function colourColumnBlock(chunkCols, tb) {
       return `<col${w ? ` style="width:${w}px;"` : ''}>`;
     }).join('') + `</colgroup>`;
 
-  const headerRow = `<tr><th class="paint-corner"></th>` + chunkCols.map(c => c.kind === 'spacer'
-    ? `<th class="spacer-th"></th>`
-    : `<th class="paint-col-th" data-action="paint-column" data-table-id="${tb.id}" data-col-id="${c.id}" title="Paint this whole column">${esc(c.label || '·')}</th>`
+  const headerRow = `<tr><th class="paint-corner"></th>` + chunkCols.map(c =>
+    `<th class="paint-col-th" data-action="paint-column" data-table-id="${tb.id}" data-col-id="${c.id}" title="Paint this ${c.kind === 'spacer' ? 'spacer column' : 'whole column'}">&#9632;</th>`
   ).join('') + `</tr>`;
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell"></td><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
+      const bg = r.bgColor || null;
+      const style = bg ? ` style="background:${bg};"` : '';
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell"></td><td class="spacer-cell paint-spacer-row" colspan="${chunkCols.length}" data-table-id="${tb.id}" data-spacer-row-id="${r.id}"${style} title="Paint this spacer row"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
     const rowHeader = `<th class="paint-row-th" data-action="paint-row" data-table-id="${tb.id}" data-row-id="${r.id}" title="Paint this whole row">&#9632;</th>`;
@@ -1591,13 +1611,16 @@ function renderPaintBar() {
   const swatches = PAINT_PRESETS.map(c =>
     `<button type="button" class="paint-swatch ${paintArmed && !paintErase && paintColor.toLowerCase() === c ? 'active' : ''}" data-action="pick-paint-color" data-color="${c}" style="background:${c};" title="${c}"></button>`
   ).join('');
+  const isCustomActive = paintArmed && !paintErase && !PAINT_PRESETS.some(p => p.toLowerCase() === paintColor.toLowerCase());
   const hint = paintArmed
     ? `<span class="paint-armed-hint">${paintErase ? 'Erasing' : 'Painting'} — click, drag, or click a row/column header below. <button type="button" class="paint-stop-btn" data-action="stop-paint">Stop</button></span>`
     : `<span class="paint-bar-hint">Pick a color, then click, drag, or click a row/column header on the tables below.</span>`;
   el.innerHTML = `
     <span class="paint-bar-label">Paint</span>
     <div class="paint-swatches">${swatches}</div>
-    <input type="color" class="swatch" id="paintCustomColor" value="${paintColor}" title="Custom color">
+    <label class="paint-custom-swatch ${isCustomActive ? 'active' : ''}" id="paintCustomSwatch" style="background:${isCustomActive ? paintColor : '#1a2338'};" title="Custom color">
+      <input type="color" id="paintCustomColor" value="${paintColor}">
+    </label>
     <button type="button" class="paint-tool-btn ${paintArmed && paintErase ? 'active' : ''}" data-action="pick-paint-erase" title="Clear color from painted cells">Eraser</button>
     ${hint}`;
   el.querySelectorAll('[data-action]').forEach(node => {
@@ -1612,6 +1635,8 @@ function renderPaintBar() {
     // Only update state while the native picker is open -- re-rendering (which rebuilds
     // this very input) is deferred to 'change' below so it doesn't interrupt the picker.
     paintColor = e.target.value; paintErase = false; paintArmed = true; document.body.classList.add('paint-mode-active');
+    const swatchLabel = document.getElementById('paintCustomSwatch');
+    if (swatchLabel) { swatchLabel.style.background = paintColor; swatchLabel.classList.add('active'); }
   });
   document.getElementById('paintCustomColor').addEventListener('change', () => {
     renderPaintBar();
@@ -1631,21 +1656,29 @@ function wireColourPaint(el) {
       const tb = findTable(parseInt(node.dataset.tableId, 10));
       if (!tb) return;
       const color = paintErase ? null : paintColor;
-      let cells;
       if (node.dataset.action === 'paint-row') {
         const rowId = parseInt(node.dataset.rowId, 10);
         const row = tb.rows.find(r => r.id === rowId);
-        cells = tb.columns.filter(c => c.kind !== 'spacer').map(c => ({ rowId, columnId: c.id }));
-        if (row && row.kind === 'spacer') cells = [];
+        if (row && row.kind === 'spacer') {
+          call({ action: 'paint_cells', tableId: tb.id, color, spacerRows: [rowId] });
+        } else {
+          const cells = tb.columns.filter(c => c.kind !== 'spacer').map(c => ({ rowId, columnId: c.id }));
+          if (cells.length) call({ action: 'paint_cells', tableId: tb.id, color, cells });
+        }
       } else {
         const columnId = parseInt(node.dataset.colId, 10);
-        cells = tb.rows.filter(r => r.kind !== 'spacer').map(r => ({ rowId: r.id, columnId }));
+        const col = tb.columns.find(c => c.id === columnId);
+        if (col && col.kind === 'spacer') {
+          call({ action: 'paint_cells', tableId: tb.id, color, spacerColumns: [columnId] });
+        } else {
+          const cells = tb.rows.filter(r => r.kind !== 'spacer').map(r => ({ rowId: r.id, columnId }));
+          if (cells.length) call({ action: 'paint_cells', tableId: tb.id, color, cells });
+        }
       }
-      if (cells.length) call({ action: 'paint_cells', tableId: tb.id, color, cells });
     });
   });
 
-  el.querySelectorAll('td.cell[data-row-id][data-col-id]').forEach(td => {
+  el.querySelectorAll('td.cell[data-row-id][data-col-id], td.paint-spacer-row[data-spacer-row-id], td.paint-spacer-col[data-spacer-col-id]').forEach(td => {
     td.addEventListener('mousedown', e => {
       if (!paintArmed || e.button !== 0) return;
       e.preventDefault();
@@ -1656,8 +1689,14 @@ function wireColourPaint(el) {
   });
 }
 
+// Keys are prefixed by target kind so the mouseup handler below can split one drag gesture
+// back into the three distinct payload shapes paint_cells accepts: ordinary (row,column)
+// cells, whole spacer rows, and whole spacer columns.
 function paintCell(td) {
-  const key = `${td.dataset.tableId}_${td.dataset.rowId}_${td.dataset.colId}`;
+  let key;
+  if (td.dataset.spacerRowId !== undefined) key = `sr_${td.dataset.tableId}_${td.dataset.spacerRowId}`;
+  else if (td.dataset.spacerColId !== undefined) key = `sc_${td.dataset.tableId}_${td.dataset.spacerColId}`;
+  else key = `c_${td.dataset.tableId}_${td.dataset.rowId}_${td.dataset.colId}`;
   if (paintDragTouched.has(key)) return;
   paintDragTouched.add(key);
   td.style.background = paintErase ? 'transparent' : paintColor;
@@ -1665,7 +1704,7 @@ function paintCell(td) {
 
 document.addEventListener('mousemove', e => {
   if (!paintDragging) return;
-  const td = e.target.closest('td.cell[data-row-id][data-col-id]');
+  const td = e.target.closest('td.cell[data-row-id][data-col-id], td.paint-spacer-row[data-spacer-row-id], td.paint-spacer-col[data-spacer-col-id]');
   if (td && document.getElementById('panelsEl').contains(td)) paintCell(td);
 });
 
@@ -1676,13 +1715,18 @@ document.addEventListener('mouseup', () => {
   paintDragTouched = null;
   if (!touched || !touched.size) return;
   const byTable = new Map();
+  const ensure = tableId => {
+    if (!byTable.has(tableId)) byTable.set(tableId, { cells: [], spacerRows: [], spacerColumns: [] });
+    return byTable.get(tableId);
+  };
   touched.forEach(key => {
-    const [tableId, rowId, columnId] = key.split('_').map(Number);
-    if (!byTable.has(tableId)) byTable.set(tableId, []);
-    byTable.get(tableId).push({ rowId, columnId });
+    const parts = key.split('_');
+    if (parts[0] === 'sr') ensure(Number(parts[1])).spacerRows.push(Number(parts[2]));
+    else if (parts[0] === 'sc') ensure(Number(parts[1])).spacerColumns.push(Number(parts[2]));
+    else ensure(Number(parts[1])).cells.push({ rowId: Number(parts[2]), columnId: Number(parts[3]) });
   });
   const color = paintErase ? null : paintColor;
-  byTable.forEach((cells, tableId) => call({ action: 'paint_cells', tableId, color, cells }));
+  byTable.forEach((payload, tableId) => call({ action: 'paint_cells', tableId, color, ...payload }));
 });
 
 function openPreview(secId) {

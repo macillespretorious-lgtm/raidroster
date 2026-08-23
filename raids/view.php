@@ -919,7 +919,12 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
     const c = chunkCols[i];
     const cell = tb.cells[r.id + '_' + c.id];
     const eff = effectiveKind(r, c, cell);
-    if (eff === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
+    if (eff === 'spacer') {
+      const spacerColor = (r.kind === 'spacer' && r.bgColor) ? r.bgColor : c.bgColor;
+      const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
+      out.push(`<td class="spacer-cell"${spacerStyle}></td>`);
+      i++; continue;
+    }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
     if (eff === 'text') {
@@ -945,7 +950,8 @@ function renderColumnBlock(chunkCols, tb, noteEnabled) {
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
+      const bgStyle = r.bgColor ? `background:${r.bgColor};` : '';
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="${bgStyle}"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
     return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled)}</tr>`;
@@ -1368,7 +1374,12 @@ function drawTable(ctx, tb, m, startY) {
     }
 
     for (const r of tb.rows) {
-      if (r.kind === 'spacer') { y += Math.max(6, m.rowH / 2); continue; }
+      if (r.kind === 'spacer') {
+        const spacerH = Math.max(6, m.rowH / 2);
+        if (r.bgColor) { ctx.fillStyle = r.bgColor; ctx.fillRect(x0, y, width, spacerH); }
+        y += spacerH;
+        continue;
+      }
       const rowH = m.rowH;
       ctx.fillStyle = '#141a2c';
       ctx.fillRect(x0, y, width, rowH);
@@ -1377,7 +1388,11 @@ function drawTable(ctx, tb, m, startY) {
       colBoxes.forEach(box => {
         const cell = tb.cells[r.id + '_' + box.c.id];
         const eff = effectiveKind(r, box.c, cell);
-        if (eff === 'spacer') return;
+        if (eff === 'spacer') {
+          const spacerColor = (r.kind === 'spacer' && r.bgColor) ? r.bgColor : box.c.bgColor;
+          if (spacerColor) { ctx.fillStyle = spacerColor; ctx.fillRect(box.x, y, box.w, rowH); }
+          return;
+        }
         if (eff === 'text') {
           if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
           ctx.fillStyle = (cell && cell.textColor) || '#c7cfe8';

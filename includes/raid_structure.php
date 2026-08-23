@@ -46,12 +46,12 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $columns = [];
     $columnIdMap = [];
     $insC = $pdo->prepare(
-        'INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, group_id, header_colspan, source_column_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_columns (table_id, label, sort_order, kind, width, header_color, bg_color, group_id, header_colspan, source_column_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     foreach ($stmtC->fetchAll(PDO::FETCH_ASSOC) as $col) {
         $newGroupId = $col['group_id'] ? ($groupIdMap[$col['group_id']] ?? null) : null;
-        $insC->execute([$newTableId, $col['label'], $col['sort_order'], $col['kind'], $col['width'], $col['header_color'], $newGroupId, $col['header_colspan'], $col['id']]);
+        $insC->execute([$newTableId, $col['label'], $col['sort_order'], $col['kind'], $col['width'], $col['header_color'], $col['bg_color'], $newGroupId, $col['header_colspan'], $col['id']]);
         $newColId = (int)$pdo->lastInsertId();
         $columns[] = ['id' => $newColId, 'kind' => $col['kind'], 'srcId' => $col['id']];
         $columnIdMap[$col['id']] = $newColId;
@@ -61,9 +61,9 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $stmtR->execute([$tb['id']]);
     $rows = [];
     $rowIdMap = [];
-    $insR = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind, height, source_row_id) VALUES (?, ?, ?, ?, ?, ?)');
+    $insR = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind, height, bg_color, source_row_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
     foreach ($stmtR->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $insR->execute([$newTableId, $row['label'], $row['sort_order'], $row['kind'], $row['height'], $row['id']]);
+        $insR->execute([$newTableId, $row['label'], $row['sort_order'], $row['kind'], $row['height'], $row['bg_color'], $row['id']]);
         $newRowId = (int)$pdo->lastInsertId();
         $rows[] = ['id' => $newRowId, 'kind' => $row['kind'], 'srcId' => $row['id']];
         $rowIdMap[$row['id']] = $newRowId;

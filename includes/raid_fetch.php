@@ -4,19 +4,20 @@
 // tree after a bulk clear (clear_section/clear_all), so both stay in the exact same shape.
 
 function fetch_table_full($pdo, $tb) {
-    $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id, header_colspan FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, bg_color, group_id, header_colspan FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmtC->execute([$tb['id']]);
     $columns = array_map(fn($c) => [
         'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
         'width' => $c['width'] !== null ? (int)$c['width'] : null,
         'headerColor' => $c['header_color'],
+        'bgColor' => $c['bg_color'],
         'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
         'headerColspan' => (int)$c['header_colspan'],
     ], $stmtC->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmtR = $pdo->prepare('SELECT id, label, kind, height FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmtR = $pdo->prepare('SELECT id, label, kind, height, bg_color FROM raid_rows WHERE table_id = ? ORDER BY sort_order, id');
     $stmtR->execute([$tb['id']]);
-    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind'], 'height' => $r['height'] !== null ? (int)$r['height'] : null], $stmtR->fetchAll(PDO::FETCH_ASSOC));
+    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind'], 'height' => $r['height'] !== null ? (int)$r['height'] : null, 'bgColor' => $r['bg_color']], $stmtR->fetchAll(PDO::FETCH_ASSOC));
 
     $stmtG = $pdo->prepare('SELECT * FROM raid_column_groups WHERE table_id = ? ORDER BY sort_order, id');
     $stmtG->execute([$tb['id']]);
