@@ -1035,9 +1035,24 @@ function render() {
   const paintBarEl = document.getElementById('paintBarEl');
 
   if (editMode === 'logic') {
-    tabsRowEl.hidden = true; panelsEl0.hidden = true; paintBarEl.hidden = true;
+    panelsEl0.hidden = true; paintBarEl.hidden = true;
     placeholderEl.hidden = false;
     placeholderEl.classList.add('logic-mode');
+
+    const TABS = currentTabs();
+    if (!TABS.includes(activeTab)) activeTab = TABS[0] || null;
+    tabsRowEl.hidden = false;
+    document.getElementById('angryInlineEl').innerHTML = '';
+    const tabsEl = document.getElementById('tabsEl');
+    tabsEl.innerHTML = TABS.map(k => `<button type="button" class="tab-btn ${k === activeTab ? 'active' : ''}" data-tab="${escAttr(k)}">${esc(tabLabel(k))}</button>`).join('');
+    tabsEl.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        history.replaceState(null, '', '#' + encodeURIComponent(activeTab));
+        render();
+      });
+    });
+
     renderLogicMode(placeholderEl);
     return;
   }
@@ -2111,12 +2126,14 @@ function logicRenderTable(tb) {
   return `<div class="tbl-wrap">${blocks}</div>`;
 }
 
-// Groups every table (including nested boss-tables inside column groups, same traversal
-// order as allTables()) under its parent section, so Logic mode can list every table at
-// once with a section heading for context instead of hiding them behind a picker.
+// Groups every table in the active tab (including nested boss-tables inside column
+// groups, same traversal order as allTables()) under its parent section, so Logic mode can
+// list every table in the current tab at once with a section heading for context instead
+// of hiding them behind a picker.
 function tablesGroupedForLogic() {
   const groups = [];
   for (const sec of sections) {
+    if (sec.kind !== activeTab) continue;
     const list = [];
     const walk = tables => { for (const tb of tables) { list.push(tb); for (const g of tb.columnGroups) walk(g.tables); } };
     walk(sec.tables);
