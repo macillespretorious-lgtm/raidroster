@@ -902,6 +902,32 @@ if ($action === 'merge_cell' || $action === 'split_cell') {
     respond_structure($pdo, $col['template_id']);
 }
 
+// Colour/Merge mode's drag-to-merge tool: the client already knows the exact colspan it
+// wants (computed from every cell the drag passed over), unlike merge_cell's one-column-
+// at-a-time increment, so this sets it directly in one call.
+if ($action === 'set_cell_merge') {
+    $col = fetch_column_owned($pdo, $tenant['id'], (int)($body['columnId'] ?? 0));
+    $row = fetch_row_owned($pdo, $tenant['id'], (int)($body['rowId'] ?? 0));
+    if (!$col || !$row) fail(404, 'Not found');
+    if ((int)$col['table_id'] !== (int)$row['table_id']) fail(400, 'Row/column must belong to the same table');
+
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM raid_template_columns WHERE table_id = ? AND sort_order >= ?');
+    $stmt->execute([$col['table_id'], $col['sort_order']]);
+    $maxSpan = (int)$stmt->fetchColumn();
+    $colspan = max(1, min($maxSpan, (int)($body['colspan'] ?? 1)));
+
+    if ($colspan <= 1) {
+        $stmt = $pdo->prepare('DELETE FROM raid_template_cell_merges WHERE row_id = ? AND column_id = ?');
+        $stmt->execute([$row['id'], $col['id']]);
+    } else {
+        $stmt = $pdo->prepare('INSERT INTO raid_template_cell_merges (table_id, row_id, column_id, colspan) VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE colspan = VALUES(colspan)');
+        $stmt->execute([$col['table_id'], $row['id'], $col['id'], $colspan]);
+    }
+
+    respond_structure($pdo, $col['template_id']);
+}
+
 if ($action === 'add_column_group') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['tableId'] ?? 0));
     if (!$tb) fail(404, 'Table not found');

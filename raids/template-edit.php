@@ -212,9 +212,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
        absolutely-positioned-content) <td> — table cell min-height is applied
        inconsistently across browsers when the cell has no in-flow content at all. */
     .cell-height-spacer { height: 16px; }
-    .cell-merge-actions { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 2px; opacity: 0; pointer-events: none; transition: opacity .15s; }
-    .cell-merge-actions .icon-btn { width: 16px; height: 16px; font-size: 9px; padding: 0; pointer-events: auto; }
-    td.data-td:hover .cell-merge-actions { opacity: 1; }
     .add-row-btn { background: none; border: 1px dashed rgba(255,255,255,0.2); color: #a8b4d0; border-radius: 6px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
     .add-row-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
     .tbl-actions-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
@@ -409,6 +406,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     body.paint-mode-active .colour-mode .paint-table-title:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
     body.paint-mode-active .colour-mode th.paint-corner { cursor: crosshair; }
     body.paint-mode-active .colour-mode th.paint-corner:hover { background: rgba(240,192,74,0.25); }
+    body.merge-mode-active .colour-mode td.cell:not(.spacer-cell) { cursor: col-resize !important; }
+    body.merge-mode-active .colour-mode td.cell:not(.spacer-cell):hover { outline: 2px solid #7bd88f; outline-offset: -2px; }
+    .colour-mode td.cell.merge-touched { outline: 2px solid #7bd88f; outline-offset: -2px; background: rgba(123,216,143,0.28) !important; }
 
     /* Logic mode: class-restriction / max-count assignment rules, authored per table against
        a read-only grid (same "as it will appear on a raid page" rendering approach as
@@ -592,6 +592,15 @@ let paintColor = '#e05555';
 let paintErase = false;
 let paintDragging = false;
 let paintDragTouched = null; // Set of "tableId_rowId_colId" strings touched this drag gesture
+
+// Colour/Merge mode's merge tool: once armed, dragging across two or more cells in the
+// same row merges them into one (colspan = every real column the drag's cells span,
+// including any already-merged cell dragged over); a plain click with no drag on an
+// already-merged cell splits it back apart. Mutually exclusive with the paint tool, since
+// both drive the same grid mousedown/mousemove/mouseup gesture.
+let mergeArmed = false;
+let mergeDragging = false;
+let mergeDragTds = null; // <td> elements touched this drag gesture, in touch order
 
 // Editing lock: purely advisory (everyone on this page already passed the admin
 // role check), it exists to warn concurrent admins off each other's edits, not
@@ -981,7 +990,9 @@ function setMode(m) {
   cellOverrideStamp = null;
   updateStampBadge();
   paintArmed = false;
+  mergeArmed = false;
   document.body.classList.remove('paint-mode-active');
+  document.body.classList.remove('merge-mode-active');
   render();
 }
 
@@ -1246,8 +1257,6 @@ function render() {
       if (act === 'col-group') { const c = findColumn(id); call({ action: 'update_column', id, label: c.label, groupId: node.value ? parseInt(node.value, 10) : null }); }
       if (act === 'merge-header') call({ action: 'merge_header', id });
       if (act === 'split-header') call({ action: 'split_header', id });
-      if (act === 'merge-cell') call({ action: 'merge_cell', rowId: parseInt(node.dataset.rowId, 10), columnId: parseInt(node.dataset.colId, 10) });
-      if (act === 'split-cell') call({ action: 'split_cell', rowId: parseInt(node.dataset.rowId, 10), columnId: parseInt(node.dataset.colId, 10) });
       if (act === 'add-group') {
         const title = prompt('Group header title, e.g. Spider Wing:');
         if (title && title.trim()) call({ action: 'add_column_group', tableId: id, title: title.trim() });
@@ -1483,13 +1492,6 @@ function bodyCellsForRow(r, chunkCols, tb) {
     if (eff === 'spacer') { out.push(`<td class="spacer-cell" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}</td>`); i++; continue; }
     const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
     const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
-    const splitBtn = span > 1
-      ? `<button class="icon-btn" data-action="split-cell" data-row-id="${r.id}" data-col-id="${c.id}" title="Unmerge cell">&#8622;</button>`
-      : '';
-    const mergeActions = `<div class="cell-merge-actions">
-        <button class="icon-btn" data-action="merge-cell" data-row-id="${r.id}" data-col-id="${c.id}" title="Merge with next column">&harr;</button>
-        ${splitBtn}
-      </div>`;
     if (eff === 'text') {
       const display = cell.textContent
         ? renderCellTextHtml(cell.textContent)
@@ -1497,7 +1499,6 @@ function bodyCellsForRow(r, chunkCols, tb) {
       out.push(`<td${colspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}">
         ${overrideTag}
         <div class="cell-text-display" data-action="open-cell-editor" data-row-id="${r.id}" data-col-id="${c.id}" title="Click to edit text" style="${cellTextStyle(cell)}color:${cell.textColor || '#e8ecff'};">${display}</div>
-        ${mergeActions}
       </td>`);
     } else if (eff === 'icon') {
       const iconKey = `cell-icon-${r.id}_${c.id}`;
@@ -1511,10 +1512,9 @@ function bodyCellsForRow(r, chunkCols, tb) {
             <button type="button" class="kind-picker-remove" data-action="cell-icon" data-icon="" data-row-id="${r.id}" data-col-id="${c.id}">Clear</button>
           </div>
         </div>
-        ${mergeActions}
       </td>`);
     } else {
-      out.push(`<td${colspanAttr} class="data-td" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}<div class="cell-height-spacer"></div>${mergeActions}</td>`);
+      out.push(`<td${colspanAttr} class="data-td" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}<div class="cell-height-spacer"></div></td>`);
     }
     i += span;
   }
@@ -1849,9 +1849,11 @@ function renderPaintBar() {
     `<button type="button" class="paint-swatch ${paintArmed && !paintErase && paintColor.toLowerCase() === c ? 'active' : ''}" data-action="pick-paint-color" data-color="${c}" style="background:${c};" title="${c}"></button>`
   ).join('');
   const isCustomActive = paintArmed && !paintErase && !PAINT_PRESETS.some(p => p.toLowerCase() === paintColor.toLowerCase());
-  const hint = paintArmed
-    ? `<span class="paint-armed-hint">${paintErase ? 'Erasing' : 'Painting'} — click, drag, or click a row/column header below. <button type="button" class="paint-stop-btn" data-action="stop-paint">Stop</button></span>`
-    : `<span class="paint-bar-hint">Pick a color, then click, drag, or click a row/column header on the tables below.</span>`;
+  const hint = mergeArmed
+    ? `<span class="paint-armed-hint">Drag across 2+ cells in a row to merge them, or click an already-merged cell to split it apart. <button type="button" class="paint-stop-btn" data-action="stop-merge">Stop</button></span>`
+    : paintArmed
+      ? `<span class="paint-armed-hint">${paintErase ? 'Erasing' : 'Painting'} — click, drag, or click a row/column header below. <button type="button" class="paint-stop-btn" data-action="stop-paint">Stop</button></span>`
+      : `<span class="paint-bar-hint">Pick a color, then click, drag, or click a row/column header on the tables below.</span>`;
   el.innerHTML = `
     <span class="paint-bar-label">Paint</span>
     <div class="paint-swatches">${swatches}</div>
@@ -1859,26 +1861,35 @@ function renderPaintBar() {
       <input type="color" id="paintCustomColor" value="${paintColor}">
     </label>
     <button type="button" class="paint-tool-btn ${paintArmed && paintErase ? 'active' : ''}" data-action="pick-paint-erase" title="Clear color from painted cells">Eraser</button>
+    <button type="button" class="paint-tool-btn ${mergeArmed ? 'active' : ''}" data-action="toggle-merge" title="Drag across 2+ cells in a row to merge them">Merge cells</button>
     ${hint}`;
   el.querySelectorAll('[data-action]').forEach(node => {
     node.addEventListener('click', () => {
       const act = node.dataset.action;
-      if (act === 'pick-paint-color') { paintColor = node.dataset.color; paintErase = false; paintArmed = true; document.body.classList.add('paint-mode-active'); renderPaintBar(); }
-      if (act === 'pick-paint-erase') { paintErase = true; paintArmed = true; document.body.classList.add('paint-mode-active'); renderPaintBar(); }
+      if (act === 'pick-paint-color') { paintColor = node.dataset.color; paintErase = false; paintArmed = true; mergeArmed = false; document.body.classList.add('paint-mode-active'); document.body.classList.remove('merge-mode-active'); renderPaintBar(); }
+      if (act === 'pick-paint-erase') { paintErase = true; paintArmed = true; mergeArmed = false; document.body.classList.add('paint-mode-active'); document.body.classList.remove('merge-mode-active'); renderPaintBar(); }
       if (act === 'stop-paint') { paintArmed = false; document.body.classList.remove('paint-mode-active'); renderPaintBar(); }
+      if (act === 'toggle-merge') {
+        mergeArmed = !mergeArmed;
+        paintArmed = false;
+        document.body.classList.remove('paint-mode-active');
+        document.body.classList.toggle('merge-mode-active', mergeArmed);
+        renderPaintBar();
+      }
+      if (act === 'stop-merge') { mergeArmed = false; document.body.classList.remove('merge-mode-active'); renderPaintBar(); }
     });
   });
   document.getElementById('paintCustomColor').addEventListener('input', e => {
     // Only update state while the native picker is open -- re-rendering (which rebuilds
     // this very input) is deferred to 'change' below so it doesn't interrupt the picker.
-    paintColor = e.target.value; paintErase = false; paintArmed = true; document.body.classList.add('paint-mode-active');
+    paintColor = e.target.value; paintErase = false; paintArmed = true; mergeArmed = false; document.body.classList.add('paint-mode-active'); document.body.classList.remove('merge-mode-active');
     const swatchLabel = document.getElementById('paintCustomSwatch');
     if (swatchLabel) { swatchLabel.style.background = paintColor; swatchLabel.classList.add('active'); }
   });
   document.getElementById('paintCustomColor').addEventListener('change', e => {
     // Some browsers (notably Safari) only fire 'change' on a color input, never 'input' --
     // so 'change' must set the arm state itself rather than assume 'input' already did.
-    paintColor = e.target.value; paintErase = false; paintArmed = true; document.body.classList.add('paint-mode-active');
+    paintColor = e.target.value; paintErase = false; paintArmed = true; mergeArmed = false; document.body.classList.add('paint-mode-active'); document.body.classList.remove('merge-mode-active');
     renderPaintBar();
   });
 }
@@ -1959,13 +1970,68 @@ function wireColourPaint(el) {
 
   el.querySelectorAll('td.cell[data-row-id][data-col-id], td.paint-spacer-row[data-spacer-row-id], td.paint-spacer-col[data-spacer-col-id]').forEach(td => {
     td.addEventListener('mousedown', e => {
-      if (!paintArmed || e.button !== 0) return;
+      if (e.button !== 0) return;
+      if (mergeArmed) {
+        // Merge only targets ordinary assignable cells -- filler-override cells (class
+        // "cell spacer-cell") and column/row spacers never take part in a merge, matching
+        // Layout mode's old restriction that spacer-kind cells never had merge buttons.
+        if (!td.classList.contains('cell') || td.classList.contains('spacer-cell')) return;
+        e.preventDefault();
+        mergeDragging = true;
+        mergeDragTds = [];
+        touchMergeCell(td);
+        return;
+      }
+      if (!paintArmed) return;
       e.preventDefault();
       paintDragging = true;
       paintDragTouched = new Set();
       paintCell(td);
     });
   });
+}
+
+// Keys off the first cell touched this drag to keep every subsequent cell scoped to the
+// same table+row -- a merge is horizontal-only, single-row, so cells the cursor strays
+// into on another row are simply ignored rather than aborting the gesture.
+function touchMergeCell(td) {
+  if (mergeDragTds.length) {
+    const first = mergeDragTds[0];
+    if (td.dataset.tableId !== first.dataset.tableId || td.dataset.rowId !== first.dataset.rowId) return;
+  }
+  if (mergeDragTds.includes(td)) return;
+  mergeDragTds.push(td);
+  td.classList.add('merge-touched');
+}
+
+// Called on mouseup with every <td> the drag touched (in touch order). A single cell with
+// no drag either splits an already-merged cell apart (colSpan > 1) or does nothing; two or
+// more cells compute the merge's colspan from the full column-index range they cover,
+// including any already-merged cell dragged over, then set it directly in one call.
+function mergeCellsFromDrag(tds) {
+  tds.forEach(td => td.classList.remove('merge-touched'));
+  const tableId = parseInt(tds[0].dataset.tableId, 10);
+  const rowId = parseInt(tds[0].dataset.rowId, 10);
+  const tb = findTable(tableId);
+  if (!tb) return;
+  if (tds.length === 1) {
+    const td = tds[0];
+    if (td.colSpan > 1) {
+      call({ action: 'split_cell', rowId, columnId: parseInt(td.dataset.colId, 10) });
+    }
+    return;
+  }
+  let minIdx = Infinity, maxIdx = -Infinity;
+  tds.forEach(td => {
+    const colId = parseInt(td.dataset.colId, 10);
+    const idx = tb.columns.findIndex(c => c.id === colId);
+    if (idx < 0) return;
+    minIdx = Math.min(minIdx, idx);
+    maxIdx = Math.max(maxIdx, idx + (td.colSpan || 1) - 1);
+  });
+  if (!isFinite(minIdx) || !isFinite(maxIdx) || maxIdx <= minIdx) return;
+  const anchorCol = tb.columns[minIdx];
+  call({ action: 'set_cell_merge', tableId: tb.id, rowId, columnId: anchorCol.id, colspan: maxIdx - minIdx + 1 });
 }
 
 // Keys are prefixed by target kind so the mouseup handler below can split one drag gesture
@@ -1982,30 +2048,40 @@ function paintCell(td) {
 }
 
 document.addEventListener('mousemove', e => {
-  if (!paintDragging) return;
-  const td = e.target.closest('td.cell[data-row-id][data-col-id], td.paint-spacer-row[data-spacer-row-id], td.paint-spacer-col[data-spacer-col-id]');
-  if (td && document.getElementById('panelsEl').contains(td)) paintCell(td);
+  if (paintDragging) {
+    const td = e.target.closest('td.cell[data-row-id][data-col-id], td.paint-spacer-row[data-spacer-row-id], td.paint-spacer-col[data-spacer-col-id]');
+    if (td && document.getElementById('panelsEl').contains(td)) paintCell(td);
+  } else if (mergeDragging) {
+    const td = e.target.closest('td.cell[data-row-id][data-col-id]:not(.spacer-cell)');
+    if (td && document.getElementById('panelsEl').contains(td)) touchMergeCell(td);
+  }
 });
 
 document.addEventListener('mouseup', () => {
-  if (!paintDragging) return;
-  paintDragging = false;
-  const touched = paintDragTouched;
-  paintDragTouched = null;
-  if (!touched || !touched.size) return;
-  const byTable = new Map();
-  const ensure = tableId => {
-    if (!byTable.has(tableId)) byTable.set(tableId, { cells: [], spacerRows: [], spacerColumns: [] });
-    return byTable.get(tableId);
-  };
-  touched.forEach(key => {
-    const parts = key.split('_');
-    if (parts[0] === 'sr') ensure(Number(parts[1])).spacerRows.push(Number(parts[2]));
-    else if (parts[0] === 'sc') ensure(Number(parts[1])).spacerColumns.push(Number(parts[2]));
-    else ensure(Number(parts[1])).cells.push({ rowId: Number(parts[2]), columnId: Number(parts[3]) });
-  });
-  const color = paintErase ? null : paintColor;
-  byTable.forEach((payload, tableId) => call({ action: 'paint_cells', tableId, color, ...payload }));
+  if (paintDragging) {
+    paintDragging = false;
+    const touched = paintDragTouched;
+    paintDragTouched = null;
+    if (!touched || !touched.size) return;
+    const byTable = new Map();
+    const ensure = tableId => {
+      if (!byTable.has(tableId)) byTable.set(tableId, { cells: [], spacerRows: [], spacerColumns: [] });
+      return byTable.get(tableId);
+    };
+    touched.forEach(key => {
+      const parts = key.split('_');
+      if (parts[0] === 'sr') ensure(Number(parts[1])).spacerRows.push(Number(parts[2]));
+      else if (parts[0] === 'sc') ensure(Number(parts[1])).spacerColumns.push(Number(parts[2]));
+      else ensure(Number(parts[1])).cells.push({ rowId: Number(parts[2]), columnId: Number(parts[3]) });
+    });
+    const color = paintErase ? null : paintColor;
+    byTable.forEach((payload, tableId) => call({ action: 'paint_cells', tableId, color, ...payload }));
+  } else if (mergeDragging) {
+    mergeDragging = false;
+    const touched = mergeDragTds;
+    mergeDragTds = null;
+    if (touched && touched.length) mergeCellsFromDrag(touched);
+  }
 });
 
 // Logic mode: class-restriction / max-count assignment rules, authored per table. A rule's
@@ -2558,6 +2634,17 @@ document.addEventListener('contextmenu', e => {
   paintDragging = false;
   paintDragTouched = null;
   document.body.classList.remove('paint-mode-active');
+  renderPaintBar();
+});
+
+document.addEventListener('contextmenu', e => {
+  if (!mergeArmed) return;
+  e.preventDefault();
+  mergeArmed = false;
+  mergeDragging = false;
+  if (mergeDragTds) mergeDragTds.forEach(td => td.classList.remove('merge-touched'));
+  mergeDragTds = null;
+  document.body.classList.remove('merge-mode-active');
   renderPaintBar();
 });
 
