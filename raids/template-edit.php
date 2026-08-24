@@ -416,8 +416,11 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     #modePlaceholderEl.logic-mode { text-align: left; padding: 18px; }
     .logic-header h2 { color: #e8ecff; font-size: 18px; margin-bottom: 4px; }
     .logic-hint { color: #7f8bad; font-size: 12.5px; margin: 0 0 12px; max-width: 640px; }
-    .logic-table-picker { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: #a8b4d0; margin-bottom: 16px; }
-    .logic-table-picker select { background: #1a2338; color: #e8ecff; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font: inherit; }
+    .logic-section { margin-bottom: 28px; }
+    .logic-section-title { color: #a8b4d0; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .logic-table-card { border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; background: rgba(255,255,255,0.015); padding: 14px; margin-bottom: 16px; }
+    .logic-table-card:last-child { margin-bottom: 0; }
+    .logic-table-heading { color: #e8ecff; font-size: 13.5px; font-weight: 700; margin: 0 0 12px; }
     .logic-body { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
     .logic-rules-col { flex: 0 0 300px; min-width: 260px; }
     .logic-grid-col { flex: 1 1 420px; min-width: 320px; }
@@ -437,7 +440,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .logic-picker-hint { font-size: 11.5px; color: #f0c04a; margin: 0; }
     .logic-draft-actions { display: flex; gap: 8px; }
     .logic-mode .tbl-wrap { min-width: 0; max-width: 100%; }
-    .logic-mode .tbl-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0; }
     .logic-mode .grid-scroll { overflow-x: auto; }
     .logic-mode table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     .logic-mode table.grid th, .logic-mode table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
@@ -569,10 +571,10 @@ let sections = <?= json_encode($sections) ?>;
 let editMode = 'layout';
 
 // Logic mode: the rule currently being added/edited (null when just browsing the rules
-// list), and which table's grid is shown. classes/cellRefs are Sets for cheap toggle-on-
-// click; cellRefs entries are "rowId_columnId" strings, matching the server's cellRefs shape
-// once split back apart in the save payload.
-let logicActiveTableId = null;
+// lists). All tables are shown at once now, so the draft tracks which table it belongs to
+// via tableId. classes/cellRefs are Sets for cheap toggle-on-click; cellRefs entries are
+// "rowId_columnId" strings, matching the server's cellRefs shape once split back apart in
+// the save payload.
 let logicDraft = null;
 
 // "Add cell Override" stamp tool: armed from the same +Row/+Column popover mechanism
@@ -2064,7 +2066,7 @@ function renderRuleDraftForm() {
 function logicBodyCellsForRow(r, chunkCols, tb) {
   const mergeByCol = {};
   tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
-  const picking = !!(logicDraft && logicDraft.scope === 'cells');
+  const picking = !!(logicDraft && logicDraft.scope === 'cells' && logicDraft.tableId === tb.id);
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
@@ -2106,57 +2108,80 @@ function logicColumnBlock(chunkCols, tb) {
 
 function logicRenderTable(tb) {
   const blocks = chunkColumns(tb.columns).map(chunkCols => logicColumnBlock(chunkCols, tb)).join('');
-  return `<div class="tbl-wrap">${tb.title ? `<div class="tbl-title">${esc(tb.title)}</div>` : ''}${blocks}</div>`;
+  return `<div class="tbl-wrap">${blocks}</div>`;
+}
+
+// Groups every table (including nested boss-tables inside column groups, same traversal
+// order as allTables()) under its parent section, so Logic mode can list every table at
+// once with a section heading for context instead of hiding them behind a picker.
+function tablesGroupedForLogic() {
+  const groups = [];
+  for (const sec of sections) {
+    const list = [];
+    const walk = tables => { for (const tb of tables) { list.push(tb); for (const g of tb.columnGroups) walk(g.tables); } };
+    walk(sec.tables);
+    if (list.length) groups.push({ sec, list });
+  }
+  return groups;
+}
+
+// Untitled tables (e.g. roster tables, which commonly have no title set) fall back to
+// their section's title, disambiguated with a "table N" suffix if the section holds more
+// than one -- so every table is identifiable without needing its own name.
+function logicTableLabel(tb, sec, idx, total) {
+  if (tb.title) return tb.title;
+  return total > 1 ? `${sec.title} — table ${idx + 1}` : sec.title;
+}
+
+function renderLogicTableCard(tb, label) {
+  if (!tb.rules) tb.rules = []; // defensive: older cached data shapes may lack this field
+  const isDrafting = !!(logicDraft && logicDraft.tableId === tb.id);
+  const draftHtml = isDrafting ? renderRuleDraftForm() : `<button type="button" class="btn" data-action="logic-add-rule" data-table-id="${tb.id}">+ Add Rule</button>`;
+  return `<div class="logic-table-card" data-table-id="${tb.id}">
+    <h4 class="logic-table-heading">${esc(label)}</h4>
+    <div class="logic-body">
+      <div class="logic-rules-col">
+        ${renderRulesList(tb)}
+        ${draftHtml}
+      </div>
+      <div class="logic-grid-col">${logicRenderTable(tb)}</div>
+    </div>
+  </div>`;
 }
 
 function renderLogicMode(el) {
-  const tables = allTables();
-  if (!logicActiveTableId || !tables.some(t => t.id === logicActiveTableId)) {
-    logicActiveTableId = tables.length ? tables[0].id : null;
-    logicDraft = null;
-  }
-  const tb = logicActiveTableId ? findTable(logicActiveTableId) : null;
-  if (tb && !tb.rules) tb.rules = []; // defensive: older cached data shapes may lack this field
+  if (logicDraft && !findTable(logicDraft.tableId)) logicDraft = null; // table was deleted mid-edit
 
-  const tableOptions = tables.map(t => `<option value="${t.id}" ${t.id === logicActiveTableId ? 'selected' : ''}>${esc(t.title || '(untitled table)')}</option>`).join('');
-  const draftHtml = logicDraft ? renderRuleDraftForm() : `<button type="button" class="btn" data-action="logic-add-rule" ${tb ? '' : 'disabled'}>+ Add Rule</button>`;
+  const groups = tablesGroupedForLogic();
+  const sectionsHtml = groups.map(({ sec, list }) => `
+    <div class="logic-section">
+      <h3 class="logic-section-title">${esc(sec.title)}</h3>
+      ${list.map((tb, idx) => renderLogicTableCard(tb, logicTableLabel(tb, sec, idx, list.length))).join('')}
+    </div>`).join('');
 
   el.innerHTML = `
     <div class="logic-header">
       <h2>Logic</h2>
       <p class="logic-hint">Restrict which classes can be assigned to a cell, or cap how many cells the same toon can occupy. Rules are enforced when toons are assigned on the raid page.</p>
-      ${tables.length ? `<label class="logic-table-picker">Table <select id="logicTableSelect">${tableOptions}</select></label>` : ''}
     </div>
-    ${tb ? `<div class="logic-body">
-      <div class="logic-rules-col">
-        <h3 style="color:#e8ecff;font-size:13px;margin:0 0 8px;">Rules</h3>
-        ${renderRulesList(tb)}
-        ${draftHtml}
-      </div>
-      <div class="logic-grid-col">${logicRenderTable(tb)}</div>
-    </div>` : '<p class="empty">No tables in this template yet &mdash; switch to Layout mode to add one.</p>'}`;
+    ${sectionsHtml || '<p class="empty">No tables in this template yet &mdash; switch to Layout mode to add one.</p>'}`;
 
-  wireLogicMode(el, tb);
+  wireLogicMode(el);
 }
 
-function wireLogicMode(el, tb) {
-  const sel = document.getElementById('logicTableSelect');
-  if (sel) sel.addEventListener('change', () => {
-    logicActiveTableId = parseInt(sel.value, 10);
-    logicDraft = null;
-    renderLogicMode(el);
-  });
-  if (!tb) return;
-
+function wireLogicMode(el) {
   el.querySelectorAll('[data-action="logic-add-rule"]').forEach(btn => btn.addEventListener('click', () => {
-    logicDraft = { id: null, ruleType: 'class_restrict', scope: 'cells', classes: new Set(), maxCount: 1, label: '', cellRefs: new Set() };
+    logicDraft = { tableId: parseInt(btn.dataset.tableId, 10), id: null, ruleType: 'class_restrict', scope: 'cells', classes: new Set(), maxCount: 1, label: '', cellRefs: new Set() };
     renderLogicMode(el);
   }));
 
   el.querySelectorAll('[data-action="logic-edit-rule"]').forEach(btn => btn.addEventListener('click', () => {
-    const rule = tb.rules.find(r => r.id === parseInt(btn.dataset.ruleId, 10));
+    const card = btn.closest('.logic-table-card');
+    const tb = card ? findTable(parseInt(card.dataset.tableId, 10)) : null;
+    const rule = tb && tb.rules.find(r => r.id === parseInt(btn.dataset.ruleId, 10));
     if (!rule) return;
     logicDraft = {
+      tableId: tb.id,
       id: rule.id,
       ruleType: rule.ruleType,
       scope: rule.scope,
@@ -2174,29 +2199,31 @@ function wireLogicMode(el, tb) {
     call({ action: 'delete_rule', ruleId: parseInt(btn.dataset.ruleId, 10) });
   }));
 
+  if (!logicDraft) return;
+  const d = logicDraft;
+
   const typeSel = document.getElementById('logicRuleType');
-  if (typeSel) typeSel.addEventListener('change', () => { logicDraft.ruleType = typeSel.value; renderLogicMode(el); });
+  if (typeSel) typeSel.addEventListener('change', () => { d.ruleType = typeSel.value; renderLogicMode(el); });
 
   const scopeSel = document.getElementById('logicScope');
-  if (scopeSel) scopeSel.addEventListener('change', () => { logicDraft.scope = scopeSel.value; renderLogicMode(el); });
+  if (scopeSel) scopeSel.addEventListener('change', () => { d.scope = scopeSel.value; renderLogicMode(el); });
 
   el.querySelectorAll('[data-action="logic-toggle-class"]').forEach(cb => cb.addEventListener('change', () => {
-    if (cb.checked) logicDraft.classes.add(cb.value); else logicDraft.classes.delete(cb.value);
+    if (cb.checked) d.classes.add(cb.value); else d.classes.delete(cb.value);
   }));
 
   const maxInput = document.getElementById('logicMaxCount');
-  if (maxInput) maxInput.addEventListener('input', () => { logicDraft.maxCount = Math.max(1, parseInt(maxInput.value, 10) || 1); });
+  if (maxInput) maxInput.addEventListener('input', () => { d.maxCount = Math.max(1, parseInt(maxInput.value, 10) || 1); });
 
   const labelInput = document.getElementById('logicLabel');
-  if (labelInput) labelInput.addEventListener('input', () => { logicDraft.label = labelInput.value; });
+  if (labelInput) labelInput.addEventListener('input', () => { d.label = labelInput.value; });
 
   el.querySelectorAll('[data-action="logic-save-rule"]').forEach(btn => btn.addEventListener('click', () => {
-    const d = logicDraft;
     if (d.ruleType === 'class_restrict' && !d.classes.size) { alert('Pick at least one class.'); return; }
     if (d.scope === 'cells' && !d.cellRefs.size) { alert('Pick at least one cell on the grid.'); return; }
     const payload = {
       action: d.id ? 'update_rule' : 'add_rule',
-      tableId: tb.id,
+      tableId: d.tableId,
       ruleType: d.ruleType,
       scope: d.scope,
       classes: d.ruleType === 'class_restrict' ? Array.from(d.classes) : [],
@@ -2211,10 +2238,10 @@ function wireLogicMode(el, tb) {
 
   el.querySelectorAll('[data-action="logic-cancel-rule"]').forEach(btn => btn.addEventListener('click', () => { logicDraft = null; renderLogicMode(el); }));
 
-  if (logicDraft && logicDraft.scope === 'cells') {
+  if (d.scope === 'cells') {
     el.querySelectorAll('td.logic-cell.logic-picking').forEach(td => td.addEventListener('click', () => {
       const key = `${td.dataset.rowId}_${td.dataset.colId}`;
-      if (logicDraft.cellRefs.has(key)) logicDraft.cellRefs.delete(key); else logicDraft.cellRefs.add(key);
+      if (d.cellRefs.has(key)) d.cellRefs.delete(key); else d.cellRefs.add(key);
       renderLogicMode(el);
     }));
   }
