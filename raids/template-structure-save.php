@@ -926,6 +926,35 @@ if ($action === 'set_cell_merge') {
         $stmt = $pdo->prepare('DELETE FROM raid_template_cell_merges WHERE row_id = ? AND column_id = ?');
         $stmt->execute([$row['id'], $col['id']]);
     } else {
+        // HTML colspan/rowspan can only extend right/down from the anchor, so the merge's
+        // structural anchor (row/col above) must stay top-left of the rectangle. But the cell
+        // the user actually clicked to start the drag is what they expect to see survive as
+        // the merged cell's content -- so if it differs from the anchor, swap the two
+        // positions' data (reversibly: splitting the merge later reveals the pre-swap values
+        // at their original positions, nothing is lost).
+        $primaryRowId = (int)($body['primaryRowId'] ?? 0);
+        $primaryColumnId = (int)($body['primaryColumnId'] ?? 0);
+        if ($primaryRowId && $primaryColumnId && ($primaryRowId !== (int)$row['id'] || $primaryColumnId !== (int)$col['id'])) {
+            $primaryRow = fetch_row_owned($pdo, $tenant['id'], $primaryRowId);
+            $primaryCol = fetch_column_owned($pdo, $tenant['id'], $primaryColumnId);
+            if ($primaryRow && $primaryCol && (int)$primaryRow['table_id'] === (int)$col['table_id'] && (int)$primaryCol['table_id'] === (int)$col['table_id']) {
+                $cellFields = ['text_content' => null, 'bg_color' => null, 'text_color' => null, 'bold' => null, 'font' => null, 'icon' => null, 'kind_override' => null];
+                $stmtCell = $pdo->prepare('SELECT text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ? AND row_id = ? AND column_id = ?');
+                $stmtCell->execute([$col['table_id'], $row['id'], $col['id']]);
+                $anchorCell = $stmtCell->fetch(PDO::FETCH_ASSOC) ?: $cellFields;
+                $stmtCell->execute([$col['table_id'], $primaryRow['id'], $primaryCol['id']]);
+                $primaryCell = $stmtCell->fetch(PDO::FETCH_ASSOC) ?: $cellFields;
+
+                $stmtUpsert = $pdo->prepare(
+                    'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color), bold = VALUES(bold), font = VALUES(font), icon = VALUES(icon), kind_override = VALUES(kind_override)'
+                );
+                $stmtUpsert->execute([$col['table_id'], $row['id'], $col['id'], $primaryCell['text_content'] ?? '', $primaryCell['bg_color'], $primaryCell['text_color'], $primaryCell['bold'] ?? 0, $primaryCell['font'], $primaryCell['icon'], $primaryCell['kind_override']]);
+                $stmtUpsert->execute([$col['table_id'], $primaryRow['id'], $primaryCol['id'], $anchorCell['text_content'] ?? '', $anchorCell['bg_color'], $anchorCell['text_color'], $anchorCell['bold'] ?? 0, $anchorCell['font'], $anchorCell['icon'], $anchorCell['kind_override']]);
+            }
+        }
+
         // A smaller merge fully swallowed by this bigger rectangle would otherwise sit
         // orphaned-but-inert (its anchor is now a covered cell) and could reappear as a
         // phantom merge if this bigger merge is later split -- remove it up front instead.

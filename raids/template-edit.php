@@ -727,6 +727,9 @@ const MAX_DATA_COLS = 10;
 // admins don't have to think in pixels — 1 unit = 60px, defaulting to 2 units (120px).
 const COL_UNIT_PX = 60;
 const DEFAULT_COL_UNITS = 2;
+// Icon columns hold a single fixed-size icon, so they're allowed to shrink further than text/
+// general columns -- half the normal floor, matching the halved min-width CSS on icon cells.
+const ICON_MIN_COL_PX = COL_UNIT_PX / 2;
 function pxToUnits(px) { return (px === null || px === undefined) ? '' : Math.round(px / COL_UNIT_PX); }
 function unitsToPx(units) { return (units === '' || units === null || units === undefined) ? null : parseInt(units, 10) * COL_UNIT_PX; }
 
@@ -1292,7 +1295,9 @@ function render() {
         else {
           const tb = tableForColumn(id);
           const base = (c.width !== null && c.width !== undefined) ? c.width : (tb.defaultColumnWidth || DEFAULT_COL_UNITS * COL_UNIT_PX);
-          call({ action: 'update_column', id, label: c.label, width: Math.max(COL_UNIT_PX, base - COL_UNIT_PX) });
+          const step = c.kind === 'icon' ? COL_UNIT_PX / 2 : COL_UNIT_PX;
+          const min = c.kind === 'icon' ? ICON_MIN_COL_PX : COL_UNIT_PX;
+          call({ action: 'update_column', id, label: c.label, width: Math.max(min, base - step) });
         }
       }
       if (act === 'col-width-inc') {
@@ -1301,7 +1306,8 @@ function render() {
         else {
           const tb = tableForColumn(id);
           const base = (c.width !== null && c.width !== undefined) ? c.width : (tb.defaultColumnWidth || DEFAULT_COL_UNITS * COL_UNIT_PX);
-          call({ action: 'update_column', id, label: c.label, width: base + COL_UNIT_PX });
+          const step = c.kind === 'icon' ? COL_UNIT_PX / 2 : COL_UNIT_PX;
+          call({ action: 'update_column', id, label: c.label, width: base + step });
         }
       }
       if (act === 'row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
@@ -1762,21 +1768,26 @@ function previewBodyCellsForRow(r, chunkCols, tb, coverage) {
     const colspan = Math.min(span.colspan, chunkCols.length - i);
     const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
     const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
+    // Column-kind min-width, not the cell's effective kind -- the width-adjustment buttons key
+    // off c.kind too, so an icon column stays shrinkable to its lower floor regardless of a
+    // cell's own kind_override.
+    const minWidthStyle = c.kind === 'icon' ? `min-width:${ICON_MIN_COL_PX}px;` : '';
     if (eff === 'spacer') {
       const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
-      const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
+      const spacerStyle = (minWidthStyle || spacerColor) ? ` style="${minWidthStyle}${spacerColor ? `background:${spacerColor};` : ''}"` : '';
       out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell"${spacerStyle}></td>`);
       i += colspan; continue;
     }
     if (eff === 'text') {
-      const style = `background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
+      const style = `${minWidthStyle}background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-td" style="${style}">${renderCellTextHtml(cell.textContent)}</td>`);
     } else if (eff === 'icon') {
-      const style = cell.bgColor ? `background:${cell.bgColor};` : '';
+      const style = minWidthStyle + (cell.bgColor ? `background:${cell.bgColor};` : '');
       const icon = cell.icon ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '';
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell icon-td" style="${style}">${icon}</td>`);
     } else {
-      out.push(`<td${colspanAttr}${rowspanAttr} class="cell"><span class="empty-slot">+</span></td>`);
+      const style = minWidthStyle ? ` style="${minWidthStyle}"` : '';
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell"${style}><span class="empty-slot">+</span></td>`);
     }
     i += colspan;
   }
@@ -1874,14 +1885,19 @@ function colourBodyCellsForRow(r, chunkCols, tb, coverage) {
       // any other cell; carries the same colspan/rowspan/remove-merge as a normal cell so a
       // merge anchored here doesn't leave the row's <td> count short.
       const bg = cell.bgColor || null;
-      const style = bg ? ` style="background:${bg};"` : '';
+      const minWidthStyle = c.kind === 'icon' ? `min-width:${ICON_MIN_COL_PX}px;` : '';
+      const style = (minWidthStyle || bg) ? ` style="${minWidthStyle}${bg ? `background:${bg};` : ''}"` : '';
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell spacer-cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${style} title="Paint this filler cell">${removeMergeBtn}</td>`);
       i += colspan; continue;
     }
     const bg = cell.bgColor || null;
-    const style = eff === 'text'
+    // Column-kind min-width, not the cell's effective kind -- the width-adjustment buttons key
+    // off c.kind too, so an icon column stays shrinkable to its lower floor even where a cell's
+    // own kind_override makes it render as text/general, matching the column's actual width.
+    const minWidthStyle = c.kind === 'icon' ? `min-width:${ICON_MIN_COL_PX}px;` : '';
+    const style = minWidthStyle + (eff === 'text'
       ? `background:${bg || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
-      : (bg ? `background:${bg};` : '');
+      : (bg ? `background:${bg};` : ''));
     const content = eff === 'text'
       ? renderCellTextHtml(cell.textContent)
       : (eff === 'icon'
@@ -2156,9 +2172,16 @@ function mergeCellsFromDrag(tds) {
   if (maxColIdx <= minColIdx && maxRowIdx <= minRowIdx) return;
   const anchorCol = tb.columns[minColIdx];
   const anchorRow = tb.rows[minRowIdx];
+  // HTML colspan/rowspan can only extend right/down, so the merge's structural anchor must
+  // stay top-left -- but the cell the user actually clicked (tds[0], the drag's start) is
+  // what they expect to see survive as the merged cell's content, which may be a different
+  // cell. The backend swaps the two positions' data so the clicked cell's text/color/icon
+  // ends up at the anchor position instead of whatever was already top-left.
+  const primaryTd = tds[0];
   call({
     action: 'set_cell_merge', tableId: tb.id, rowId: anchorRow.id, columnId: anchorCol.id,
     colspan: maxColIdx - minColIdx + 1, rowspan: maxRowIdx - minRowIdx + 1,
+    primaryRowId: parseInt(primaryTd.dataset.rowId, 10), primaryColumnId: parseInt(primaryTd.dataset.colId, 10),
   });
 }
 

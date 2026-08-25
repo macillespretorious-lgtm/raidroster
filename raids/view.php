@@ -1079,23 +1079,27 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage) {
     const colspan = Math.min(span.colspan, chunkCols.length - i);
     const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
     const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
+    // Column-kind min-width (matches the editor's ICON_MIN_COL_PX = half the normal 60px
+    // floor) -- icon columns hold one fixed-size icon, so they're allowed narrower than the
+    // generic td.cell 90px CSS floor.
+    const minWidthStyle = c.kind === 'icon' ? 'min-width:30px;' : '';
     if (eff === 'spacer') {
       const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
-      const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
+      const spacerStyle = (minWidthStyle || spacerColor) ? ` style="${minWidthStyle}${spacerColor ? `background:${spacerColor};` : ''}"` : '';
       out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell"${spacerStyle}></td>`);
       i += colspan; continue;
     }
     if (eff === 'text') {
-      const style = `background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
+      const style = `${minWidthStyle}background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-cell" style="${style}">${renderCellTextHtml(cell ? cell.textContent : '')}</td>`);
     } else if (eff === 'icon') {
-      const bgStyle = (cell && cell.bgColor) ? ` style="background:${cell.bgColor};"` : '';
+      const bgStyle = ` style="${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}"`;
       const icon = (cell && cell.icon) ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '';
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell icon-cell"${bgStyle}>${icon}</td>`);
     } else {
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
-      const bgStyle = (cell && cell.bgColor) ? ` style="background:${cell.bgColor};"` : '';
+      const bgStyle = (minWidthStyle || (cell && cell.bgColor)) ? ` style="${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}"` : '';
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
     }
     i += colspan;
