@@ -173,7 +173,7 @@ function fmtTime($t) {
     table.grid td.text-cell { text-align: left; white-space: nowrap; }
     table.grid td.icon-cell { text-align: center; }
     table.grid th.group-th { font-size: 13px; letter-spacing: .04em; }
-    td.cell { min-width: 90px; }
+    td.cell { min-width: 90px; background: rgba(255,255,255,0.04); }
     .inline-raid-icon { margin: 0 1px; }
     .raid-icon-cell { display: inline-block; }
     th.spacer-th, td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
@@ -1090,7 +1090,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage) {
       i += colspan; continue;
     }
     if (eff === 'text') {
-      const style = `${minWidthStyle}background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
+      const style = `${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-cell" style="${style}">${renderCellTextHtml(cell ? cell.textContent : '')}</td>`);
     } else if (eff === 'icon') {
       const bgStyle = ` style="${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}"`;

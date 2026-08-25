@@ -328,7 +328,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .preview-modal table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     .preview-modal table.grid th, .preview-modal table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
     .preview-modal table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
-    .preview-modal td.cell { min-width: 90px; }
+    .preview-modal td.cell { min-width: 90px; background: rgba(255,255,255,0.04); }
     .preview-modal th.spacer-th, .preview-modal td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
     .preview-modal .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
     .preview-modal .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
@@ -395,6 +395,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .colour-mode table.grid th, .colour-mode table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
     .colour-mode table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
     .colour-mode td.cell { min-width: 90px; user-select: none; }
+    .colour-mode td.cell:not(.spacer-cell) { background: rgba(255,255,255,0.04); }
     .colour-mode td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
     .colour-mode td.spacer-cell.paint-spacer-row, .colour-mode td.spacer-cell.paint-spacer-col { border-color: rgba(255,255,255,0.15); border-style: dashed; }
     body.paint-mode-active .colour-mode td.spacer-cell.paint-spacer-row, body.paint-mode-active .colour-mode td.spacer-cell.paint-spacer-col { cursor: crosshair !important; }
@@ -1789,7 +1790,7 @@ function previewBodyCellsForRow(r, chunkCols, tb, coverage) {
       i += colspan; continue;
     }
     if (eff === 'text') {
-      const style = `${minWidthStyle}background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
+      const style = `${minWidthStyle}${cell.bgColor ? `background:${cell.bgColor};` : ''}color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-td" style="${style}">${renderCellTextHtml(cell.textContent)}</td>`);
     } else if (eff === 'icon') {
       const style = minWidthStyle + (cell.bgColor ? `background:${cell.bgColor};` : '');
@@ -1906,7 +1907,7 @@ function colourBodyCellsForRow(r, chunkCols, tb, coverage) {
     // own kind_override makes it render as text/general, matching the column's actual width.
     const minWidthStyle = (c.kind === 'icon' || c.kind === 'text' || c.kind === 'general') ? `min-width:${NARROW_MIN_COL_PX}px;` : '';
     const style = minWidthStyle + (eff === 'text'
-      ? `background:${bg || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
+      ? `${bg ? `background:${bg};` : ''}color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
       : (bg ? `background:${bg};` : ''));
     const content = eff === 'text'
       ? renderCellTextHtml(cell.textContent)
