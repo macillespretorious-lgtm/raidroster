@@ -1075,16 +1075,16 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage) {
     if (coverage.covered.has(`${r.id}_${c.id}`)) { i++; continue; }
     const cell = tb.cells[r.id + '_' + c.id];
     const eff = effectiveKind(r, c, cell);
-    if (eff === 'spacer') {
-      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
-      const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
-      out.push(`<td class="spacer-cell"${spacerStyle}></td>`);
-      i++; continue;
-    }
     const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
     const colspan = Math.min(span.colspan, chunkCols.length - i);
     const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
     const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
+    if (eff === 'spacer') {
+      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
+      const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
+      out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell"${spacerStyle}></td>`);
+      i += colspan; continue;
+    }
     if (eff === 'text') {
       const style = `background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-cell" style="${style}">${renderCellTextHtml(cell ? cell.textContent : '')}</td>`);

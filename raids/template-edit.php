@@ -408,8 +408,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     body.paint-mode-active .colour-mode .paint-table-title:hover { outline: 2px solid #f0c04a; outline-offset: -2px; }
     body.paint-mode-active .colour-mode th.paint-corner { cursor: crosshair; }
     body.paint-mode-active .colour-mode th.paint-corner:hover { background: rgba(240,192,74,0.25); }
-    body.merge-mode-active .colour-mode td.cell:not(.spacer-cell) { cursor: col-resize !important; }
-    body.merge-mode-active .colour-mode td.cell:not(.spacer-cell):hover { outline: 2px solid #7bd88f; outline-offset: -2px; }
+    body.merge-mode-active .colour-mode td.cell { cursor: col-resize !important; }
+    body.merge-mode-active .colour-mode td.cell:hover { outline: 2px solid #7bd88f; outline-offset: -2px; }
     .colour-mode td.cell.merge-touched { outline: 2px solid #7bd88f; outline-offset: -2px; background: rgba(123,216,143,0.28) !important; }
 
     /* Logic mode: class-restriction / max-count assignment rules, authored per table against
@@ -1585,11 +1585,11 @@ function bodyCellsForRow(r, chunkCols, tb, coverage) {
           </div>
         </div>`
       : '';
-    if (eff === 'spacer') { out.push(`<td class="spacer-cell" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}</td>`); i++; continue; }
     const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
     const colspan = Math.min(span.colspan, chunkCols.length - i);
     const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
     const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
+    if (eff === 'spacer') { out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}</td>`); i += colspan; continue; }
     if (eff === 'text') {
       const display = cell.textContent
         ? renderCellTextHtml(cell.textContent)
@@ -1758,16 +1758,16 @@ function previewBodyCellsForRow(r, chunkCols, tb, coverage) {
     if (coverage.covered.has(`${r.id}_${c.id}`)) { i++; continue; }
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
-    if (eff === 'spacer') {
-      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
-      const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
-      out.push(`<td class="spacer-cell"${spacerStyle}></td>`);
-      i++; continue;
-    }
     const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
     const colspan = Math.min(span.colspan, chunkCols.length - i);
     const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
     const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
+    if (eff === 'spacer') {
+      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
+      const spacerStyle = spacerColor ? ` style="background:${spacerColor};"` : '';
+      out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell"${spacerStyle}></td>`);
+      i += colspan; continue;
+    }
     if (eff === 'text') {
       const style = `background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-td" style="${style}">${renderCellTextHtml(cell.textContent)}</td>`);
@@ -1861,18 +1861,23 @@ function colourBodyCellsForRow(r, chunkCols, tb, coverage) {
     }
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
-    if (eff === 'spacer') {
-      // A cell-level "Filler" override (row/column themselves aren't spacer-kind) — it
-      // still owns a real raid_template_cells row, so it stays paintable like any other cell.
-      const bg = cell.bgColor || null;
-      const style = bg ? ` style="background:${bg};"` : '';
-      out.push(`<td class="cell spacer-cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${style} title="Paint this filler cell"></td>`);
-      i++; continue;
-    }
     const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
     const colspan = Math.min(span.colspan, chunkCols.length - i);
     const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
     const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
+    const removeMergeBtn = (span.colspan > 1 || span.rowspan > 1)
+      ? `<button type="button" class="cell-split-btn" data-action="remove-merge" data-row-id="${r.id}" data-col-id="${c.id}" title="Remove merge">&times;</button>`
+      : '';
+    if (eff === 'spacer') {
+      // A cell-level "Filler" override (row/column themselves aren't spacer-kind) — it
+      // still owns a real raid_template_cells row, so it stays paintable and mergeable like
+      // any other cell; carries the same colspan/rowspan/remove-merge as a normal cell so a
+      // merge anchored here doesn't leave the row's <td> count short.
+      const bg = cell.bgColor || null;
+      const style = bg ? ` style="background:${bg};"` : '';
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell spacer-cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${style} title="Paint this filler cell">${removeMergeBtn}</td>`);
+      i += colspan; continue;
+    }
     const bg = cell.bgColor || null;
     const style = eff === 'text'
       ? `background:${bg || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
@@ -1882,9 +1887,6 @@ function colourBodyCellsForRow(r, chunkCols, tb, coverage) {
       : (eff === 'icon'
         ? (cell.icon ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '<span class="empty-slot">+</span>')
         : '<span class="empty-slot">+</span>');
-    const removeMergeBtn = (span.colspan > 1 || span.rowspan > 1)
-      ? `<button type="button" class="cell-split-btn" data-action="remove-merge" data-row-id="${r.id}" data-col-id="${c.id}" title="Remove merge">&times;</button>`
-      : '';
     out.push(`<td${colspanAttr}${rowspanAttr} class="cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="${style}">${content}${removeMergeBtn}</td>`);
     i += colspan;
   }
@@ -2090,10 +2092,10 @@ function wireColourPaint(el) {
     td.addEventListener('mousedown', e => {
       if (e.button !== 0) return;
       if (mergeArmed) {
-        // Merge only targets ordinary assignable cells -- filler-override cells (class
-        // "cell spacer-cell") and column/row spacers never take part in a merge, matching
-        // Layout mode's old restriction that spacer-kind cells never had merge buttons.
-        if (!td.classList.contains('cell') || td.classList.contains('spacer-cell')) return;
+        // Merge targets any real (row,column) cell -- including filler-override cells, which
+        // still own a real raid_template_cells row -- but not whole-row/whole-column spacer
+        // strips (class "spacer-cell" without "cell"), which have no per-cell identity to merge.
+        if (!td.classList.contains('cell')) return;
         e.preventDefault();
         mergeDragging = true;
         mergeDragTds = [];
@@ -2178,7 +2180,7 @@ document.addEventListener('mousemove', e => {
     const td = e.target.closest('td.cell[data-row-id][data-col-id], td.paint-spacer-row[data-spacer-row-id], td.paint-spacer-col[data-spacer-col-id]');
     if (td && document.getElementById('panelsEl').contains(td)) paintCell(td);
   } else if (mergeDragging) {
-    const td = e.target.closest('td.cell[data-row-id][data-col-id]:not(.spacer-cell)');
+    const td = e.target.closest('td.cell[data-row-id][data-col-id]');
     if (td && document.getElementById('panelsEl').contains(td)) touchMergeCell(td);
   }
 });
