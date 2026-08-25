@@ -742,9 +742,9 @@ if ($action === 'set_cell_kind_override') {
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO raid_template_cells (table_id, row_id, column_id, kind_override)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE kind_override = VALUES(kind_override)'
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, kind_override, bg_color)
+         VALUES (?, ?, ?, ?, NULL)
+         ON DUPLICATE KEY UPDATE kind_override = VALUES(kind_override), bg_color = IF(VALUES(kind_override) = "spacer", NULL, bg_color)'
     );
     $stmt->execute([$col['table_id'], $row['id'], $col['id'], $kindOverride]);
 

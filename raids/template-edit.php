@@ -367,6 +367,14 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .paint-swatch { width: 22px; height: 22px; border-radius: 6px; border: 2px solid rgba(255,255,255,0.15); padding: 0; cursor: pointer; }
     .paint-swatch:hover { border-color: rgba(255,255,255,0.4); }
     .paint-swatch.active { border-color: #fff; box-shadow: 0 0 0 2px #5865f2; }
+    .paint-swatch-transparent {
+      background-color: #1a2338;
+      background-image:
+        linear-gradient(45deg, rgba(255,255,255,0.28) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.28) 75%),
+        linear-gradient(45deg, rgba(255,255,255,0.28) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.28) 75%);
+      background-size: 8px 8px;
+      background-position: 0 0, 4px 4px;
+    }
     .paint-tool-btn { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #c7cef2; border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
     .paint-tool-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
     .paint-tool-btn.active { background: #e05555; border-color: #e05555; color: #fff; }
@@ -1974,7 +1982,8 @@ const PAINT_PRESETS = ['#e05555', '#f0a030', '#f0c04a', '#4caf6a', '#4ac0c0', '#
 
 function renderPaintBar() {
   const el = document.getElementById('paintBarEl');
-  const swatches = PAINT_PRESETS.map(c =>
+  const transparentSwatch = `<button type="button" class="paint-swatch paint-swatch-transparent ${paintArmed && paintErase ? 'active' : ''}" data-action="pick-paint-erase" title="Transparent (clear color)"></button>`;
+  const swatches = transparentSwatch + PAINT_PRESETS.map(c =>
     `<button type="button" class="paint-swatch ${paintArmed && !paintErase && paintColor.toLowerCase() === c ? 'active' : ''}" data-action="pick-paint-color" data-color="${c}" style="background:${c};" title="${c}"></button>`
   ).join('');
   const isCustomActive = paintArmed && !paintErase && !PAINT_PRESETS.some(p => p.toLowerCase() === paintColor.toLowerCase());
