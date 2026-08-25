@@ -345,6 +345,25 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .preview-modal .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
     .preview-modal .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
+    /* Discord mode: read-only rendering (same rationale/porting as .preview-modal above),
+       plus "post" grouping boxes that show which tables would land in the same Discord image. */
+    .discord-mode .section-card { border-radius: 12px; overflow: hidden; margin: 0 0 18px; border: 1px solid rgba(255,255,255,0.08); }
+    .discord-mode .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
+    .discord-mode .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .discord-mode .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; }
+    .discord-post { border: 1px dashed rgba(88,101,242,0.4); border-radius: 10px; padding: 12px; }
+    .discord-post-label { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #a3adfa; margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px; }
+    .discord-post-meta { font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; color: #7f8bad; }
+    .discord-post-row { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: flex-start; gap: 18px; overflow-x: auto; padding-bottom: 4px; }
+    .discord-mode .tbl-wrap { min-width: 0; flex-shrink: 0; }
+    .discord-mode .tbl-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0; }
+    .discord-mode table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
+    .discord-mode table.grid th, .discord-mode table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
+    .discord-mode td.cell { min-width: 90px; background: rgba(255,255,255,0.04); }
+    .discord-mode td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
+    .discord-mode .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
+    .discord-mode .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
+
     .angry-page-pane { display: flex; gap: 14px; }
     .angry-page-list { display: flex; flex-direction: column; gap: 4px; width: 160px; flex-shrink: 0; }
     .angry-page-btn { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: #c7cef2; text-align: left; padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer; }
@@ -1077,6 +1096,7 @@ const EDIT_MODES = [
   { key: 'layout', label: 'Layout' },
   { key: 'colourMerge', label: 'Colour/Merge' },
   { key: 'logic', label: 'Logic' },
+  { key: 'discord', label: 'Discord' },
 ];
 
 function setMode(m) {
@@ -1194,6 +1214,34 @@ function render() {
     }).join('') : '<p class="empty">No tabs yet &mdash; switch to Layout mode to start building this template.</p>';
 
     wireColourPaint(panelsEl0);
+    return;
+  }
+
+  if (editMode === 'discord') {
+    placeholderEl.hidden = true;
+    paintBarEl.hidden = true;
+
+    const TABS = currentTabs();
+    if (!TABS.includes(activeTab)) activeTab = TABS[0] || null;
+
+    tabsRowEl.hidden = false;
+    document.getElementById('angryInlineEl').innerHTML = '';
+    const tabsEl = document.getElementById('tabsEl');
+    tabsEl.innerHTML = TABS.map(k => `<button type="button" class="tab-btn ${k === activeTab ? 'active' : ''}" data-tab="${escAttr(k)}">${esc(tabLabel(k))}</button>`).join('');
+    tabsEl.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        history.replaceState(null, '', '#' + encodeURIComponent(activeTab));
+        render();
+      });
+    });
+
+    panelsEl0.hidden = false;
+    panelsEl0.innerHTML = TABS.length ? TABS.map(k => {
+      const secs = sections.filter(s => s.kind === k);
+      const body = secs.length ? secs.map(sec => renderDiscordSection(sec)).join('') : '<p class="empty">No sections in this tab.</p>';
+      return `<div class="tab-panel discord-mode ${k === activeTab ? 'active' : ''}" data-panel="${escAttr(k)}">${body}</div>`;
+    }).join('') : '<p class="empty">No tabs yet &mdash; switch to Layout mode to start building this template.</p>';
     return;
   }
 
@@ -1887,6 +1935,119 @@ function renderPreviewSection(sec) {
     ${noteBar}
     <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
       ${sec.tables.map(tb => previewRenderTable(tb, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables in this section.</p>'}
+    </div>
+  </div>`;
+}
+
+// Discord post preview: a first-pass "how will this raid split into Discord messages" tool
+// for template designers. Not wired to actual posting yet (raids/view.php's canvas export is
+// the only thing that really posts) -- this just visualizes the grouping so designers can see
+// it before that machinery is taught to draw multiple images. Nested column-group tables are
+// flattened alongside their parent (mirroring raids/view.php's flattenSectionTables, since the
+// real export will eventually need to consider them too), and each table renders at full width
+// (no MAX_DATA_COLS chunking) since a real Discord image draws one continuous table, not a
+// wrapped on-screen grid.
+const DISCORD_MAX_COLS = 9;
+const DISCORD_MAX_COL_PX = DEFAULT_COL_UNITS * COL_UNIT_PX;
+function discordColWidthPx(c, tb) {
+  return Math.min(colWidthPx(c, tb), DISCORD_MAX_COL_PX);
+}
+function flattenSectionTables(tables) {
+  const out = [];
+  for (const tb of tables) {
+    out.push(tb);
+    for (const g of tb.columnGroups) {
+      if (g.tables.length) out.push(...flattenSectionTables(g.tables));
+    }
+  }
+  return out;
+}
+// Greedily packs tables side-by-side into "posts" up to a combined DISCORD_MAX_COLS budget.
+// Two spacer columns meeting at a table-to-table boundary within the same post count as one
+// combined column (not two) since they'd visually merge into a single gap in the image. A
+// table that alone exceeds the budget still gets its own post -- it can't be split further.
+function groupTablesIntoPosts(tables) {
+  const posts = [];
+  let current = [];
+  let currentCols = 0;
+  for (const tb of tables) {
+    const cols = tb.columns.length;
+    let addCols = cols;
+    if (current.length) {
+      const prevTb = current[current.length - 1];
+      const prevLast = prevTb.columns[prevTb.columns.length - 1];
+      const nextFirst = tb.columns[0];
+      if (prevLast && nextFirst && prevLast.kind === 'spacer' && nextFirst.kind === 'spacer') {
+        addCols = Math.max(0, addCols - 1);
+      }
+    }
+    if (current.length && currentCols + addCols > DISCORD_MAX_COLS) {
+      posts.push(current);
+      current = [tb];
+      currentCols = cols;
+    } else {
+      current.push(tb);
+      currentCols += addCols;
+    }
+  }
+  if (current.length) posts.push(current);
+  return posts;
+}
+function discordColumnBlock(tb, sectionBg) {
+  const coverage = computeMergeCoverage(tb);
+  const chunkCols = tb.columns;
+  const colgroup = `<colgroup>` +
+    chunkCols.map(c => {
+      const w = discordColWidthPx(c, tb);
+      return `<col${w ? ` style="width:${w}px;"` : ''}>`;
+    }).join('') + `</colgroup>`;
+
+  const bodyRows = tb.rows.map(r => {
+    if (r.kind === 'spacer') {
+      const bg = r.bgColor || sectionBg;
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="background:${bg};"></td></tr>`;
+    }
+    const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
+    return `<tr${heightAttr}>${previewBodyCellsForRow(r, chunkCols, tb, coverage, sectionBg)}</tr>`;
+  }).join('');
+
+  return `<div class="grid-scroll">
+      <table class="grid">
+        ${colgroup}
+        ${bodyRows}
+      </table>
+    </div>`;
+}
+function discordRenderTable(tb, sectionBg) {
+  const block = tb.columns.length ? discordColumnBlock(tb, sectionBg) : '';
+  const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
+  const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
+  return `<div class="tbl-wrap"${wrapStyle}>
+    ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
+    ${block}
+  </div>`;
+}
+function renderDiscordSection(sec) {
+  const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
+  const headColor = sec.color || meta.color;
+  const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
+  const sectionBg = sec.bgColor || '#111827';
+  const flatTables = flattenSectionTables(sec.tables);
+  const posts = groupTablesIntoPosts(flatTables);
+  const postsHtml = posts.length ? posts.map((tables, idx) => {
+    const totalCols = tables.reduce((sum, tb) => sum + tb.columns.length, 0);
+    return `<div class="discord-post">
+      <div class="discord-post-label">Post ${idx + 1}<span class="discord-post-meta">${tables.length} table${tables.length === 1 ? '' : 's'} &middot; ${totalCols} col${totalCols === 1 ? '' : 's'}</span></div>
+      <div class="discord-post-row">
+        ${tables.map(tb => discordRenderTable(tb, sectionBg)).join('')}
+      </div>
+    </div>`;
+  }).join('') : '<p class="empty">No tables in this section.</p>';
+  return `<div class="section-card">
+    <div class="section-head" style="background:${headColor};">${esc(sec.title)}</div>
+    ${noteBar}
+    <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
+      ${postsHtml}
     </div>
   </div>`;
 }
