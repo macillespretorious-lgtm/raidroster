@@ -346,15 +346,19 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .preview-modal .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
     /* Discord mode: read-only rendering (same rationale/porting as .preview-modal above),
-       plus "post" grouping boxes that show which tables would land in the same Discord image. */
-    .discord-panel { display: flex; flex-direction: column; gap: 16px; }
-    .discord-post { border: 1px dashed rgba(88,101,242,0.4); border-radius: 10px; padding: 12px; background: #111827; }
+       plus "post" grouping boxes that show which tables would land in the same Discord image.
+       Posts never cross a section boundary -- each section's own colored header banner is a
+       post boundary in its own right, matching how the live raid page visually separates them. */
+    .discord-mode .section-card { border-radius: 12px; overflow: hidden; margin: 0 0 18px; border: 1px solid rgba(255,255,255,0.08); }
+    .discord-mode .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
+    .discord-mode .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .discord-mode .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; }
+    .discord-post { border: 1px dashed rgba(88,101,242,0.4); border-radius: 10px; padding: 12px; }
     .discord-post-label { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #a3adfa; margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px; }
     .discord-post-meta { font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; color: #7f8bad; }
     .discord-post-row { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: flex-start; gap: 18px; overflow-x: auto; padding-bottom: 4px; }
     .discord-mode .tbl-wrap { min-width: 0; flex-shrink: 0; }
-    .discord-sec-tag { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #fff; padding: 3px 10px; border-radius: 6px 6px 0 0; }
-    .discord-mode .tbl-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; }
+    .discord-mode .tbl-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0; }
     .discord-mode table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     .discord-mode table.grid th, .discord-mode table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
     .discord-mode td.cell { min-width: 90px; background: rgba(255,255,255,0.04); }
@@ -1237,7 +1241,7 @@ function render() {
     panelsEl0.hidden = false;
     panelsEl0.innerHTML = TABS.length ? TABS.map(k => {
       const secs = sections.filter(s => s.kind === k);
-      const body = renderDiscordTab(secs);
+      const body = secs.length ? secs.map(sec => renderDiscordSection(sec)).join('') : '<p class="empty">No sections in this tab.</p>';
       return `<div class="tab-panel discord-mode ${k === activeTab ? 'active' : ''}" data-panel="${escAttr(k)}">${body}</div>`;
     }).join('') : '<p class="empty">No tabs yet &mdash; switch to Layout mode to start building this template.</p>';
     return;
@@ -1974,22 +1978,22 @@ function flattenSectionTables(tables) {
 // meeting at a table-to-table boundary within the same post count as one combined column, not
 // two -- so only the narrower of the pair's widths is added, not both -- since they'd visually
 // merge into a single gap in the image. A table that alone exceeds the budget still gets its
-// own post -- it can't be split further. Packing runs across the whole tab, not reset at each
-// section boundary: most sections here hold exactly one table each, so a per-section budget
-// would almost never combine anything -- the live Discord canvas export (raids/view.php)
-// already stacks every section into one image regardless of section boundaries, so packing
-// should be free to do the same. Returns [{ entries, width }, ...].
-function groupEntriesIntoPosts(entries) {
+// own post -- it can't be split further. Packing is scoped to one section's own tables and
+// never crosses a section boundary: a section's colored header banner (e.g. "TANK
+// ASSIGNMENTS") is itself a distinct unit on the live raid page, so it -- and everything under
+// it -- always starts its own post, even if there'd be room left in the previous section's
+// last post. A section whose tables don't all fit in one post still gets split into several,
+// same as any other over-budget group. Returns [{ tables, width }, ...].
+function groupTablesIntoPosts(tables) {
   const posts = [];
   let current = [];
   let currentWidth = 0;
-  const flush = () => { if (current.length) posts.push({ entries: current, width: currentWidth }); };
-  for (const entry of entries) {
-    const tb = entry.tb;
+  const flush = () => { if (current.length) posts.push({ tables: current, width: currentWidth }); };
+  for (const tb of tables) {
     const width = tableWidthPx(tb);
     let addWidth = width;
     if (current.length) {
-      const prevTb = current[current.length - 1].tb;
+      const prevTb = current[current.length - 1];
       const prevLast = prevTb.columns[prevTb.columns.length - 1];
       const nextFirst = tb.columns[0];
       if (prevLast && nextFirst && prevLast.kind === 'spacer' && nextFirst.kind === 'spacer') {
@@ -2000,10 +2004,10 @@ function groupEntriesIntoPosts(entries) {
     }
     if (current.length && currentWidth + addWidth > DISCORD_MAX_TOTAL_PX) {
       flush();
-      current = [entry];
+      current = [tb];
       currentWidth = width;
     } else {
-      current.push(entry);
+      current.push(tb);
       currentWidth += addWidth;
     }
   }
@@ -2035,39 +2039,38 @@ function discordColumnBlock(tb, sectionBg) {
       </table>
     </div>`;
 }
-function discordRenderTable(tb, sec) {
-  const sectionBg = sec.bgColor || '#111827';
-  const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
-  const secColor = sec.color || meta.color;
+function discordRenderTable(tb, sectionBg) {
   const block = tb.columns.length ? discordColumnBlock(tb, sectionBg) : '';
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
   const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
   return `<div class="tbl-wrap"${wrapStyle}>
-    <div class="discord-sec-tag" style="background:${secColor};">${esc(sec.title)}</div>
     ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
     ${block}
   </div>`;
 }
-// Renders one whole tab's worth of sections as a flat sequence of Discord "posts" -- packing
-// spans section boundaries (see groupEntriesIntoPosts above), so each table carries its own
-// section-name tag (discord-sec-tag) since a single post can now mix tables from more than
-// one section.
-function renderDiscordTab(secs) {
-  const flat = [];
-  for (const sec of secs) {
-    for (const tb of flattenSectionTables(sec.tables)) flat.push({ tb, sec });
-  }
-  if (!flat.length) return '<p class="empty">No tables in this tab.</p>';
-  const posts = groupEntriesIntoPosts(flat);
-  return `<div class="discord-panel">` + posts.map((post, idx) => {
-    const { entries, width } = post;
+function renderDiscordSection(sec) {
+  const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
+  const headColor = sec.color || meta.color;
+  const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
+  const sectionBg = sec.bgColor || '#111827';
+  const flatTables = flattenSectionTables(sec.tables);
+  const posts = groupTablesIntoPosts(flatTables);
+  const postsHtml = posts.length ? posts.map((post, idx) => {
+    const { tables, width } = post;
     return `<div class="discord-post">
-      <div class="discord-post-label">Post ${idx + 1}<span class="discord-post-meta">${entries.length} table${entries.length === 1 ? '' : 's'} &middot; ~${Math.round(width)}px / ${DISCORD_MAX_TOTAL_PX}px</span></div>
+      <div class="discord-post-label">Post ${idx + 1}<span class="discord-post-meta">${tables.length} table${tables.length === 1 ? '' : 's'} &middot; ~${Math.round(width)}px / ${DISCORD_MAX_TOTAL_PX}px</span></div>
       <div class="discord-post-row">
-        ${entries.map(e => discordRenderTable(e.tb, e.sec)).join('')}
+        ${tables.map(tb => discordRenderTable(tb, sectionBg)).join('')}
       </div>
     </div>`;
-  }).join('') + `</div>`;
+  }).join('') : '<p class="empty">No tables in this section.</p>';
+  return `<div class="section-card">
+    <div class="section-head" style="background:${headColor};">${esc(sec.title)}</div>
+    ${noteBar}
+    <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
+      ${postsHtml}
+    </div>
+  </div>`;
 }
 
 // Colour/Merge mode: same read-only rendering as the preview above (tables "as they will
