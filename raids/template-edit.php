@@ -376,6 +376,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
 
     .colour-mode .section-card { border-radius: 12px; overflow: hidden; margin-bottom: 18px; border: 1px solid rgba(255,255,255,0.08); }
     .colour-mode .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
+    .colour-mode .section-head-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .colour-mode .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
     .colour-mode .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
     .colour-mode .tbl-wrap { min-width: 0; max-width: 100%; }
@@ -1957,7 +1958,10 @@ function renderColourSection(sec) {
   const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   const bodyStyle = sec.bgColor ? ` style="background:${sec.bgColor};"` : '';
   return `<div class="section-card">
-    <div class="section-head paint-section-head" data-action="paint-section" data-section-id="${sec.id}" style="background:${headColor};" title="Click to paint this section header">${esc(sec.title)}</div>
+    <div class="section-head paint-section-head" data-action="paint-section" data-section-id="${sec.id}" style="background:${headColor};" title="Click to paint this section header">
+      <span class="section-head-title">${esc(sec.title)}</span>
+      <button type="button" class="icon-btn" data-action="preview-section" data-id="${sec.id}" title="Preview as it will look on a raid page">&#128065;</button>
+    </div>
     ${noteBar}
     <div class="section-body paint-section-body" data-action="paint-section-bg" data-section-id="${sec.id}"${bodyStyle} title="Click to paint this section's background">
       ${sec.tables.map(tb => colourRenderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
@@ -2034,6 +2038,14 @@ function wireColourPaint(el) {
       const rowId = parseInt(node.dataset.rowId, 10);
       const columnId = parseInt(node.dataset.colId, 10);
       call({ action: 'split_cell', rowId, columnId });
+    });
+  });
+
+  el.querySelectorAll('[data-action="preview-section"]').forEach(node => {
+    node.addEventListener('mousedown', e => e.stopPropagation());
+    node.addEventListener('click', e => {
+      e.stopPropagation();
+      openPreview(parseInt(node.dataset.id, 10));
     });
   });
 
