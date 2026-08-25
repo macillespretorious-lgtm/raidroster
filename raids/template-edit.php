@@ -219,7 +219,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .lbl-input { background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 5px; width: 100%; min-width: 0; box-sizing: border-box; }
     .cell-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 2px; }
     .cell-actions .icon-btn { width: 20px; height: 20px; font-size: 10px; }
-    td.data-td { position: relative; min-width: 24px; min-height: 24px; }
+    td.data-td { position: relative; min-width: 24px; min-height: 24px; background: rgba(255,255,255,0.04); }
     /* Real in-flow content, not just a min-height on the (otherwise entirely
        absolutely-positioned-content) <td> — table cell min-height is applied
        inconsistently across browsers when the cell has no in-flow content at all. */
@@ -1593,7 +1593,7 @@ function computeMergeCoverage(tb) {
   return { covered, spans };
 }
 
-function bodyCellsForRow(r, chunkCols, tb, coverage) {
+function bodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
@@ -1618,19 +1618,25 @@ function bodyCellsForRow(r, chunkCols, tb, coverage) {
     const colspan = Math.min(span.colspan, chunkCols.length - i);
     const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
     const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
-    if (eff === 'spacer') { out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}</td>`); i += colspan; continue; }
+    if (eff === 'spacer') {
+      const spacerBg = (cell && cell.bgColor) || c.bgColor || sectionBg;
+      out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell" data-row-id="${r.id}" data-col-id="${c.id}" style="background:${spacerBg};">${overrideTag}</td>`);
+      i += colspan; continue;
+    }
     if (eff === 'text') {
       const display = cell.textContent
         ? renderCellTextHtml(cell.textContent)
         : '<span class="cell-text-placeholder">Click to edit&hellip;</span>';
-      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}">
+      const tdStyle = cell.bgColor ? ` style="background:${cell.bgColor};"` : '';
+      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}"${tdStyle}>
         ${overrideTag}
         <div class="cell-text-display" data-action="open-cell-editor" data-row-id="${r.id}" data-col-id="${c.id}" title="Click to edit text" style="${cellTextStyle(cell)}color:${cell.textColor || '#e8ecff'};">${display}</div>
       </td>`);
     } else if (eff === 'icon') {
       const iconKey = `cell-icon-${r.id}_${c.id}`;
       const swatches = RAID_ICON_KEYS.map(k => `<button type="button" class="icon-swatch-btn" data-action="cell-icon" data-icon="${k}" data-row-id="${r.id}" data-col-id="${c.id}" style="${raidIconStyle(k, 22)}" title="${k}"></button>`).join('');
-      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td icon-td" data-row-id="${r.id}" data-col-id="${c.id}">
+      const tdStyle = cell.bgColor ? ` style="background:${cell.bgColor};"` : '';
+      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td icon-td" data-row-id="${r.id}" data-col-id="${c.id}"${tdStyle}>
         ${overrideTag}
         <div class="cell-icon-wrap kind-picker-wrap">
           <button type="button" class="icon-pick-btn${cell.icon ? '' : ' empty'}" data-action="open-cell-icon-menu" data-row-id="${r.id}" data-col-id="${c.id}" style="${cell.icon ? raidIconStyle(cell.icon, 26) : ''}" title="Pick raid icon">${cell.icon ? '' : '+'}</button>
@@ -1641,14 +1647,15 @@ function bodyCellsForRow(r, chunkCols, tb, coverage) {
         </div>
       </td>`);
     } else {
-      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}<div class="cell-height-spacer"></div></td>`);
+      const tdStyle = cell.bgColor ? ` style="background:${cell.bgColor};"` : '';
+      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td" data-row-id="${r.id}" data-col-id="${c.id}"${tdStyle}>${overrideTag}<div class="cell-height-spacer"></div></td>`);
     }
     i += colspan;
   }
   return out.join('');
 }
 
-function renderColumnBlock(chunkCols, tb, groupsEnabled) {
+function renderColumnBlock(chunkCols, tb, groupsEnabled, sectionBg) {
   const coverage = computeMergeCoverage(tb);
   const colHeaders = headerCellsForChunk(chunkCols, tb, groupsEnabled);
   const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups) : '';
@@ -1666,11 +1673,12 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
   const bodyRows = tb.rows.map(r => {
     const rowHeader = renderRowHeader(r, tb);
     if (r.kind === 'spacer') {
-      const spacerCells = chunkCols.map(() => `<td class="spacer-cell"></td>`).join('');
+      const bg = r.bgColor || sectionBg;
+      const spacerCells = chunkCols.map(() => `<td class="spacer-cell" style="background:${bg};"></td>`).join('');
       return `<tr style="height:${r.height || 20}px;">${rowHeader}${spacerCells}</tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
-    return `<tr${heightAttr}>${rowHeader}${bodyCellsForRow(r, chunkCols, tb, coverage)}</tr>`;
+    return `<tr${heightAttr}>${rowHeader}${bodyCellsForRow(r, chunkCols, tb, coverage, sectionBg)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
@@ -1686,24 +1694,25 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
 // parentKind/parentId identify where tb hangs off (a section, top-level, or a group, nested).
 // groupsEnabled is false for roster-kind sections, which don't use column-groups/nested
 // boss-tables at all — only tank/healer/misc assignment sections do.
-function renderTable(tb, parentKind, parentId, groupsEnabled) {
+function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
   const groupsWithTables = groupsEnabled ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
 
-  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, groupsEnabled)).join('');
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, groupsEnabled, sectionBg)).join('');
 
   const headerBg = tb.headerColor || '';
   const headerStyle = headerBg ? `background:${headerBg};` : '';
   const titleColor = headerBg ? contrastText(headerBg) : '#e8ecff';
+  const cardStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
 
   const titleHtml = `<input class="tbl-title" draggable="false" data-action="rename-table" data-id="${tb.id}" placeholder="Table name (optional)" value="${escAttr(tb.title)}" style="color:${titleColor};">`;
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables" data-drop-kind="table-container" data-drop-parent="${g.id}" data-drop-parent-kind="group">
-      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, groupsEnabled)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, groupsEnabled, sectionBg)).join('')}
     </div>`).join('');
 
-  return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}" data-flip-id="table:${tb.id}">
+  return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}" data-flip-id="table:${tb.id}"${cardStyle}>
     <div class="tbl-head" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="${headerStyle}">
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
@@ -1747,9 +1756,12 @@ function renderTable(tb, parentKind, parentId, groupsEnabled) {
 
 function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
+  const headColor = sec.color || meta.color;
   const groupsEnabled = false;
+  const sectionBg = sec.bgColor || '#111827';
+  const bodyStyle = sec.bgColor ? ` style="background:${sec.bgColor};"` : '';
   return `<div class="section-card">
-    <div class="section-head" style="background:${meta.color};">
+    <div class="section-head" style="background:${headColor};">
       <input class="title-input" data-action="rename-section" data-id="${sec.id}" value="${escAttr(sec.title)}">
       <button class="icon-btn" data-action="preview-section" data-id="${sec.id}" title="Preview as it will look on a raid page">&#128065;</button>
       <button class="icon-btn" data-action="move-section-up" data-id="${sec.id}" title="Move up">&uarr;</button>
@@ -1767,8 +1779,8 @@ function renderSection(sec) {
         MRT export
       </label>
     </div>
-    <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section">
-      ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled)).join('') || '<p class="empty">No tables yet.</p>'}
+    <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section"${bodyStyle}>
+      ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables yet.</p>'}
       <button class="btn" data-action="add-table-to-section" data-id="${sec.id}">+ Table</button>
     </div>
   </div>`;
