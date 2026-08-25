@@ -374,6 +374,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
        raid page" -- no drag handles, rename inputs, or add/delete controls -- with a thin
        row/column header strip added purely as paint-target affordances for this tool. */
     .paint-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
+    .paint-bar[hidden] { display: none; }
     .paint-bar-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #7f8bad; }
     .paint-swatches { display: flex; gap: 5px; flex-wrap: wrap; }
     .paint-swatch { width: 22px; height: 22px; border-radius: 6px; border: 2px solid rgba(255,255,255,0.15); padding: 0; cursor: pointer; }
