@@ -93,10 +93,10 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     // so remap them the same way group nesting does above.
     $stmtM = $pdo->prepare('SELECT * FROM raid_template_cell_merges WHERE table_id = ?');
     $stmtM->execute([$tb['id']]);
-    $insM = $pdo->prepare('INSERT INTO raid_cell_merges (table_id, row_id, column_id, colspan) VALUES (?, ?, ?, ?)');
+    $insM = $pdo->prepare('INSERT INTO raid_cell_merges (table_id, row_id, column_id, colspan, rowspan) VALUES (?, ?, ?, ?, ?)');
     foreach ($stmtM->fetchAll(PDO::FETCH_ASSOC) as $m) {
         if (!isset($rowIdMap[$m['row_id']]) || !isset($columnIdMap[$m['column_id']])) continue;
-        $insM->execute([$newTableId, $rowIdMap[$m['row_id']], $columnIdMap[$m['column_id']], $m['colspan']]);
+        $insM->execute([$newTableId, $rowIdMap[$m['row_id']], $columnIdMap[$m['column_id']], $m['colspan'], $m['rowspan']]);
     }
 
     // Assignment rules (class-restrict / max-count), remapped the same way cell merges are above.

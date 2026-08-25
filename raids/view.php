@@ -168,6 +168,7 @@ function fmtTime($t) {
     .grid-scroll { overflow-x: auto; }
     table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     table.grid th, table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
+    table.grid td[rowspan] { vertical-align: top; }
     table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
     table.grid td.text-cell { text-align: left; white-space: nowrap; }
     table.grid td.icon-cell { text-align: center; }
@@ -1040,15 +1041,38 @@ function groupHeaderRow(cols, columnGroups, tb) {
   return `<tr>${cells.join('')}</tr>`;
 }
 
+// Computed once per table (not per column-chunk, since rows are never chunked). Returns
+// which (rowId,columnId) positions must render nothing at all (covered by an earlier
+// row's rowspan), and the render-time-clamped {colspan, rowspan} for each anchor cell --
+// clamped to the table's actual remaining rows so a stale value degrades gracefully.
+function computeMergeCoverage(tb) {
+  const covered = new Set();
+  const spans = {};
+  tb.cellMerges.forEach(m => {
+    const rowIdx = tb.rows.findIndex(r => r.id === m.rowId);
+    const colIdx = tb.columns.findIndex(c => c.id === m.columnId);
+    if (rowIdx < 0 || colIdx < 0) return;
+    const rowspan = Math.min(m.rowspan || 1, tb.rows.length - rowIdx);
+    spans[`${m.rowId}_${m.columnId}`] = { colspan: m.colspan || 1, rowspan };
+    for (let dr = 1; dr < rowspan; dr++) {
+      const coveredRow = tb.rows[rowIdx + dr];
+      for (let dc = 0; dc < (m.colspan || 1); dc++) {
+        const coveredCol = tb.columns[colIdx + dc];
+        if (coveredCol) covered.add(`${coveredRow.id}_${coveredCol.id}`);
+      }
+    }
+  });
+  return { covered, spans };
+}
+
 // Same walk-and-consume pattern for body cells: tb.cellMerges is a (rowId, columnId) ->
-// colspan lookup, independent of header merges. The covered columns get no <td> at all.
-function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
-  const mergeByCol = {};
-  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+// colspan/rowspan lookup, independent of header merges. Covered positions get no <td> at all.
+function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
+    if (coverage.covered.has(`${r.id}_${c.id}`)) { i++; continue; }
     const cell = tb.cells[r.id + '_' + c.id];
     const eff = effectiveKind(r, c, cell);
     if (eff === 'spacer') {
@@ -1057,27 +1081,30 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled) {
       out.push(`<td class="spacer-cell"${spacerStyle}></td>`);
       i++; continue;
     }
-    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
-    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
+    const colspan = Math.min(span.colspan, chunkCols.length - i);
+    const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
+    const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
     if (eff === 'text') {
       const style = `background:${(cell && cell.bgColor) || 'transparent'};color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
-      out.push(`<td${colspanAttr} class="cell text-cell" style="${style}">${renderCellTextHtml(cell ? cell.textContent : '')}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-cell" style="${style}">${renderCellTextHtml(cell ? cell.textContent : '')}</td>`);
     } else if (eff === 'icon') {
       const bgStyle = (cell && cell.bgColor) ? ` style="background:${cell.bgColor};"` : '';
       const icon = (cell && cell.icon) ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '';
-      out.push(`<td${colspanAttr} class="cell icon-cell"${bgStyle}>${icon}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell icon-cell"${bgStyle}>${icon}</td>`);
     } else {
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
       const bgStyle = (cell && cell.bgColor) ? ` style="background:${cell.bgColor};"` : '';
-      out.push(`<td${colspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
     }
-    i += span;
+    i += colspan;
   }
   return out.join('');
 }
 
 function renderColumnBlock(chunkCols, tb, noteEnabled) {
+  const coverage = computeMergeCoverage(tb);
   const colgroup = `<colgroup>` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
@@ -1090,7 +1117,7 @@ function renderColumnBlock(chunkCols, tb, noteEnabled) {
       return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="${bgStyle}"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
-    return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled)}</tr>`;
+    return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage)}</tr>`;
   }).join('');
 
   const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb);

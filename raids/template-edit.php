@@ -347,6 +347,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
     .mode-switcher { display: flex; gap: 4px; background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 3px; width: fit-content; }
+    .undo-bar { display: flex; width: fit-content; }
+    .undo-bar #undoBtn:disabled { opacity: 0.4; cursor: default; }
     .mode-btn { background: none; border: none; color: #a8b4d0; font: inherit; font-size: 12.5px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
     .mode-btn:hover { color: #e8ecff; }
     .mode-btn.active { background: #5865f2; color: #fff; }
@@ -443,6 +445,12 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .logic-mode .grid-scroll { overflow-x: auto; }
     .logic-mode table.grid { border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
     .logic-mode table.grid th, .logic-mode table.grid td { border: 1px solid rgba(255,255,255,0.08); padding: 8px 8px; text-align: center; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
+    /* Rectangular merges (rowspan>1) read better top-aligned than vertically centered. */
+    table.grid td[rowspan], .preview-modal table.grid td[rowspan], .colour-mode table.grid td[rowspan], .logic-mode table.grid td[rowspan] { vertical-align: top; }
+    .colour-mode td.cell { position: relative; }
+    .cell-split-btn { display: none; position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; line-height: 14px; padding: 0; border: 1px solid rgba(224,85,85,0.5); border-radius: 4px; background: rgba(20,22,36,0.9); color: #e88585; font-size: 12px; cursor: pointer; z-index: 2; }
+    .colour-mode td.cell:hover .cell-split-btn { display: block; }
+    .cell-split-btn:hover { background: rgba(224,85,85,0.25); }
     .logic-mode table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
     .logic-mode .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
     .logic-mode td.logic-cell-disabled { background: rgba(255,255,255,0.02); color: #3a4260; }
@@ -480,6 +488,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
 
     <div class="controls-bar" id="controlsBar">
       <div class="mode-switcher" id="modeSwitcherEl"></div>
+      <div class="undo-bar" id="undoBarEl"></div>
       <div class="tabs-row" id="tabsRowEl">
         <div class="tabs" id="tabsEl"></div>
         <div class="angry-inline" id="angryInlineEl"></div>
@@ -567,8 +576,11 @@ let tabExports = <?= json_encode($tabExports) ?>;
 let sections = <?= json_encode($sections) ?>;
 
 // Layout / Colour-Merge / Logic mode switcher -- selecting a mode swaps the whole
-// editor body for that mode's tools.
-let editMode = 'layout';
+// editor body for that mode's tools. Persisted per-template so a refresh reopens the
+// same mode instead of always falling back to Layout.
+const EDIT_MODE_KEY = `raidroster_editMode_${TEMPLATE_ID}`;
+const EDIT_MODE_VALUES = ['layout', 'colourMerge', 'logic'];
+let editMode = EDIT_MODE_VALUES.includes(localStorage.getItem(EDIT_MODE_KEY)) ? localStorage.getItem(EDIT_MODE_KEY) : 'layout';
 
 // Logic mode: the rule currently being added/edited (null when just browsing the rules
 // lists). All tables are shown at once now, so the draft tracks which table it belongs to
@@ -969,7 +981,63 @@ function finalizeDrop() {
   dragData = null; dragSnapshot = null; dragOverKey = null;
 }
 
+// Undo: an in-memory stack of full {sections, tabExports} snapshots, captured just before
+// every structural call() -- sections/tabExports are already a complete, self-sufficient
+// snapshot of the whole template (every mutating action ends by returning the full tree),
+// so this is a straightforward client-side capture. Cleared on reload; capped so a long
+// editing session doesn't grow this unbounded; no Redo. Lock actions and restore_snapshot
+// itself are excluded so clicking Undo repeatedly steps back one edit at a time.
+let undoStack = [];
+const UNDO_STACK_LIMIT = 25;
+const UNDO_EXCLUDED_ACTIONS = new Set([
+  'lock_status', 'lock_acquire', 'lock_heartbeat', 'lock_release', 'lock_force_release',
+  'restore_snapshot',
+]);
+
+const UNDO_ACTION_LABELS = {
+  add_section: 'Added tab section', delete_tab: 'Deleted tab', update_section: 'Edited section',
+  set_section_mrt_export: 'Toggled MRT export', paint_section: 'Painted section', paint_table: 'Painted table',
+  add_table: 'Added table', update_table: 'Renamed table', delete_table: 'Deleted table',
+  add_column: 'Added column', add_row: 'Added row', update_column: 'Edited column', update_row: 'Edited row',
+  delete_column: 'Deleted column', delete_row: 'Deleted row', update_cell: 'Edited cell',
+  set_cell_kind_override: 'Set cell override', add_rule: 'Added rule', update_rule: 'Edited rule',
+  delete_rule: 'Deleted rule', paint_cells: 'Painted cells', merge_cell: 'Merged cell',
+  split_cell: 'Split cell', set_cell_merge: 'Merged cells', add_column_group: 'Added column group',
+  update_column_group: 'Edited column group', delete_column_group: 'Deleted column group',
+  reorder: 'Reordered items', set_tab_export_enabled: 'Toggled AngryERA export',
+  set_tab_export_meta: 'Edited AngryERA export', add_export_page: 'Added export page',
+  update_export_page: 'Edited export page', delete_export_page: 'Deleted export page',
+  move_export_page: 'Moved export page',
+};
+
+function describeAction(payload) {
+  return UNDO_ACTION_LABELS[payload.action] || 'Edit';
+}
+
+function renderUndoButton() {
+  const el = document.getElementById('undoBarEl');
+  if (!el) return;
+  const top = undoStack[undoStack.length - 1];
+  el.innerHTML = `<button type="button" class="btn" id="undoBtn" ${top ? '' : 'disabled'} title="${top ? 'Undo: ' + escAttr(top.label) : 'Nothing to undo'}">&#8630; Undo</button>`;
+  const btn = document.getElementById('undoBtn');
+  if (btn) btn.addEventListener('click', undoLastEdit);
+}
+
+function undoLastEdit() {
+  const snap = undoStack.pop();
+  if (!snap) return;
+  call({ action: 'restore_snapshot', templateId: TEMPLATE_ID, sections: snap.sections, tabExports: snap.tabExports }).then(() => renderUndoButton());
+}
+
 function call(payload) {
+  if (!UNDO_EXCLUDED_ACTIONS.has(payload.action)) {
+    undoStack.push({
+      sections: JSON.parse(JSON.stringify(sections)),
+      tabExports: JSON.parse(JSON.stringify(tabExports)),
+      label: describeAction(payload),
+    });
+    if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
+  }
   return fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(r => r.json())
     .then(d => { if (!d.success) throw new Error(d.error || 'Failed'); sections = d.sections; if (d.tabExports) tabExports = d.tabExports; render(); return d; })
@@ -987,6 +1055,7 @@ const EDIT_MODES = [
 function setMode(m) {
   if (editMode === m) return;
   editMode = m;
+  try { localStorage.setItem(EDIT_MODE_KEY, editMode); } catch (e) {}
   cellOverrideStamp = null;
   updateStampBadge();
   paintArmed = false;
@@ -1039,6 +1108,7 @@ function renderAngryInline() {
 
 function render() {
   renderModeSwitcher();
+  renderUndoButton();
 
   const tabsRowEl = document.getElementById('tabsRowEl');
   const panelsEl0 = document.getElementById('panelsEl');
@@ -1467,13 +1537,39 @@ function headerCellsForChunk(chunkCols, tb, groupsEnabled) {
 
 // Same walk-and-consume pattern as headers, but per-row: cellMerges is a (rowId, columnId)
 // -> colspan lookup, independent of header merges.
-function bodyCellsForRow(r, chunkCols, tb) {
-  const mergeByCol = {};
-  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+// Computed once per table by each *ColumnBlock caller (not per row -- rows are never
+// chunked, so this only needs to run once per render pass). Returns which (rowId,columnId)
+// positions must render nothing at all (covered by an earlier row's rowspan), and the
+// render-time-clamped {colspan, rowspan} for each anchor cell -- clamped to the table's
+// actual remaining rows so a stale DB value (e.g. after rows were deleted) degrades
+// gracefully instead of overrunning tb.rows, matching how colspan is already clamped to
+// chunkCols.length at render time.
+function computeMergeCoverage(tb) {
+  const covered = new Set();
+  const spans = {};
+  tb.cellMerges.forEach(m => {
+    const rowIdx = tb.rows.findIndex(r => r.id === m.rowId);
+    const colIdx = tb.columns.findIndex(c => c.id === m.columnId);
+    if (rowIdx < 0 || colIdx < 0) return;
+    const rowspan = Math.min(m.rowspan || 1, tb.rows.length - rowIdx);
+    spans[`${m.rowId}_${m.columnId}`] = { colspan: m.colspan || 1, rowspan };
+    for (let dr = 1; dr < rowspan; dr++) {
+      const coveredRow = tb.rows[rowIdx + dr];
+      for (let dc = 0; dc < (m.colspan || 1); dc++) {
+        const coveredCol = tb.columns[colIdx + dc];
+        if (coveredCol) covered.add(`${coveredRow.id}_${coveredCol.id}`);
+      }
+    }
+  });
+  return { covered, spans };
+}
+
+function bodyCellsForRow(r, chunkCols, tb, coverage) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
+    if (coverage.covered.has(`${r.id}_${c.id}`)) { i++; continue; }
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
     const overrideKey = `cell-override-${r.id}_${c.id}`;
@@ -1490,20 +1586,22 @@ function bodyCellsForRow(r, chunkCols, tb) {
         </div>`
       : '';
     if (eff === 'spacer') { out.push(`<td class="spacer-cell" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}</td>`); i++; continue; }
-    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
-    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
+    const colspan = Math.min(span.colspan, chunkCols.length - i);
+    const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
+    const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
     if (eff === 'text') {
       const display = cell.textContent
         ? renderCellTextHtml(cell.textContent)
         : '<span class="cell-text-placeholder">Click to edit&hellip;</span>';
-      out.push(`<td${colspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}">
+      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}">
         ${overrideTag}
         <div class="cell-text-display" data-action="open-cell-editor" data-row-id="${r.id}" data-col-id="${c.id}" title="Click to edit text" style="${cellTextStyle(cell)}color:${cell.textColor || '#e8ecff'};">${display}</div>
       </td>`);
     } else if (eff === 'icon') {
       const iconKey = `cell-icon-${r.id}_${c.id}`;
       const swatches = RAID_ICON_KEYS.map(k => `<button type="button" class="icon-swatch-btn" data-action="cell-icon" data-icon="${k}" data-row-id="${r.id}" data-col-id="${c.id}" style="${raidIconStyle(k, 22)}" title="${k}"></button>`).join('');
-      out.push(`<td${colspanAttr} class="data-td icon-td" data-row-id="${r.id}" data-col-id="${c.id}">
+      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td icon-td" data-row-id="${r.id}" data-col-id="${c.id}">
         ${overrideTag}
         <div class="cell-icon-wrap kind-picker-wrap">
           <button type="button" class="icon-pick-btn${cell.icon ? '' : ' empty'}" data-action="open-cell-icon-menu" data-row-id="${r.id}" data-col-id="${c.id}" style="${cell.icon ? raidIconStyle(cell.icon, 26) : ''}" title="Pick raid icon">${cell.icon ? '' : '+'}</button>
@@ -1514,14 +1612,15 @@ function bodyCellsForRow(r, chunkCols, tb) {
         </div>
       </td>`);
     } else {
-      out.push(`<td${colspanAttr} class="data-td" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}<div class="cell-height-spacer"></div></td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="data-td" data-row-id="${r.id}" data-col-id="${c.id}">${overrideTag}<div class="cell-height-spacer"></div></td>`);
     }
-    i += span;
+    i += colspan;
   }
   return out.join('');
 }
 
 function renderColumnBlock(chunkCols, tb, groupsEnabled) {
+  const coverage = computeMergeCoverage(tb);
   const colHeaders = headerCellsForChunk(chunkCols, tb, groupsEnabled);
   const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups) : '';
 
@@ -1542,7 +1641,7 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled) {
       return `<tr style="height:${r.height || 20}px;">${rowHeader}${spacerCells}</tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
-    return `<tr${heightAttr}>${rowHeader}${bodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    return `<tr${heightAttr}>${rowHeader}${bodyCellsForRow(r, chunkCols, tb, coverage)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
@@ -1651,13 +1750,12 @@ function renderSection(sec) {
 // group header row, same effectiveKind cell-kind resolution), but every General cell
 // always shows the empty-slot placeholder since no toon assignments exist at the
 // template level; Text cells render their real authored content/colors.
-function previewBodyCellsForRow(r, chunkCols, tb) {
-  const mergeByCol = {};
-  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+function previewBodyCellsForRow(r, chunkCols, tb, coverage) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
+    if (coverage.covered.has(`${r.id}_${c.id}`)) { i++; continue; }
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
     if (eff === 'spacer') {
@@ -1666,24 +1764,27 @@ function previewBodyCellsForRow(r, chunkCols, tb) {
       out.push(`<td class="spacer-cell"${spacerStyle}></td>`);
       i++; continue;
     }
-    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
-    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
+    const colspan = Math.min(span.colspan, chunkCols.length - i);
+    const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
+    const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
     if (eff === 'text') {
       const style = `background:${cell.bgColor || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
-      out.push(`<td${colspanAttr} class="cell text-td" style="${style}">${renderCellTextHtml(cell.textContent)}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-td" style="${style}">${renderCellTextHtml(cell.textContent)}</td>`);
     } else if (eff === 'icon') {
       const style = cell.bgColor ? `background:${cell.bgColor};` : '';
       const icon = cell.icon ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '';
-      out.push(`<td${colspanAttr} class="cell icon-td" style="${style}">${icon}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell icon-td" style="${style}">${icon}</td>`);
     } else {
-      out.push(`<td${colspanAttr} class="cell"><span class="empty-slot">+</span></td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell"><span class="empty-slot">+</span></td>`);
     }
-    i += span;
+    i += colspan;
   }
   return out.join('');
 }
 
 function previewColumnBlock(chunkCols, tb, groupsEnabled) {
+  const coverage = computeMergeCoverage(tb);
   const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups, false, true) : '';
 
   const colgroup = `<colgroup>` +
@@ -1698,7 +1799,7 @@ function previewColumnBlock(chunkCols, tb, groupsEnabled) {
       return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="${bgStyle}"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
-    return `<tr${heightAttr}>${previewBodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    return `<tr${heightAttr}>${previewBodyCellsForRow(r, chunkCols, tb, coverage)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
@@ -1746,13 +1847,12 @@ function renderPreviewSection(sec) {
 // kept on every paintable cell, plus a thin row/column header strip whose only job is to be
 // a click target for "paint this whole row/column" -- an affordance that doesn't exist on the
 // raid page itself, added here purely for the paint tool.
-function colourBodyCellsForRow(r, chunkCols, tb) {
-  const mergeByCol = {};
-  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+function colourBodyCellsForRow(r, chunkCols, tb, coverage) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
+    if (coverage.covered.has(`${r.id}_${c.id}`)) { i++; continue; }
     if (c.kind === 'spacer') {
       const bg = c.bgColor || null;
       const style = bg ? ` style="background:${bg};"` : '';
@@ -1769,8 +1869,10 @@ function colourBodyCellsForRow(r, chunkCols, tb) {
       out.push(`<td class="cell spacer-cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${style} title="Paint this filler cell"></td>`);
       i++; continue;
     }
-    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
-    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
+    const colspan = Math.min(span.colspan, chunkCols.length - i);
+    const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
+    const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
     const bg = cell.bgColor || null;
     const style = eff === 'text'
       ? `background:${bg || 'transparent'};color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
@@ -1780,13 +1882,17 @@ function colourBodyCellsForRow(r, chunkCols, tb) {
       : (eff === 'icon'
         ? (cell.icon ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '<span class="empty-slot">+</span>')
         : '<span class="empty-slot">+</span>');
-    out.push(`<td${colspanAttr} class="cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="${style}">${content}</td>`);
-    i += span;
+    const removeMergeBtn = (span.colspan > 1 || span.rowspan > 1)
+      ? `<button type="button" class="cell-split-btn" data-action="remove-merge" data-row-id="${r.id}" data-col-id="${c.id}" title="Remove merge">&times;</button>`
+      : '';
+    out.push(`<td${colspanAttr}${rowspanAttr} class="cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="${style}">${content}${removeMergeBtn}</td>`);
+    i += colspan;
   }
   return out.join('');
 }
 
 function colourColumnBlock(chunkCols, tb) {
+  const coverage = computeMergeCoverage(tb);
   const colgroup = `<colgroup><col style="width:22px;">` +
     chunkCols.map(c => {
       const w = colWidthPx(c, tb);
@@ -1805,7 +1911,7 @@ function colourColumnBlock(chunkCols, tb) {
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
     const rowHeader = `<th class="paint-row-th" data-action="paint-row" data-table-id="${tb.id}" data-row-id="${r.id}" title="Paint this whole row">&#9632;</th>`;
-    return `<tr${heightAttr}>${rowHeader}${colourBodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    return `<tr${heightAttr}>${rowHeader}${colourBodyCellsForRow(r, chunkCols, tb, coverage)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
@@ -1850,7 +1956,7 @@ function renderPaintBar() {
   ).join('');
   const isCustomActive = paintArmed && !paintErase && !PAINT_PRESETS.some(p => p.toLowerCase() === paintColor.toLowerCase());
   const hint = mergeArmed
-    ? `<span class="paint-armed-hint">Drag across 2+ cells in a row to merge them, or click an already-merged cell to split it apart. <button type="button" class="paint-stop-btn" data-action="stop-merge">Stop</button></span>`
+    ? `<span class="paint-armed-hint">Drag across 2+ cells to merge them, or click an already-merged cell to split it apart. <button type="button" class="paint-stop-btn" data-action="stop-merge">Stop</button></span>`
     : paintArmed
       ? `<span class="paint-armed-hint">${paintErase ? 'Erasing' : 'Painting'} — click, drag, or click a row/column header below. <button type="button" class="paint-stop-btn" data-action="stop-paint">Stop</button></span>`
       : `<span class="paint-bar-hint">Pick a color, then click, drag, or click a row/column header on the tables below.</span>`;
@@ -1861,7 +1967,7 @@ function renderPaintBar() {
       <input type="color" id="paintCustomColor" value="${paintColor}">
     </label>
     <button type="button" class="paint-tool-btn ${paintArmed && paintErase ? 'active' : ''}" data-action="pick-paint-erase" title="Clear color from painted cells">Eraser</button>
-    <button type="button" class="paint-tool-btn ${mergeArmed ? 'active' : ''}" data-action="toggle-merge" title="Drag across 2+ cells in a row to merge them">Merge cells</button>
+    <button type="button" class="paint-tool-btn ${mergeArmed ? 'active' : ''}" data-action="toggle-merge" title="Drag across 2+ cells to merge them">Merge cells</button>
     ${hint}`;
   el.querySelectorAll('[data-action]').forEach(node => {
     node.addEventListener('click', () => {
@@ -1901,6 +2007,18 @@ function renderPaintBar() {
 // mouseup listeners below, registered once outside render() since this element is rebuilt
 // on every render()).
 function wireColourPaint(el) {
+  // Always-available un-merge button on any merged anchor cell -- independent of whether
+  // the merge tool is armed, unlike the click-with-no-drag un-merge gesture below.
+  el.querySelectorAll('[data-action="remove-merge"]').forEach(node => {
+    node.addEventListener('mousedown', e => e.stopPropagation());
+    node.addEventListener('click', e => {
+      e.stopPropagation();
+      const rowId = parseInt(node.dataset.rowId, 10);
+      const columnId = parseInt(node.dataset.colId, 10);
+      call({ action: 'split_cell', rowId, columnId });
+    });
+  });
+
   el.querySelectorAll('[data-action="paint-section"]').forEach(node => {
     node.addEventListener('click', () => {
       if (!paintArmed) return;
@@ -1992,12 +2110,12 @@ function wireColourPaint(el) {
 }
 
 // Keys off the first cell touched this drag to keep every subsequent cell scoped to the
-// same table+row -- a merge is horizontal-only, single-row, so cells the cursor strays
-// into on another row are simply ignored rather than aborting the gesture.
+// same table -- rectangular merges can span multiple rows and columns, so only the table
+// needs to match.
 function touchMergeCell(td) {
   if (mergeDragTds.length) {
     const first = mergeDragTds[0];
-    if (td.dataset.tableId !== first.dataset.tableId || td.dataset.rowId !== first.dataset.rowId) return;
+    if (td.dataset.tableId !== first.dataset.tableId) return;
   }
   if (mergeDragTds.includes(td)) return;
   mergeDragTds.push(td);
@@ -2005,33 +2123,41 @@ function touchMergeCell(td) {
 }
 
 // Called on mouseup with every <td> the drag touched (in touch order). A single cell with
-// no drag either splits an already-merged cell apart (colSpan > 1) or does nothing; two or
-// more cells compute the merge's colspan from the full column-index range they cover,
-// including any already-merged cell dragged over, then set it directly in one call.
+// no drag either splits an already-merged cell apart (colSpan/rowSpan > 1) or does nothing;
+// two or more cells compute the merge's rectangle from the full row/column-index range they
+// cover, including any already-merged cell dragged over, then set it directly in one call.
 function mergeCellsFromDrag(tds) {
   tds.forEach(td => td.classList.remove('merge-touched'));
   const tableId = parseInt(tds[0].dataset.tableId, 10);
-  const rowId = parseInt(tds[0].dataset.rowId, 10);
   const tb = findTable(tableId);
   if (!tb) return;
   if (tds.length === 1) {
     const td = tds[0];
-    if (td.colSpan > 1) {
-      call({ action: 'split_cell', rowId, columnId: parseInt(td.dataset.colId, 10) });
+    if (td.colSpan > 1 || td.rowSpan > 1) {
+      call({ action: 'split_cell', rowId: parseInt(td.dataset.rowId, 10), columnId: parseInt(td.dataset.colId, 10) });
     }
     return;
   }
-  let minIdx = Infinity, maxIdx = -Infinity;
+  let minColIdx = Infinity, maxColIdx = -Infinity, minRowIdx = Infinity, maxRowIdx = -Infinity;
   tds.forEach(td => {
     const colId = parseInt(td.dataset.colId, 10);
-    const idx = tb.columns.findIndex(c => c.id === colId);
-    if (idx < 0) return;
-    minIdx = Math.min(minIdx, idx);
-    maxIdx = Math.max(maxIdx, idx + (td.colSpan || 1) - 1);
+    const rowId = parseInt(td.dataset.rowId, 10);
+    const colIdx = tb.columns.findIndex(c => c.id === colId);
+    const rowIdx = tb.rows.findIndex(r => r.id === rowId);
+    if (colIdx < 0 || rowIdx < 0) return;
+    minColIdx = Math.min(minColIdx, colIdx);
+    maxColIdx = Math.max(maxColIdx, colIdx + (td.colSpan || 1) - 1);
+    minRowIdx = Math.min(minRowIdx, rowIdx);
+    maxRowIdx = Math.max(maxRowIdx, rowIdx + (td.rowSpan || 1) - 1);
   });
-  if (!isFinite(minIdx) || !isFinite(maxIdx) || maxIdx <= minIdx) return;
-  const anchorCol = tb.columns[minIdx];
-  call({ action: 'set_cell_merge', tableId: tb.id, rowId, columnId: anchorCol.id, colspan: maxIdx - minIdx + 1 });
+  if (!isFinite(minColIdx) || !isFinite(maxColIdx) || !isFinite(minRowIdx) || !isFinite(maxRowIdx)) return;
+  if (maxColIdx <= minColIdx && maxRowIdx <= minRowIdx) return;
+  const anchorCol = tb.columns[minColIdx];
+  const anchorRow = tb.rows[minRowIdx];
+  call({
+    action: 'set_cell_merge', tableId: tb.id, rowId: anchorRow.id, columnId: anchorCol.id,
+    colspan: maxColIdx - minColIdx + 1, rowspan: maxRowIdx - minRowIdx + 1,
+  });
 }
 
 // Keys are prefixed by target kind so the mouseup handler below can split one drag gesture
@@ -2154,34 +2280,36 @@ function renderRuleDraftForm() {
   </div>`;
 }
 
-function logicBodyCellsForRow(r, chunkCols, tb) {
-  const mergeByCol = {};
-  tb.cellMerges.forEach(m => { if (m.rowId === r.id) mergeByCol[m.columnId] = m.colspan; });
+function logicBodyCellsForRow(r, chunkCols, tb, coverage) {
   const picking = !!(logicDraft && logicDraft.scope === 'cells' && logicDraft.tableId === tb.id);
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
+    if (coverage.covered.has(`${r.id}_${c.id}`)) { i++; continue; }
     if (c.kind === 'spacer') { out.push(`<td class="spacer-cell"></td>`); i++; continue; }
-    const span = Math.min(mergeByCol[c.id] || 1, chunkCols.length - i);
-    const colspanAttr = span > 1 ? ` colspan="${span}"` : '';
+    const span = coverage.spans[`${r.id}_${c.id}`] || { colspan: 1, rowspan: 1 };
+    const colspan = Math.min(span.colspan, chunkCols.length - i);
+    const colspanAttr = colspan > 1 ? ` colspan="${colspan}"` : '';
+    const rowspanAttr = span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : '';
     const cell = cellFor(tb, r.id, c.id);
     const eff = effectiveKind(r, c, cell);
     if (eff !== 'general') {
-      out.push(`<td${colspanAttr} class="cell logic-cell-disabled" title="Rules only apply to general (assignable) cells"></td>`);
-      i += span; continue;
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell logic-cell-disabled" title="Rules only apply to general (assignable) cells"></td>`);
+      i += colspan; continue;
     }
     const key = `${r.id}_${c.id}`;
     const selected = picking && logicDraft.cellRefs.has(key);
     const inOtherRule = !picking && tb.rules.some(rule => rule.scope === 'cells' && rule.cellRefs.some(cr => cr.rowId === r.id && cr.columnId === c.id));
     const cls = ['cell', 'logic-cell', picking ? 'logic-picking' : '', selected ? 'logic-cell-selected' : '', inOtherRule ? 'logic-cell-in-rule' : ''].filter(Boolean).join(' ');
-    out.push(`<td${colspanAttr} class="${cls}" data-row-id="${r.id}" data-col-id="${c.id}" title="${escAttr((c.label || '') + (r.label ? ' / ' + r.label : ''))}"><span class="empty-slot">${selected ? '&#10003;' : '+'}</span></td>`);
-    i += span;
+    out.push(`<td${colspanAttr}${rowspanAttr} class="${cls}" data-row-id="${r.id}" data-col-id="${c.id}" title="${escAttr((c.label || '') + (r.label ? ' / ' + r.label : ''))}"><span class="empty-slot">${selected ? '&#10003;' : '+'}</span></td>`);
+    i += colspan;
   }
   return out.join('');
 }
 
 function logicColumnBlock(chunkCols, tb) {
+  const coverage = computeMergeCoverage(tb);
   const colgroup = `<colgroup>` + chunkCols.map(c => {
     const w = colWidthPx(c, tb);
     return `<col${w ? ` style="width:${w}px;"` : ''}>`;
@@ -2192,7 +2320,7 @@ function logicColumnBlock(chunkCols, tb) {
       return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
-    return `<tr${heightAttr}>${logicBodyCellsForRow(r, chunkCols, tb)}</tr>`;
+    return `<tr${heightAttr}>${logicBodyCellsForRow(r, chunkCols, tb, coverage)}</tr>`;
   }).join('');
   return `<div class="grid-scroll"><table class="grid">${colgroup}${headerRow}${bodyRows}</table></div>`;
 }

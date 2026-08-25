@@ -70,10 +70,10 @@ function fetch_table_full($pdo, $tb) {
         ];
     }
 
-    $stmtM = $pdo->prepare('SELECT row_id, column_id, colspan FROM raid_cell_merges WHERE table_id = ?');
+    $stmtM = $pdo->prepare('SELECT row_id, column_id, colspan, rowspan FROM raid_cell_merges WHERE table_id = ?');
     $stmtM->execute([$tb['id']]);
     $cellMerges = array_map(fn($m) => [
-        'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
+        'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'], 'rowspan' => (int)$m['rowspan'],
     ], $stmtM->fetchAll(PDO::FETCH_ASSOC));
 
     $stmtRule = $pdo->prepare('SELECT id, rule_type, scope, classes, max_count, label, sort_order FROM raid_rules WHERE table_id = ? ORDER BY sort_order, id');

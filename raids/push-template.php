@@ -414,14 +414,14 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
         // Cell merges carry no assignment data, so just wholesale-resync them from the
         // template using the row/column id maps built above (matched + newly added ids).
         $pdo->prepare('DELETE FROM raid_cell_merges WHERE table_id = ?')->execute([$raidTableId]);
-        $stmt = $pdo->prepare('SELECT row_id, column_id, colspan FROM raid_template_cell_merges WHERE table_id = ?');
+        $stmt = $pdo->prepare('SELECT row_id, column_id, colspan, rowspan FROM raid_template_cell_merges WHERE table_id = ?');
         $stmt->execute([$tplTableId]);
-        $insMerge = $pdo->prepare('INSERT INTO raid_cell_merges (table_id, row_id, column_id, colspan) VALUES (?, ?, ?, ?)');
+        $insMerge = $pdo->prepare('INSERT INTO raid_cell_merges (table_id, row_id, column_id, colspan, rowspan) VALUES (?, ?, ?, ?, ?)');
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $m) {
             $rId = $rowIdMap[(int)$m['row_id']] ?? null;
             $cId = $columnIdMap[(int)$m['column_id']] ?? null;
             if ($rId === null || $cId === null) continue;
-            $insMerge->execute([$raidTableId, $rId, $cId, $m['colspan']]);
+            $insMerge->execute([$raidTableId, $rId, $cId, $m['colspan'], $m['rowspan']]);
         }
 
         // Rule cell scopes carry no assignment data either, so wholesale-resync them the

@@ -265,12 +265,13 @@ function fetch_table_full($pdo, $tb) {
         ];
     }
 
-    $stmt = $pdo->prepare('SELECT row_id, column_id, colspan FROM raid_template_cell_merges WHERE table_id = ?');
+    $stmt = $pdo->prepare('SELECT row_id, column_id, colspan, rowspan FROM raid_template_cell_merges WHERE table_id = ?');
     $stmt->execute([$tb['id']]);
     $cellMerges = array_map(fn($m) => [
         'rowId' => (int)$m['row_id'],
         'columnId' => (int)$m['column_id'],
         'colspan' => (int)$m['colspan'],
+        'rowspan' => (int)$m['rowspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ?');
@@ -913,16 +914,40 @@ if ($action === 'set_cell_merge') {
 
     $stmt = $pdo->prepare('SELECT COUNT(*) FROM raid_template_columns WHERE table_id = ? AND sort_order >= ?');
     $stmt->execute([$col['table_id'], $col['sort_order']]);
-    $maxSpan = (int)$stmt->fetchColumn();
-    $colspan = max(1, min($maxSpan, (int)($body['colspan'] ?? 1)));
+    $maxColSpan = (int)$stmt->fetchColumn();
+    $colspan = max(1, min($maxColSpan, (int)($body['colspan'] ?? 1)));
 
-    if ($colspan <= 1) {
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM raid_template_rows WHERE table_id = ? AND sort_order >= ?');
+    $stmt->execute([$row['table_id'], $row['sort_order']]);
+    $maxRowSpan = (int)$stmt->fetchColumn();
+    $rowspan = max(1, min($maxRowSpan, (int)($body['rowspan'] ?? 1)));
+
+    if ($colspan <= 1 && $rowspan <= 1) {
         $stmt = $pdo->prepare('DELETE FROM raid_template_cell_merges WHERE row_id = ? AND column_id = ?');
         $stmt->execute([$row['id'], $col['id']]);
     } else {
-        $stmt = $pdo->prepare('INSERT INTO raid_template_cell_merges (table_id, row_id, column_id, colspan) VALUES (?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE colspan = VALUES(colspan)');
-        $stmt->execute([$col['table_id'], $row['id'], $col['id'], $colspan]);
+        // A smaller merge fully swallowed by this bigger rectangle would otherwise sit
+        // orphaned-but-inert (its anchor is now a covered cell) and could reappear as a
+        // phantom merge if this bigger merge is later split -- remove it up front instead.
+        $stmt = $pdo->prepare(
+            'DELETE m FROM raid_template_cell_merges m
+             JOIN raid_template_rows r ON r.id = m.row_id
+             JOIN raid_template_columns c ON c.id = m.column_id
+             WHERE m.table_id = ?
+               AND r.sort_order BETWEEN ? AND ?
+               AND c.sort_order BETWEEN ? AND ?
+               AND NOT (m.row_id = ? AND m.column_id = ?)'
+        );
+        $stmt->execute([
+            $col['table_id'],
+            $row['sort_order'], $row['sort_order'] + $rowspan - 1,
+            $col['sort_order'], $col['sort_order'] + $colspan - 1,
+            $row['id'], $col['id'],
+        ]);
+
+        $stmt = $pdo->prepare('INSERT INTO raid_template_cell_merges (table_id, row_id, column_id, colspan, rowspan) VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE colspan = VALUES(colspan), rowspan = VALUES(rowspan)');
+        $stmt->execute([$col['table_id'], $row['id'], $col['id'], $colspan, $rowspan]);
     }
 
     respond_structure($pdo, $col['template_id']);
@@ -1054,6 +1079,262 @@ if ($action === 'reorder') {
     }
 
     fail(400, 'Invalid reorder kind');
+}
+
+// --- Undo: id-preserving snapshot restore -------------------------------------------------
+//
+// push-template.php's sync_table() matches a raid's rows/columns/tables/groups/rules back to
+// the template via a source_*_id FK on the raid side that points at the template entity's own
+// id (see raid_structure.php's copy_table_recursive()). So Undo can't just wipe and recreate
+// the template's structure -- every raid built from it would desync on the next push. Instead
+// this diffs a client-held snapshot (an earlier fetch_structure()/fetch_tab_exports() response)
+// against the live rows, matched by their own id: UPDATE what changed, DELETE what's live but
+// missing from the snapshot, and re-INSERT what's missing live *with its original id* (MySQL
+// allows an explicit-id insert into an AUTO_INCREMENT PK; the counter just advances past it).
+
+// Diffs one table's live rows (scoped by $fkCol = $fkVal) against $snapshotList -- an ordered
+// array of assoc arrays shaped like fetch_structure()'s client JSON -- by each item's own id.
+// $fieldMap maps DB column => [snapshot key, cast] ('str'|'int'|'bool'); sort_order is derived
+// from array position (fetch_structure() never exposes it to the client) unless an item carries
+// a '__sortOrder' override (used by column-group topological reordering, see below).
+// $extraFixed supplies DB columns whose value isn't in the snapshot item at all -- e.g. a
+// table's own section_id/parent_group_id, which the caller fixes by scope rather than the JSON.
+function restore_diff_entities($pdo, $table, $fkCol, $fkVal, array $snapshotList, array $fieldMap, array $extraFixed = []) {
+    $stmt = $pdo->prepare("SELECT id FROM $table WHERE $fkCol = ?");
+    $stmt->execute([$fkVal]);
+    $liveIds = array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
+
+    $dbCols = array_keys($fieldMap);
+    $fixedCols = array_keys($extraFixed);
+    $seen = [];
+
+    foreach ($snapshotList as $i => $item) {
+        $id = (int)($item['id'] ?? 0);
+        if ($id <= 0) continue;
+        $seen[] = $id;
+
+        $values = [];
+        foreach ($fieldMap as $dbCol => $spec) {
+            [$key, $cast] = $spec;
+            $v = $item[$key] ?? null;
+            if ($cast === 'bool') $v = $v ? 1 : 0;
+            elseif ($cast === 'int' && $v !== null) $v = (int)$v;
+            $values[$dbCol] = $v;
+        }
+        $values['sort_order'] = $item['__sortOrder'] ?? $i;
+        foreach ($extraFixed as $col => $val) $values[$col] = $val;
+
+        if (in_array($id, $liveIds, true)) {
+            $sets = [];
+            $params = [];
+            foreach (array_merge($dbCols, ['sort_order'], $fixedCols) as $col) {
+                $sets[] = "$col = ?";
+                $params[] = $values[$col];
+            }
+            $params[] = $id;
+            $pdo->prepare("UPDATE $table SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+        } else {
+            $cols = array_merge(['id', $fkCol], $dbCols, ['sort_order'], $fixedCols);
+            $params = array_merge([$id, $fkVal], array_map(fn($c) => $values[$c], array_merge($dbCols, ['sort_order'], $fixedCols)));
+            $placeholders = implode(',', array_fill(0, count($params), '?'));
+            $pdo->prepare("INSERT INTO $table (" . implode(',', $cols) . ") VALUES ($placeholders)")->execute($params);
+        }
+    }
+
+    foreach ($liveIds as $id) {
+        if (!in_array($id, $seen, true)) {
+            $pdo->prepare("DELETE FROM $table WHERE id = ?")->execute([$id]);
+        }
+    }
+}
+
+// Column groups are self-referential (parentGroupId -> another group's own id) and DB-FK
+// enforced, so a freshly re-inserted parent must exist before any child referencing it is
+// inserted/updated. Reorders (stable, depth-first) so every group appears after its parent;
+// each item keeps a '__sortOrder' tag carrying its original array position, since this reorder
+// must not itself change sort_order.
+function topological_sort_groups(array $groups) {
+    $byId = [];
+    foreach ($groups as $g) $byId[(int)$g['id']] = $g;
+    $out = [];
+    $placed = [];
+    $visit = function ($g) use (&$visit, &$out, &$placed, $byId) {
+        $id = (int)$g['id'];
+        if (isset($placed[$id])) return;
+        $parentId = $g['parentGroupId'] ?? null;
+        if ($parentId !== null && isset($byId[(int)$parentId])) {
+            $visit($byId[(int)$parentId]);
+        }
+        $placed[$id] = true;
+        $out[] = $g;
+    };
+    foreach ($groups as $g) $visit($g);
+    return $out;
+}
+
+// Restores one table's own contents (columns/rows/groups/rules id-preserving; cell_merges/
+// cells/rule_cells wholesale) from $snapshotTable, then recurses into any nested boss-tables
+// living inside its column groups -- mirroring fetch_table_full()'s own recursive shape.
+function restore_table_recursive($pdo, $tableId, array $snapshotTable) {
+    $indexedGroups = [];
+    foreach ($snapshotTable['columnGroups'] ?? [] as $i => $g) {
+        $g['__sortOrder'] = $i;
+        $indexedGroups[] = $g;
+    }
+    $sortedGroups = topological_sort_groups($indexedGroups);
+    // Groups before columns: raid_template_columns.group_id is FK-constrained to
+    // raid_template_column_groups.id, so a re-inserted group must exist first.
+    restore_diff_entities($pdo, 'raid_template_column_groups', 'table_id', $tableId, $sortedGroups, [
+        'parent_group_id' => ['parentGroupId', 'int'],
+        'title'           => ['title', 'str'],
+        'color'           => ['color', 'str'],
+    ]);
+
+    restore_diff_entities($pdo, 'raid_template_columns', 'table_id', $tableId, $snapshotTable['columns'] ?? [], [
+        'label'          => ['label', 'str'],
+        'kind'           => ['kind', 'str'],
+        'width'          => ['width', 'int'],
+        'header_color'   => ['headerColor', 'str'],
+        'bg_color'       => ['bgColor', 'str'],
+        'group_id'       => ['groupId', 'int'],
+        'header_colspan' => ['headerColspan', 'int'],
+    ]);
+
+    restore_diff_entities($pdo, 'raid_template_rows', 'table_id', $tableId, $snapshotTable['rows'] ?? [], [
+        'label'    => ['label', 'str'],
+        'kind'     => ['kind', 'str'],
+        'height'   => ['height', 'int'],
+        'bg_color' => ['bgColor', 'str'],
+    ]);
+
+    // raid_template_rule_cells has no FK at all, so deleting a rule (missing from the snapshot)
+    // wouldn't cascade-clean its cell refs -- match delete_rule's own explicit cleanup here too,
+    // before the rules diff below removes the rule row itself.
+    $stmt = $pdo->prepare('SELECT id FROM raid_template_rules WHERE table_id = ?');
+    $stmt->execute([$tableId]);
+    $liveRuleIds = array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
+    $snapshotRuleIds = array_map(fn($r) => (int)($r['id'] ?? 0), $snapshotTable['rules'] ?? []);
+    $deletedRuleIds = array_diff($liveRuleIds, $snapshotRuleIds);
+    if ($deletedRuleIds) {
+        $ph = implode(',', array_fill(0, count($deletedRuleIds), '?'));
+        $pdo->prepare("DELETE FROM raid_template_rule_cells WHERE rule_id IN ($ph)")->execute(array_values($deletedRuleIds));
+    }
+
+    restore_diff_entities($pdo, 'raid_template_rules', 'table_id', $tableId, $snapshotTable['rules'] ?? [], [
+        'rule_type' => ['ruleType', 'str'],
+        'scope'     => ['scope', 'str'],
+        'classes'   => ['classes', 'str'],
+        'max_count' => ['maxCount', 'int'],
+        'label'     => ['label', 'str'],
+    ]);
+
+    // cell_merges/cells are matched only by (row_id, column_id), never referenced by their own
+    // id elsewhere, so a wholesale table-scoped resync is simplest -- correct now that rows/
+    // columns above have their original ids back.
+    $pdo->prepare('DELETE FROM raid_template_cell_merges WHERE table_id = ?')->execute([$tableId]);
+    $insMerge = $pdo->prepare('INSERT INTO raid_template_cell_merges (table_id, row_id, column_id, colspan, rowspan) VALUES (?, ?, ?, ?, ?)');
+    foreach ($snapshotTable['cellMerges'] ?? [] as $m) {
+        $insMerge->execute([$tableId, (int)$m['rowId'], (int)$m['columnId'], (int)($m['colspan'] ?? 1), (int)($m['rowspan'] ?? 1)]);
+    }
+
+    $pdo->prepare('DELETE FROM raid_template_cells WHERE table_id = ?')->execute([$tableId]);
+    $insCell = $pdo->prepare(
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    foreach ($snapshotTable['cells'] ?? [] as $c) {
+        $insCell->execute([
+            $tableId, (int)$c['rowId'], (int)$c['columnId'],
+            $c['textContent'] ?? '', $c['bgColor'] ?? null, $c['textColor'] ?? null,
+            !empty($c['bold']) ? 1 : 0, $c['font'] ?? null, $c['icon'] ?? null, $c['kindOverride'] ?? null,
+        ]);
+    }
+
+    // Rule-cell refs, keyed only by rule_id -- rules above kept their ids, so this can stay
+    // scoped per rule rather than needing a table-wide join.
+    foreach ($snapshotTable['rules'] ?? [] as $rule) {
+        $ruleId = (int)($rule['id'] ?? 0);
+        if (!$ruleId) continue;
+        $pdo->prepare('DELETE FROM raid_template_rule_cells WHERE rule_id = ?')->execute([$ruleId]);
+        $insRC = $pdo->prepare('INSERT INTO raid_template_rule_cells (rule_id, row_id, column_id) VALUES (?, ?, ?)');
+        foreach ($rule['cellRefs'] ?? [] as $ref) {
+            $insRC->execute([$ruleId, (int)$ref['rowId'], (int)$ref['columnId']]);
+        }
+    }
+
+    // Nested boss-tables live inside column groups, recursed the same way fetch_table_full()
+    // builds them.
+    foreach ($sortedGroups as $g) {
+        $groupId = (int)$g['id'];
+        restore_diff_entities($pdo, 'raid_template_tables', 'parent_group_id', $groupId, $g['tables'] ?? [], [
+            'title'                 => ['title', 'str'],
+            'header_color'          => ['headerColor', 'str'],
+            'bg_color'              => ['bgColor', 'str'],
+            'default_column_width'  => ['defaultColumnWidth', 'int'],
+        ], ['section_id' => null]);
+        foreach ($g['tables'] ?? [] as $childTb) {
+            $childId = (int)($childTb['id'] ?? 0);
+            if ($childId) restore_table_recursive($pdo, $childId, $childTb);
+        }
+    }
+}
+
+function restore_snapshot($pdo, $templateId, array $snapshotSections, array $snapshotTabExports) {
+    restore_diff_entities($pdo, 'raid_template_sections', 'template_id', $templateId, $snapshotSections, [
+        'kind'               => ['kind', 'str'],
+        'title'              => ['title', 'str'],
+        'color'              => ['color', 'str'],
+        'bg_color'           => ['bgColor', 'str'],
+        'note_enabled'       => ['noteEnabled', 'bool'],
+        'note_text'          => ['noteText', 'str'],
+        'mrt_export_enabled' => ['mrtExportEnabled', 'bool'],
+    ]);
+
+    foreach ($snapshotSections as $sec) {
+        $sectionId = (int)($sec['id'] ?? 0);
+        if (!$sectionId) continue;
+        restore_diff_entities($pdo, 'raid_template_tables', 'section_id', $sectionId, $sec['tables'] ?? [], [
+            'title'                 => ['title', 'str'],
+            'header_color'          => ['headerColor', 'str'],
+            'bg_color'              => ['bgColor', 'str'],
+            'default_column_width'  => ['defaultColumnWidth', 'int'],
+        ], ['parent_group_id' => null]);
+        foreach ($sec['tables'] ?? [] as $tb) {
+            $tableId = (int)($tb['id'] ?? 0);
+            if ($tableId) restore_table_recursive($pdo, $tableId, $tb);
+        }
+    }
+
+    // Tab-export config is template-scoped and never referenced by raid-side sync at all
+    // (confirmed: no source_*_id anywhere near it), so a full wholesale resync -- ignoring the
+    // snapshot's own export-page ids entirely -- is simplest and correct.
+    $pdo->prepare('DELETE FROM raid_template_tab_exports WHERE template_id = ?')->execute([$templateId]);
+    $insTE = $pdo->prepare('INSERT INTO raid_template_tab_exports (template_id, kind, enabled, single_page, export_name) VALUES (?, ?, ?, ?, ?)');
+    $insPage = $pdo->prepare('INSERT INTO raid_template_export_pages (tab_export_id, name, template, sort_order) VALUES (?, ?, ?, ?)');
+    foreach ($snapshotTabExports as $kind => $te) {
+        $insTE->execute([$templateId, $kind, !empty($te['enabled']) ? 1 : 0, !empty($te['singlePage']) ? 1 : 0, $te['exportName'] ?? null]);
+        $tabExportId = (int)$pdo->lastInsertId();
+        foreach ($te['pages'] ?? [] as $i => $p) {
+            $insPage->execute([$tabExportId, $p['name'] ?? '', $p['template'] ?? '', $i]);
+        }
+    }
+}
+
+if ($action === 'restore_snapshot') {
+    $templateId = isset($body['templateId']) ? (int)$body['templateId'] : 0;
+    $template = fetch_template($pdo, $tenant['id'], $templateId);
+    if (!$template) fail(404, 'Template not found');
+    $snapshotSections = is_array($body['sections'] ?? null) ? $body['sections'] : [];
+    $snapshotTabExports = is_array($body['tabExports'] ?? null) ? $body['tabExports'] : [];
+    $pdo->beginTransaction();
+    try {
+        restore_snapshot($pdo, $templateId, $snapshotSections, $snapshotTabExports);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        fail(500, 'Restore failed');
+    }
+    respond_structure($pdo, $templateId);
 }
 
 fail(400, 'Unknown action');
