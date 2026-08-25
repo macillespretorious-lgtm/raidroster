@@ -26,19 +26,20 @@ if (!$template) {
 }
 
 function fetch_table_full($pdo, $tb) {
-    $stmt3 = $pdo->prepare('SELECT id, label, kind, width, header_color, group_id, header_colspan FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt3 = $pdo->prepare('SELECT id, label, kind, width, header_color, bg_color, group_id, header_colspan FROM raid_template_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmt3->execute([$tb['id']]);
     $columns = array_map(fn($c) => [
         'id' => (int)$c['id'], 'label' => $c['label'], 'kind' => $c['kind'],
         'width' => $c['width'] !== null ? (int)$c['width'] : null,
         'headerColor' => $c['header_color'],
+        'bgColor' => $c['bg_color'],
         'groupId' => $c['group_id'] !== null ? (int)$c['group_id'] : null,
         'headerColspan' => (int)$c['header_colspan'],
     ], $stmt3->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt4 = $pdo->prepare('SELECT id, label, kind, height FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
+    $stmt4 = $pdo->prepare('SELECT id, label, kind, height, bg_color FROM raid_template_rows WHERE table_id = ? ORDER BY sort_order, id');
     $stmt4->execute([$tb['id']]);
-    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind'], 'height' => $r['height'] !== null ? (int)$r['height'] : null], $stmt4->fetchAll(PDO::FETCH_ASSOC));
+    $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'label' => $r['label'], 'kind' => $r['kind'], 'height' => $r['height'] !== null ? (int)$r['height'] : null, 'bgColor' => $r['bg_color']], $stmt4->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt5 = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
     $stmt5->execute([$tb['id']]);
@@ -56,10 +57,10 @@ function fetch_table_full($pdo, $tb) {
         ];
     }
 
-    $stmt6 = $pdo->prepare('SELECT row_id, column_id, colspan FROM raid_template_cell_merges WHERE table_id = ?');
+    $stmt6 = $pdo->prepare('SELECT row_id, column_id, colspan, rowspan FROM raid_template_cell_merges WHERE table_id = ?');
     $stmt6->execute([$tb['id']]);
     $cellMerges = array_map(fn($m) => [
-        'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'],
+        'rowId' => (int)$m['row_id'], 'columnId' => (int)$m['column_id'], 'colspan' => (int)$m['colspan'], 'rowspan' => (int)$m['rowspan'],
     ], $stmt6->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt7 = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ?');
@@ -97,6 +98,7 @@ function fetch_table_full($pdo, $tb) {
     return [
         'id' => (int)$tb['id'], 'title' => $tb['title'],
         'headerColor' => $tb['header_color'],
+        'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
         'cellMerges' => $cellMerges, 'cells' => $cells, 'rules' => $rules,
@@ -111,7 +113,17 @@ function fetch_structure($pdo, $templateId) {
         $stmt2 = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
         $stmt2->execute([$sec['id']]);
         $tables = array_map(fn($tb) => fetch_table_full($pdo, $tb), $stmt2->fetchAll(PDO::FETCH_ASSOC));
-        $out[] = ['id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'tables' => $tables];
+        $out[] = [
+            'id' => (int)$sec['id'],
+            'kind' => $sec['kind'],
+            'title' => $sec['title'],
+            'color' => $sec['color'],
+            'bgColor' => $sec['bg_color'],
+            'tables' => $tables,
+            'noteEnabled' => (bool)$sec['note_enabled'],
+            'noteText' => $sec['note_text'],
+            'mrtExportEnabled' => (bool)$sec['mrt_export_enabled'],
+        ];
     }
     return $out;
 }
