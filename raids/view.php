@@ -1082,7 +1082,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage) {
     // Column-kind min-width (matches the editor's NARROW_MIN_COL_PX = half the normal 60px
     // floor) -- icon/text columns hold compact content, so they're allowed narrower than the
     // generic td.cell 90px CSS floor.
-    const minWidthStyle = (c.kind === 'icon' || c.kind === 'text') ? 'min-width:30px;' : '';
+    const minWidthStyle = (c.kind === 'icon' || c.kind === 'text' || c.kind === 'general') ? 'min-width:30px;' : '';
     if (eff === 'spacer') {
       const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
       const spacerStyle = (minWidthStyle || spacerColor) ? ` style="${minWidthStyle}${spacerColor ? `background:${spacerColor};` : ''}"` : '';
