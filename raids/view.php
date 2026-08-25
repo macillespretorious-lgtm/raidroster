@@ -1067,7 +1067,7 @@ function computeMergeCoverage(tb) {
 
 // Same walk-and-consume pattern for body cells: tb.cellMerges is a (rowId, columnId) ->
 // colspan/rowspan lookup, independent of header merges. Covered positions get no <td> at all.
-function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage) {
+function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
@@ -1084,9 +1084,12 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage) {
     // generic td.cell 90px CSS floor.
     const minWidthStyle = (c.kind === 'icon' || c.kind === 'text' || c.kind === 'general') ? 'min-width:30px;' : '';
     if (eff === 'spacer') {
-      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
-      const spacerStyle = (minWidthStyle || spacerColor) ? ` style="${minWidthStyle}${spacerColor ? `background:${spacerColor};` : ''}"` : '';
-      out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell"${spacerStyle}></td>`);
+      // Unpainted fillers/spacers always resolve explicitly to the section's own background
+      // (not just CSS "none"), so they show through the section colour even when the table
+      // they sit in has its own painted background -- a spacer is meant to look like a gap
+      // straight down to the section, not a hole in the table's colour.
+      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || sectionBg;
+      out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell" style="${minWidthStyle}background:${spacerColor};"></td>`);
       i += colspan; continue;
     }
     if (eff === 'text') {
@@ -1107,7 +1110,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage) {
   return out.join('');
 }
 
-function renderColumnBlock(chunkCols, tb, noteEnabled) {
+function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
   const coverage = computeMergeCoverage(tb);
   const colgroup = `<colgroup>` +
     chunkCols.map(c => {
@@ -1117,11 +1120,10 @@ function renderColumnBlock(chunkCols, tb, noteEnabled) {
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      const bgStyle = r.bgColor ? `background:${r.bgColor};` : '';
-      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="${bgStyle}"></td></tr>`;
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="background:${r.bgColor || sectionBg};"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
-    return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage)}</tr>`;
+    return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg)}</tr>`;
   }).join('');
 
   const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb);
@@ -1135,15 +1137,15 @@ function renderColumnBlock(chunkCols, tb, noteEnabled) {
     </div>`;
 }
 
-function renderTable(tb, noteEnabled) {
+function renderTable(tb, noteEnabled, sectionBg) {
   const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
-  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, noteEnabled)).join('');
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables">
-      ${g.tables.map(ctb => renderTable(ctb, noteEnabled)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb, noteEnabled, sectionBg)).join('')}
     </div>`).join('');
 
   const headBar = tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : '';
@@ -1166,11 +1168,12 @@ function renderSection(sec) {
     </div>` : '';
   const noteEnabled = !!sec.noteEnabled;
   const noteBar = (noteEnabled && sec.noteText) ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
+  const sectionBg = sec.bgColor || '#111827';
   return `<div class="section-card">
     <div class="section-head" style="background:${headColor};"><span>${meta.icon} ${esc(sec.title)}</span><div class="section-head-actions">${mrtBar}${clearBtn}</div></div>
     ${noteBar}
     <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
-      ${sec.tables.map(tb => renderTable(tb, noteEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
+      ${sec.tables.map(tb => renderTable(tb, noteEnabled, sectionBg)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }

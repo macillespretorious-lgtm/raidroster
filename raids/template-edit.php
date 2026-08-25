@@ -1767,7 +1767,7 @@ function renderSection(sec) {
 // group header row, same effectiveKind cell-kind resolution), but every General cell
 // always shows the empty-slot placeholder since no toon assignments exist at the
 // template level; Text cells render their real authored content/colors.
-function previewBodyCellsForRow(r, chunkCols, tb, coverage) {
+function previewBodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
@@ -1784,9 +1784,8 @@ function previewBodyCellsForRow(r, chunkCols, tb, coverage) {
     // cell's own kind_override.
     const minWidthStyle = (c.kind === 'icon' || c.kind === 'text' || c.kind === 'general') ? `min-width:${NARROW_MIN_COL_PX}px;` : '';
     if (eff === 'spacer') {
-      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || null;
-      const spacerStyle = (minWidthStyle || spacerColor) ? ` style="${minWidthStyle}${spacerColor ? `background:${spacerColor};` : ''}"` : '';
-      out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell"${spacerStyle}></td>`);
+      const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || c.bgColor || sectionBg;
+      out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell" style="${minWidthStyle}background:${spacerColor};"></td>`);
       i += colspan; continue;
     }
     if (eff === 'text') {
@@ -1805,7 +1804,7 @@ function previewBodyCellsForRow(r, chunkCols, tb, coverage) {
   return out.join('');
 }
 
-function previewColumnBlock(chunkCols, tb, groupsEnabled) {
+function previewColumnBlock(chunkCols, tb, groupsEnabled, sectionBg) {
   const coverage = computeMergeCoverage(tb);
   const groupRow = groupsEnabled ? groupHeaderRow(chunkCols, tb.columnGroups, false, true) : '';
 
@@ -1817,11 +1816,11 @@ function previewColumnBlock(chunkCols, tb, groupsEnabled) {
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      const bgStyle = r.bgColor ? `background:${r.bgColor};` : '';
-      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="${bgStyle}"></td></tr>`;
+      const bg = r.bgColor || sectionBg;
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="background:${bg};"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
-    return `<tr${heightAttr}>${previewBodyCellsForRow(r, chunkCols, tb, coverage)}</tr>`;
+    return `<tr${heightAttr}>${previewBodyCellsForRow(r, chunkCols, tb, coverage, sectionBg)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
@@ -1833,16 +1832,16 @@ function previewColumnBlock(chunkCols, tb, groupsEnabled) {
     </div>`;
 }
 
-function previewRenderTable(tb, groupsEnabled) {
+function previewRenderTable(tb, groupsEnabled, sectionBg) {
   const groupsWithTables = groupsEnabled ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
-  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => previewColumnBlock(chunkCols, tb, groupsEnabled)).join('');
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => previewColumnBlock(chunkCols, tb, groupsEnabled, sectionBg)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
   const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables">
-      ${g.tables.map(ctb => previewRenderTable(ctb, groupsEnabled)).join('')}
+      ${g.tables.map(ctb => previewRenderTable(ctb, groupsEnabled, sectionBg)).join('')}
     </div>`).join('');
 
   return `<div class="tbl-wrap"${wrapStyle}>
@@ -1857,11 +1856,12 @@ function renderPreviewSection(sec) {
   const headColor = sec.color || meta.color;
   const groupsEnabled = false;
   const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
+  const sectionBg = sec.bgColor || '#111827';
   return `<div class="section-card">
     <div class="section-head" style="background:${headColor};">${esc(sec.title)}</div>
     ${noteBar}
     <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
-      ${sec.tables.map(tb => previewRenderTable(tb, groupsEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
+      ${sec.tables.map(tb => previewRenderTable(tb, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }
@@ -1871,16 +1871,18 @@ function renderPreviewSection(sec) {
 // kept on every paintable cell, plus a thin row/column header strip whose only job is to be
 // a click target for "paint this whole row/column" -- an affordance that doesn't exist on the
 // raid page itself, added here purely for the paint tool.
-function colourBodyCellsForRow(r, chunkCols, tb, coverage) {
+function colourBodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
     const c = chunkCols[i];
     if (coverage.covered.has(`${r.id}_${c.id}`)) { i++; continue; }
     if (c.kind === 'spacer') {
-      const bg = c.bgColor || null;
-      const style = bg ? ` style="background:${bg};"` : '';
-      out.push(`<td class="spacer-cell paint-spacer-col" data-table-id="${tb.id}" data-spacer-col-id="${c.id}"${style} title="Paint this spacer column"></td>`);
+      // Unpainted spacer columns resolve explicitly to the section's own background (not
+      // just left unset), so they show through to the section colour even when the table
+      // they sit in has its own painted background.
+      const bg = c.bgColor || sectionBg;
+      out.push(`<td class="spacer-cell paint-spacer-col" data-table-id="${tb.id}" data-spacer-col-id="${c.id}" style="background:${bg};" title="Paint this spacer column"></td>`);
       i++; continue;
     }
     const cell = cellFor(tb, r.id, c.id);
@@ -1897,10 +1899,9 @@ function colourBodyCellsForRow(r, chunkCols, tb, coverage) {
       // still owns a real raid_template_cells row, so it stays paintable and mergeable like
       // any other cell; carries the same colspan/rowspan/remove-merge as a normal cell so a
       // merge anchored here doesn't leave the row's <td> count short.
-      const bg = cell.bgColor || null;
+      const bg = cell.bgColor || sectionBg;
       const minWidthStyle = (c.kind === 'icon' || c.kind === 'text' || c.kind === 'general') ? `min-width:${NARROW_MIN_COL_PX}px;` : '';
-      const style = (minWidthStyle || bg) ? ` style="${minWidthStyle}${bg ? `background:${bg};` : ''}"` : '';
-      out.push(`<td${colspanAttr}${rowspanAttr} class="cell spacer-cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${style} title="Paint this filler cell">${removeMergeBtn}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell spacer-cell" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}" style="${minWidthStyle}background:${bg};" title="Paint this filler cell">${removeMergeBtn}</td>`);
       i += colspan; continue;
     }
     const bg = cell.bgColor || null;
@@ -1922,7 +1923,7 @@ function colourBodyCellsForRow(r, chunkCols, tb, coverage) {
   return out.join('');
 }
 
-function colourColumnBlock(chunkCols, tb) {
+function colourColumnBlock(chunkCols, tb, sectionBg) {
   const coverage = computeMergeCoverage(tb);
   const colgroup = `<colgroup><col style="width:22px;">` +
     chunkCols.map(c => {
@@ -1936,13 +1937,12 @@ function colourColumnBlock(chunkCols, tb) {
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
-      const bg = r.bgColor || null;
-      const style = bg ? ` style="background:${bg};"` : '';
-      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell"></td><td class="spacer-cell paint-spacer-row" colspan="${chunkCols.length}" data-table-id="${tb.id}" data-spacer-row-id="${r.id}"${style} title="Paint this spacer row"></td></tr>`;
+      const bg = r.bgColor || sectionBg;
+      return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell"></td><td class="spacer-cell paint-spacer-row" colspan="${chunkCols.length}" data-table-id="${tb.id}" data-spacer-row-id="${r.id}" style="background:${bg};" title="Paint this spacer row"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
     const rowHeader = `<th class="paint-row-th" data-action="paint-row" data-table-id="${tb.id}" data-row-id="${r.id}" title="Paint this whole row">&#9632;</th>`;
-    return `<tr${heightAttr}>${rowHeader}${colourBodyCellsForRow(r, chunkCols, tb, coverage)}</tr>`;
+    return `<tr${heightAttr}>${rowHeader}${colourBodyCellsForRow(r, chunkCols, tb, coverage, sectionBg)}</tr>`;
   }).join('');
 
   return `<div class="grid-scroll">
@@ -1954,8 +1954,8 @@ function colourColumnBlock(chunkCols, tb) {
     </div>`;
 }
 
-function colourRenderTable(tb) {
-  const blocks = chunkColumns(tb.columns).map(chunkCols => colourColumnBlock(chunkCols, tb)).join('');
+function colourRenderTable(tb, sectionBg) {
+  const blocks = chunkColumns(tb.columns).map(chunkCols => colourColumnBlock(chunkCols, tb, sectionBg)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
   const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
   return `<div class="tbl-wrap"${wrapStyle}>
@@ -1968,6 +1968,7 @@ function renderColourSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
   const headColor = sec.color || meta.color;
   const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
+  const sectionBg = sec.bgColor || '#111827';
   const bodyStyle = sec.bgColor ? ` style="background:${sec.bgColor};"` : '';
   return `<div class="section-card">
     <div class="section-head paint-section-head" data-action="paint-section" data-section-id="${sec.id}" style="background:${headColor};" title="Click to paint this section header">
@@ -1976,7 +1977,7 @@ function renderColourSection(sec) {
     </div>
     ${noteBar}
     <div class="section-body paint-section-body" data-action="paint-section-bg" data-section-id="${sec.id}"${bodyStyle} title="Click to paint this section's background">
-      ${sec.tables.map(tb => colourRenderTable(tb)).join('') || '<p class="empty">No tables in this section.</p>'}
+      ${sec.tables.map(tb => colourRenderTable(tb, sectionBg)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }
