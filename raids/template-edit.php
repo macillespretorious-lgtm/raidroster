@@ -1947,8 +1947,17 @@ function renderPreviewSection(sec) {
 // wrapped on-screen grid.
 const DISCORD_MAX_COLS = 9;
 const DISCORD_MAX_COL_PX = DEFAULT_COL_UNITS * COL_UNIT_PX;
+const DISCORD_MAX_TOTAL_PX = DISCORD_MAX_COLS * DISCORD_MAX_COL_PX;
 function discordColWidthPx(c, tb) {
   return Math.min(colWidthPx(c, tb), DISCORD_MAX_COL_PX);
+}
+// A raw column count is a poor proxy for how much horizontal room a table actually needs --
+// a table full of wide text columns eats the budget far faster than one of narrow icon/spacer
+// columns. Budget by actual rendered pixel width instead (post cap = 9 columns' worth of the
+// default general-cell width, 1080px), matching the same discordColWidthPx cap already used
+// to render each column.
+function tableWidthPx(tb) {
+  return tb.columns.reduce((sum, c) => sum + discordColWidthPx(c, tb), 0);
 }
 function flattenSectionTables(tables) {
   const out = [];
@@ -1960,40 +1969,45 @@ function flattenSectionTables(tables) {
   }
   return out;
 }
-// Greedily packs tables side-by-side into "posts" up to a combined DISCORD_MAX_COLS budget.
-// Two spacer columns meeting at a table-to-table boundary within the same post count as one
-// combined column (not two) since they'd visually merge into a single gap in the image. A
-// table that alone exceeds the budget still gets its own post -- it can't be split further.
-// Packing runs across the whole tab, not reset at each section boundary: most sections here
-// hold exactly one table each, so a per-section budget would almost never combine anything --
-// the live Discord canvas export (raids/view.php) already stacks every section into one image
-// regardless of section boundaries, so packing should be free to do the same.
+// Greedily packs tables side-by-side into "posts" up to a combined DISCORD_MAX_TOTAL_PX width
+// budget (9 columns' worth of the default general-cell width, 1080px). Two spacer columns
+// meeting at a table-to-table boundary within the same post count as one combined column, not
+// two -- so only the narrower of the pair's widths is added, not both -- since they'd visually
+// merge into a single gap in the image. A table that alone exceeds the budget still gets its
+// own post -- it can't be split further. Packing runs across the whole tab, not reset at each
+// section boundary: most sections here hold exactly one table each, so a per-section budget
+// would almost never combine anything -- the live Discord canvas export (raids/view.php)
+// already stacks every section into one image regardless of section boundaries, so packing
+// should be free to do the same. Returns [{ entries, width }, ...].
 function groupEntriesIntoPosts(entries) {
   const posts = [];
   let current = [];
-  let currentCols = 0;
+  let currentWidth = 0;
+  const flush = () => { if (current.length) posts.push({ entries: current, width: currentWidth }); };
   for (const entry of entries) {
     const tb = entry.tb;
-    const cols = tb.columns.length;
-    let addCols = cols;
+    const width = tableWidthPx(tb);
+    let addWidth = width;
     if (current.length) {
       const prevTb = current[current.length - 1].tb;
       const prevLast = prevTb.columns[prevTb.columns.length - 1];
       const nextFirst = tb.columns[0];
       if (prevLast && nextFirst && prevLast.kind === 'spacer' && nextFirst.kind === 'spacer') {
-        addCols = Math.max(0, addCols - 1);
+        const prevW = discordColWidthPx(prevLast, prevTb);
+        const nextW = discordColWidthPx(nextFirst, tb);
+        addWidth = Math.max(0, addWidth - Math.min(prevW, nextW));
       }
     }
-    if (current.length && currentCols + addCols > DISCORD_MAX_COLS) {
-      posts.push(current);
+    if (current.length && currentWidth + addWidth > DISCORD_MAX_TOTAL_PX) {
+      flush();
       current = [entry];
-      currentCols = cols;
+      currentWidth = width;
     } else {
       current.push(entry);
-      currentCols += addCols;
+      currentWidth += addWidth;
     }
   }
-  if (current.length) posts.push(current);
+  flush();
   return posts;
 }
 function discordColumnBlock(tb, sectionBg) {
@@ -2045,10 +2059,10 @@ function renderDiscordTab(secs) {
   }
   if (!flat.length) return '<p class="empty">No tables in this tab.</p>';
   const posts = groupEntriesIntoPosts(flat);
-  return `<div class="discord-panel">` + posts.map((entries, idx) => {
-    const totalCols = entries.reduce((sum, e) => sum + e.tb.columns.length, 0);
+  return `<div class="discord-panel">` + posts.map((post, idx) => {
+    const { entries, width } = post;
     return `<div class="discord-post">
-      <div class="discord-post-label">Post ${idx + 1}<span class="discord-post-meta">${entries.length} table${entries.length === 1 ? '' : 's'} &middot; ${totalCols} col${totalCols === 1 ? '' : 's'}</span></div>
+      <div class="discord-post-label">Post ${idx + 1}<span class="discord-post-meta">${entries.length} table${entries.length === 1 ? '' : 's'} &middot; ~${Math.round(width)}px / ${DISCORD_MAX_TOTAL_PX}px</span></div>
       <div class="discord-post-row">
         ${entries.map(e => discordRenderTable(e.tb, e.sec)).join('')}
       </div>
