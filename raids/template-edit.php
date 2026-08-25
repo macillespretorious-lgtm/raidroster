@@ -1838,13 +1838,14 @@ function previewRenderTable(tb, groupsEnabled) {
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
   const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => previewColumnBlock(chunkCols, tb, groupsEnabled)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
+  const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables">
       ${g.tables.map(ctb => previewRenderTable(ctb, groupsEnabled)).join('')}
     </div>`).join('');
 
-  return `<div class="tbl-wrap">
+  return `<div class="tbl-wrap"${wrapStyle}>
     ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
     ${blocks}
     ${nestedGroupsHtml}
@@ -1853,12 +1854,13 @@ function previewRenderTable(tb, groupsEnabled) {
 
 function renderPreviewSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
+  const headColor = sec.color || meta.color;
   const groupsEnabled = false;
   const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   return `<div class="section-card">
-    <div class="section-head" style="background:${meta.color};">${esc(sec.title)}</div>
+    <div class="section-head" style="background:${headColor};">${esc(sec.title)}</div>
     ${noteBar}
-    <div class="section-body">
+    <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
       ${sec.tables.map(tb => previewRenderTable(tb, groupsEnabled)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
