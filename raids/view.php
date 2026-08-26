@@ -179,7 +179,7 @@ function fmtTime($t) {
     th.spacer-th, td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
 
     .toon-chip {
-      position: relative; display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 10px;
+      position: relative; display: inline-flex; align-items: center; gap: 4px; border-radius: 5px; padding: 3px 10px;
       font-size: 11px; font-weight: 700; color: #000; white-space: nowrap; cursor: default;
     }
     td.cell.editable .toon-chip[draggable="true"] { cursor: grab; }
@@ -205,7 +205,7 @@ function fmtTime($t) {
     .attendance-status { font-size: 12px; color: #7f8bad; margin-left: 2px; }
     .attendance-status.locked { color: #6fcf97; font-weight: 600; }
     .pool-drawer {
-      position: fixed; top: 0; right: 0; bottom: 0; width: 300px; max-width: 90vw; z-index: 400;
+      position: fixed; top: 0; right: 0; bottom: 0; width: 440px; max-width: 90vw; z-index: 400;
       background: #111827; border-left: 1px solid rgba(255,255,255,0.1); box-shadow: -8px 0 24px rgba(0,0,0,0.35);
       display: flex; flex-direction: column; padding: 16px; gap: 12px; overflow-y: auto;
       transform: translateX(100%); transition: transform .18s ease, border-color .18s ease;
@@ -236,9 +236,8 @@ function fmtTime($t) {
     #pugClassInput { padding: 8px 6px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12px; font: inherit; }
     #pugAddBtn { padding: 8px 12px; border: none; border-radius: 7px; background: #4a63e0; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
     #pugAddBtn:hover { background: #3b52c4; }
-    .pool-list { display: flex; flex-direction: column; gap: 6px; }
-    .pool-chip-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-    .pool-chip-row.indent { margin-left: 16px; }
+    .pool-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; align-content: start; }
+    .pool-chip-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
     .pool-chip { flex: 1; min-width: 0; cursor: grab; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; }
     .pool-chip.stamped { outline: 2px solid #f0c04a; outline-offset: 1px; }
     .pool-tag { font-size: 9px; font-weight: 700; opacity: .75; margin-left: 4px; }
@@ -1193,11 +1192,11 @@ function renderSection(sec) {
   </div>`;
 }
 
-function poolEntryHtml(p, indent) {
+function poolEntryHtml(p) {
   const color = classColor(p.class);
   const tagLabel = p.toonKind === 'pug' ? 'PUG' : (p.toonKind === 'alt' ? 'ALT' : '');
   const tag = tagLabel ? `<span class="pool-tag${p.toonKind === 'pug' ? ' pug' : ''}">${tagLabel}</span>` : '';
-  return `<div class="pool-chip-row${indent ? ' indent' : ''}">
+  return `<div class="pool-chip-row">
     <span class="toon-chip pool-chip" draggable="true" data-source="pool" data-pool-id="${p.id}"
       data-toon-kind="${esc(p.toonKind)}" data-toon-id="${esc(p.toonId || '')}"
       data-pug-name="${esc(p.pugName || '')}" data-pug-class="${esc(p.pugClass || '')}"
@@ -1210,26 +1209,25 @@ function renderPool() {
   const listEl = document.getElementById('poolList');
   if (!listEl) return;
 
-  const byMainId = {};
-  const altEntries = [];
-  const pugEntries = [];
-  pool.forEach(p => {
-    if (p.toonKind === 'main') byMainId[p.toonId] = p;
-    else if (p.toonKind === 'alt') altEntries.push(p);
-    else pugEntries.push(p);
+  // Pool entries can outlive the roster member they point at (removed toon/alt), so keep
+  // the same membership check the old main->alt grouping used to imply, now done directly
+  // against valid ids instead of via that grouping.
+  const validMainIds = new Set(roster.map(m => m.id));
+  const validAltIds = new Set();
+  roster.forEach(m => m.alts.forEach(a => validAltIds.add(a.id)));
+  const entries = pool.filter(p => {
+    if (p.toonKind === 'main') return validMainIds.has(p.toonId);
+    if (p.toonKind === 'alt') return validAltIds.has(p.toonId);
+    return true;
   });
-  const altIdsByMain = {};
-  roster.forEach(m => { altIdsByMain[m.id] = new Set(m.alts.map(a => a.id)); });
 
-  let html = '';
-  roster.forEach(m => {
-    const mainEntry = byMainId[m.id];
-    const mine = altEntries.filter(a => altIdsByMain[m.id] && altIdsByMain[m.id].has(a.toonId));
-    if (!mainEntry && !mine.length) return;
-    if (mainEntry) html += poolEntryHtml(mainEntry, false);
-    mine.forEach(a => { html += poolEntryHtml(a, true); });
+  entries.sort((a, b) => {
+    const ca = (a.class || '').toLowerCase(), cb = (b.class || '').toLowerCase();
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    return (a.name || '').localeCompare(b.name || '');
   });
-  pugEntries.forEach(p => { html += poolEntryHtml(p, false); });
+
+  const html = entries.map(p => poolEntryHtml(p)).join('');
 
   listEl.innerHTML = html || '<p class="pool-empty">No one in the pool yet. Search or add a PUG below.</p>';
 
