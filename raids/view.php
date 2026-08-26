@@ -174,7 +174,10 @@ function fmtTime($t) {
     table.grid td.icon-cell { text-align: center; }
     table.grid th.group-th { font-size: 13px; letter-spacing: .04em; }
     td.cell { min-width: 90px; background: rgba(255,255,255,0.04); }
-    td.cell.filled { padding: 0; }
+    /* Assignment-slot cells (whether filled or the "+" placeholder) get zero td padding --
+       the padding lives on the inner span instead, sized identically in both states, so a
+       row's height never shifts as its cells fill in one by one. */
+    td.cell.slot { padding: 0; }
     .inline-raid-icon { margin: 0 1px; }
     .raid-icon-cell { display: inline-block; }
     th.spacer-th, td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
@@ -185,10 +188,11 @@ function fmtTime($t) {
     }
     /* Discord export fills each assigned cell edge-to-edge with the class color; mirror
        that on-screen instead of a small pill floating in a dark cell, so the live table
-       looks the same as the posted image. */
-    td.cell.filled .toon-chip {
+       looks the same as the posted image. Matched by .empty-slot below so a row's height
+       doesn't change depending on which of its cells are filled yet. */
+    td.cell.slot .toon-chip {
       display: flex; width: 100%; height: 100%; box-sizing: border-box; border-radius: 0;
-      justify-content: center; padding: 6px 8px;
+      justify-content: center; padding: 8px;
     }
     td.cell.editable .toon-chip[draggable="true"] { cursor: grab; }
     td.cell.editable.drop-hover { background: rgba(88,101,242,0.18); }
@@ -199,7 +203,10 @@ function fmtTime($t) {
       line-height: 1; cursor: pointer;
     }
     .chip-clear:hover { background: rgba(0,0,0,0.45); }
-    .empty-slot { display: inline-block; color: #4a5578; font-size: 14px; padding: 3px 10px; }
+    td.cell.slot .empty-slot {
+      display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+      box-sizing: border-box; padding: 8px; color: #4a5578; font-size: 14px;
+    }
     .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
     .chip-marker { display: inline-block; margin-left: 4px; font-weight: 800; font-size: 11px; line-height: 1; color: rgba(255,255,255,0.35); }
     .chip-marker.clickable { cursor: pointer; }
@@ -1124,9 +1131,8 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
     } else {
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
-      const filledCls = (cell && cell.name) ? ' filled' : '';
       const bgStyle = (minWidthStyle || (cell && cell.bgColor)) ? ` style="${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}"` : '';
-      out.push(`<td${colspanAttr}${rowspanAttr} class="cell${editableCls}${filledCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell slot${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
     }
     i += colspan;
   }
@@ -1675,7 +1681,7 @@ function drawBlock(ctx, block, m, x0, y0) {
         ctx.fillStyle = color;
         ctx.fillRect(box.x + pad, y + pad, box.w - pad * 2, rowH - pad * 2);
         ctx.fillStyle = contrastText(color);
-        ctx.font = '11px Segoe UI, Arial, sans-serif';
+        ctx.font = 'bold 11px Segoe UI, Arial, sans-serif';
         ctx.fillText(cell.name, box.x + pad + 5, y + rowH / 2, box.w - pad * 2 - 10);
       }
     });
