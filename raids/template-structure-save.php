@@ -185,15 +185,22 @@ function fetch_group_owned($pdo, $guildId, $groupId) {
     return $grp;
 }
 
-function next_sort_order($pdo, $table, $fkCol, $fkVal) {
-    $stmt = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM $table WHERE $fkCol = ?");
-    $stmt->execute([$fkVal]);
+function next_sort_order($pdo, $table, $fkCol, $fkVal, $extraWhere = null, $extraParams = []) {
+    $sql = "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM $table WHERE $fkCol = ?";
+    $params = [$fkVal];
+    if ($extraWhere) { $sql .= " AND $extraWhere"; $params = array_merge($params, $extraParams); }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     return (int)$stmt->fetchColumn();
 }
 
-function move_sibling($pdo, $table, $fkCol, $fkVal, $id, $direction) {
-    $stmt = $pdo->prepare("SELECT id, sort_order FROM $table WHERE $fkCol = ? ORDER BY sort_order, id");
-    $stmt->execute([$fkVal]);
+function move_sibling($pdo, $table, $fkCol, $fkVal, $id, $direction, $extraWhere = null, $extraParams = []) {
+    $sql = "SELECT id, sort_order FROM $table WHERE $fkCol = ?";
+    $params = [$fkVal];
+    if ($extraWhere) { $sql .= " AND $extraWhere"; $params = array_merge($params, $extraParams); }
+    $sql .= " ORDER BY sort_order, id";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $idx = null;
     foreach ($rows as $i => $r) { if ((int)$r['id'] === (int)$id) { $idx = $i; break; } }
@@ -530,7 +537,7 @@ if ($action === 'add_section') {
     if (!$kind) fail(400, 'Tab name is required');
     if (!$title) fail(400, 'Title is required');
 
-    $order = next_sort_order($pdo, 'raid_template_sections', 'template_id', $templateId);
+    $order = next_sort_order($pdo, 'raid_template_sections', 'template_id', $templateId, 'kind = ?', [$kind]);
     $stmt = $pdo->prepare('INSERT INTO raid_template_sections (template_id, kind, title, sort_order) VALUES (?, ?, ?, ?)');
     $stmt->execute([$templateId, $kind, $title, $order]);
     respond_structure($pdo, $templateId);
@@ -609,7 +616,7 @@ if ($action === 'delete_section') {
 if ($action === 'move_section') {
     $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$sec) fail(404, 'Section not found');
-    move_sibling($pdo, 'raid_template_sections', 'template_id', $sec['template_id'], $sec['id'], $body['direction'] ?? '');
+    move_sibling($pdo, 'raid_template_sections', 'template_id', $sec['template_id'], $sec['id'], $body['direction'] ?? '', 'kind = ?', [$sec['kind']]);
     respond_structure($pdo, $sec['template_id']);
 }
 

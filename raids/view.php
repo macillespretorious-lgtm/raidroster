@@ -304,8 +304,10 @@ function fmtTime($t) {
     .import-row button:disabled { opacity: .5; cursor: not-allowed; }
     .modal.discord-modal { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 22px; width: 100%; max-width: 720px; max-height: 90vh; overflow-y: auto; }
     .modal.discord-modal h2 { font-size: 17px; margin-bottom: 14px; }
-    .discord-preview-wrap { border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: #05070f; padding: 10px; text-align: center; }
-    .discord-preview-wrap canvas { max-width: 100%; height: auto; border-radius: 4px; }
+    .discord-preview-wrap { display: flex; flex-direction: column; gap: 14px; max-height: 46vh; overflow-y: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: #05070f; padding: 10px; }
+    .discord-preview-item { text-align: center; }
+    .discord-preview-item canvas { max-width: 100%; height: auto; border-radius: 4px; }
+    .discord-preview-label { font-size: 10px; font-weight: 700; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 5px; }
     .discord-field { margin-top: 12px; }
     .discord-field label { display: block; font-size: 11px; font-weight: 700; color: #7f8bad; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 5px; }
     .discord-field select, .discord-field textarea { width: 100%; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 9px 12px; color: #e8ecff; font-size: 13px; font-family: inherit; }
@@ -364,7 +366,7 @@ function fmtTime($t) {
   <div class="modal-backdrop" id="discordModalBackdrop">
     <div class="modal discord-modal">
       <h2>Post to Discord</h2>
-      <div class="discord-preview-wrap"><canvas id="discordPreviewCanvas"></canvas></div>
+      <div class="discord-preview-wrap" id="discordPreviewWrap"></div>
       <div class="discord-field">
         <label for="discordWebhookSelect">Webhook</label>
         <select id="discordWebhookSelect">
@@ -419,7 +421,7 @@ const TEMPLATE_ID = <?= json_encode($templateId) ?>;
 const PUSH_TEMPLATE_URL = <?= json_encode('/raids/push-template.php?slug=' . $slug) ?>;
 const RAID_ID = <?= json_encode($raidId) ?>;
 const USER_ID = <?= json_encode($user['id']) ?>;
-let sections = <?= json_encode($sections) ?>;
+let sections = groupSectionsByKind(<?= json_encode($sections) ?>);
 const roster = <?= json_encode($roster) ?>;
 let pool = <?= json_encode($pool) ?>;
 const POOL_SAVE_URL = <?= json_encode('/raids/pool-save.php?slug=' . $slug) ?>;
@@ -623,6 +625,19 @@ const CLASS_COLORS = {
   rogue: '#fff569', mage: '#69ccf0', warlock: '#9482c9', shaman: '#0070de', hunter: '#abd473',
 };
 
+// The DB query orders sections by a single flat sort_order/id sequence spanning every
+// kind at once, not grouped by kind -- so a section added or reordered while the template
+// editor's tab view was scoped to one kind can end up with a sort_order that interleaves
+// it with another kind's sections. This page has no tab UI to isolate that damage (unlike
+// template-edit.php, which filters by kind per tab), so re-group here by kind (first-
+// appearance order, same convention as template-edit.php's currentTabs()) before ever
+// rendering or measuring, so the page always reads one kind-block fully before the next.
+function groupSectionsByKind(secs) {
+  const order = [];
+  for (const s of secs) if (!order.includes(s.kind)) order.push(s.kind);
+  return order.flatMap(k => secs.filter(s => s.kind === k));
+}
+
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function classColor(cls) { return CLASS_COLORS[(cls || '').toLowerCase()] || '#8892b0'; }
 
@@ -741,7 +756,7 @@ function clearCall(body) {
   return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raidId: RAID_ID, ...body }) })
     .then(r => r.json()).then(d => {
       if (!d.success) { alert(d.error || 'Clear failed'); return; }
-      sections = d.sections;
+      sections = groupSectionsByKind(d.sections);
       render();
     });
 }
@@ -951,7 +966,7 @@ function renderCellTextHtml(text) {
 // Canvas can't use CSS background-position sprite slicing, so the same sprite sheet is
 // preloaded as an Image and sliced via drawImage's source-rect args instead. Preloaded
 // eagerly at page load so it's already decoded by the time a Discord export is drawn
-// (renderRaidCanvas() below is synchronous, so this can't be awaited at draw time).
+// (drawBlock() below is synchronous, so this can't be awaited at draw time).
 const RAID_ICON_IMG = new Image();
 RAID_ICON_IMG.src = '/assets/img/raid-icons.png';
 function drawRaidIcon(ctx, key, x, y, size) {
@@ -1426,13 +1441,16 @@ function wireImportControls() {
   if (allBtn) allBtn.addEventListener('click', addAllImportRows);
 }
 
-// Discord post: renders the raid's sections/tables onto a single canvas (a generic,
-// vertically-stacked approximation of the on-screen layout -- reuses the same class
-// colors/contrast/chunking helpers as the live grid, but skips cell-merge colspans and
-// on-screen flex-wrap in favor of stacking every table top-to-bottom) and posts it as an
-// image attachment straight to the selected Discord webhook, matching IO's publish flow.
+// Discord post: splits the raid into a sequence of small, readable Discord posts instead
+// of one giant image -- mirrors IO's per-row/per-divider publish flow (staging-php's
+// dc-utils.js/healer-core.js dcPublish: a divider banner posted first, then one image per
+// "row" of content, each posted as its own message with a short delay in between). Here,
+// each section (its own colored banner on this page, e.g. "TANK ASSIGNMENTS") becomes a
+// divider image followed by its tables packed side-by-side into posts, capped at a
+// 9-column-equivalent (1080px) width budget and 8 rows tall each -- wide tables get their
+// own post, tall tables split into multiple posts -- so nothing renders too small to read.
 function raidCanvasMetrics() {
-  return { pad: 20, rowH: 28, groupH: 20, sectionHeadH: 32, tableTitleH: 26, gapSection: 20, gapTable: 12 };
+  return { pad: 20, rowH: 28, groupH: 20, tableTitleH: 26, dividerH: 56 };
 }
 
 function flattenSectionTables(tables) {
@@ -1460,219 +1478,271 @@ function canvasColWidth(c, tb) {
   return effWidth || 120;
 }
 
-function measureChunkWidth(chunk, tb) {
-  return chunk.reduce((sum, c) => sum + canvasColWidth(c, tb), 0);
-}
+const DISCORD_MAX_COL_PX = 120;
+const DISCORD_MAX_COLS = 9;
+const DISCORD_MAX_TOTAL_PX = DISCORD_MAX_COLS * DISCORD_MAX_COL_PX;
+const DISCORD_MAX_ROWS = 8;
+const DISCORD_GAP = 18;
 
-function measureTableWidth(tb) {
-  let w = 0;
-  if (!tb.columns.length) return w;
-  for (const chunk of chunkColumns(tb.columns)) w = Math.max(w, measureChunkWidth(chunk, tb));
-  return w;
-}
+function discordColWidth(c, tb) { return Math.min(canvasColWidth(c, tb), DISCORD_MAX_COL_PX); }
+function discordTableWidth(tb) { return tb.columns.reduce((s, c) => s + discordColWidth(c, tb), 0); }
 
-function measureRaidCanvasWidth() {
-  let w = 0;
-  for (const sec of sections) {
-    for (const tb of flattenSectionTables(sec.tables)) w = Math.max(w, measureTableWidth(tb));
+// Splits one table's rows into <=DISCORD_MAX_ROWS-tall chunks. Spacer rows ride along with
+// whichever chunk they land in and don't count against the cap -- they're half-height
+// dividers, not content a reader needs to parse.
+function chunkRowsForDiscord(rows) {
+  const chunks = [];
+  let current = [];
+  let count = 0;
+  for (const r of rows) {
+    if (r.kind !== 'spacer' && count >= DISCORD_MAX_ROWS) {
+      chunks.push(current);
+      current = [];
+      count = 0;
+    }
+    current.push(r);
+    if (r.kind !== 'spacer') count++;
   }
-  return w;
+  chunks.push(current);
+  return chunks;
 }
 
-function measureTableHeight(tb, m) {
+function buildDiscordBlocks(tables) {
+  const blocks = [];
+  for (const tb of tables) {
+    if (!tb.columns.length) { blocks.push({ tb, rows: [], chunkIndex: 0, chunkTotal: 1 }); continue; }
+    const rowChunks = chunkRowsForDiscord(tb.rows);
+    rowChunks.forEach((rows, i) => blocks.push({ tb, rows, chunkIndex: i, chunkTotal: rowChunks.length }));
+  }
+  return blocks;
+}
+
+// Greedy bin-packing, same algorithm as template-edit.php's Discord preview mode: blocks
+// (a whole table, or one row-chunk of a too-tall table) pack side by side until the
+// combined width would exceed the budget, then a new post starts. Two spacer columns
+// meeting at a block-to-block boundary count as one combined column, not two, since
+// they'd visually merge into a single gap once rendered. Packing never crosses a section
+// boundary -- buildDiscordPlan() below calls this once per section.
+function groupBlocksIntoPosts(blocks) {
+  const posts = [];
+  let current = [];
+  let currentWidth = 0;
+  const flush = () => { if (current.length) posts.push(current); };
+  for (const block of blocks) {
+    const width = discordTableWidth(block.tb);
+    let addWidth = width;
+    if (current.length) {
+      const prevTb = current[current.length - 1].tb;
+      const prevLast = prevTb.columns[prevTb.columns.length - 1];
+      const nextFirst = block.tb.columns[0];
+      if (prevLast && nextFirst && prevLast.kind === 'spacer' && nextFirst.kind === 'spacer') {
+        const prevW = discordColWidth(prevLast, prevTb);
+        const nextW = discordColWidth(nextFirst, block.tb);
+        addWidth = Math.max(0, addWidth - Math.min(prevW, nextW));
+      }
+    }
+    if (current.length && currentWidth + addWidth > DISCORD_MAX_TOTAL_PX) {
+      flush();
+      current = [block];
+      currentWidth = width;
+    } else {
+      current.push(block);
+      currentWidth += addWidth;
+    }
+  }
+  flush();
+  return posts;
+}
+
+function measureBlockHeight(block, m) {
+  const tb = block.tb;
   let h = tb.title ? m.tableTitleH : 0;
   if (!tb.columns.length) return h;
-  const chunks = chunkColumns(tb.columns);
-  for (const chunk of chunks) {
-    if (tb.columnGroups.some(g => chunk.some(c => c.groupId === g.id))) h += m.groupH;
-    for (const r of tb.rows) h += r.kind === 'spacer' ? Math.max(6, m.rowH / 2) : m.rowH;
-  }
+  if (tb.columnGroups.some(g => tb.columns.some(c => c.groupId === g.id))) h += m.groupH;
+  for (const r of block.rows) h += r.kind === 'spacer' ? Math.max(6, m.rowH / 2) : m.rowH;
   return h;
 }
 
-function measureRaidCanvasHeight(m) {
-  let h = m.pad;
-  for (const sec of sections) {
-    h += m.sectionHeadH + 6;
-    const tables = flattenSectionTables(sec.tables);
-    if (!tables.length) { h += 24; continue; }
-    for (const tb of tables) h += measureTableHeight(tb, m) + m.gapTable;
-    h += m.gapSection;
-  }
-  return h;
+function measurePostWidth(blocks) {
+  return blocks.reduce((s, b) => s + discordTableWidth(b.tb), 0) + DISCORD_GAP * Math.max(0, blocks.length - 1);
 }
 
-// Sums to the same height the render loop below actually draws for a section's table
-// stack, so a section-background fill (drawn before the tables, since canvas has no
-// transparency-to-parent like HTML's cascade) lines up with the real content bounds.
-function measureSectionBodyHeight(sec, m) {
-  const tables = flattenSectionTables(sec.tables);
-  if (!tables.length) return 24;
-  let h = 0;
-  for (const tb of tables) h += measureTableHeight(tb, m) + m.gapTable;
-  return h;
-}
-
-function drawTable(ctx, tb, m, startY) {
-  let y = startY;
-  const x0 = m.pad;
-  const width = m.width - m.pad * 2;
-  const tableH = measureTableHeight(tb, m);
-  if (tableH > 0) {
+function drawBlock(ctx, block, m, x0, y0) {
+  const tb = block.tb;
+  const width = discordTableWidth(tb);
+  let y = y0;
+  const blockH = measureBlockHeight(block, m);
+  if (blockH > 0) {
     ctx.fillStyle = tb.bgColor || '#141a2c';
-    ctx.fillRect(x0, y, width, tableH);
+    ctx.fillRect(x0, y, width, blockH);
   }
   if (tb.title) {
     ctx.fillStyle = tb.headerColor || '#1c2333';
     ctx.fillRect(x0, y, width, m.tableTitleH);
     ctx.fillStyle = contrastText(tb.headerColor || '#1c2333');
     ctx.font = 'bold 13px Segoe UI, Arial, sans-serif';
-    ctx.fillText(tb.title, x0 + 8, y + m.tableTitleH / 2);
+    const label = tb.title + (block.chunkTotal > 1 ? ` (${block.chunkIndex + 1}/${block.chunkTotal})` : '');
+    ctx.fillText(label, x0 + 8, y + m.tableTitleH / 2, width - 16);
     y += m.tableTitleH;
   }
-  if (!tb.columns.length) return y;
+  if (!tb.columns.length) return;
 
-  for (const chunk of chunkColumns(tb.columns)) {
-    let cx = x0;
-    const colBoxes = chunk.map(c => {
-      const w = canvasColWidth(c, tb);
-      const box = { c, x: cx, w };
-      cx += w;
-      return box;
-    });
+  const chunk = tb.columns;
+  const colBoxes = [];
+  let cx = x0;
+  for (const c of chunk) { const w = discordColWidth(c, tb); colBoxes.push({ c, x: cx, w }); cx += w; }
 
-    if (tb.columnGroups.some(g => chunk.some(c => c.groupId === g.id))) {
-      let i = 0;
-      while (i < chunk.length) {
-        const gid = chunk[i].groupId;
-        if (!gid) { i++; continue; }
-        let span = 1;
-        while (i + span < chunk.length && chunk[i + span].groupId === gid) span++;
-        const grp = tb.columnGroups.find(g => g.id === gid);
-        const box = colBoxes[i];
-        const totalW = colBoxes.slice(i, i + span).reduce((s, b) => s + b.w, 0);
-        if (grp) {
-          ctx.fillStyle = grp.color || '#2a3350';
-          ctx.fillRect(box.x, y, totalW, m.groupH);
-          ctx.fillStyle = contrastText(grp.color || '#2a3350');
-          ctx.font = 'bold 10px Segoe UI, Arial, sans-serif';
-          ctx.fillText(grp.title || '', box.x + 4, y + m.groupH / 2, totalW - 8);
-        }
-        i += span;
+  if (tb.columnGroups.some(g => chunk.some(c => c.groupId === g.id))) {
+    let i = 0;
+    while (i < chunk.length) {
+      const gid = chunk[i].groupId;
+      if (!gid) { i++; continue; }
+      let span = 1;
+      while (i + span < chunk.length && chunk[i + span].groupId === gid) span++;
+      const grp = tb.columnGroups.find(g => g.id === gid);
+      const box = colBoxes[i];
+      const totalW = colBoxes.slice(i, i + span).reduce((s, b) => s + b.w, 0);
+      if (grp) {
+        ctx.fillStyle = grp.color || '#2a3350';
+        ctx.fillRect(box.x, y, totalW, m.groupH);
+        ctx.fillStyle = contrastText(grp.color || '#2a3350');
+        ctx.font = 'bold 10px Segoe UI, Arial, sans-serif';
+        ctx.fillText(grp.title || '', box.x + 4, y + m.groupH / 2, totalW - 8);
       }
-      y += m.groupH;
+      i += span;
     }
-
-    for (const r of tb.rows) {
-      if (r.kind === 'spacer') {
-        const spacerH = Math.max(6, m.rowH / 2);
-        if (r.bgColor) { ctx.fillStyle = r.bgColor; ctx.fillRect(x0, y, width, spacerH); }
-        y += spacerH;
-        continue;
-      }
-      const rowH = m.rowH;
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-      ctx.strokeRect(x0 + 0.5, y + 0.5, width - 1, rowH - 1);
-      colBoxes.forEach(box => {
-        const cell = tb.cells[r.id + '_' + box.c.id];
-        const eff = effectiveKind(r, box.c, cell);
-        if (eff === 'spacer') {
-          const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || box.c.bgColor || null;
-          if (spacerColor) { ctx.fillStyle = spacerColor; ctx.fillRect(box.x, y, box.w, rowH); }
-          return;
-        }
-        if (eff === 'text') {
-          if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
-          ctx.fillStyle = (cell && cell.textColor) || '#c7cfe8';
-          const fontFamily = (cell && CELL_FONT_STACKS[cell.font]) || 'Segoe UI, Arial, sans-serif';
-          ctx.font = `${(cell && cell.bold) ? 'bold ' : ''}11px ${fontFamily}`;
-          const parts = parseCellText(cell && cell.textContent);
-          const iconSize = 13;
-          const maxX = box.x + box.w - 4;
-          let tx = box.x + 6;
-          for (const p of parts) {
-            if (tx >= maxX) break;
-            if (p.type === 'icon') {
-              drawRaidIcon(ctx, p.key, tx, y + rowH / 2 - iconSize / 2, iconSize);
-              tx += iconSize + 2;
-            } else {
-              ctx.fillText(p.value, tx, y + rowH / 2, maxX - tx);
-              tx += measureTextPx(p.value, ctx.font);
-            }
-          }
-          return;
-        }
-        if (eff === 'icon') {
-          if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
-          if (cell && cell.icon) {
-            const size = Math.min(rowH - 8, 26);
-            drawRaidIcon(ctx, cell.icon, box.x + (box.w - size) / 2, y + (rowH - size) / 2, size);
-          }
-          return;
-        }
-        if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
-        if (cell && cell.name) {
-          const color = classColor(cell.class);
-          const pad = 3;
-          ctx.fillStyle = color;
-          ctx.fillRect(box.x + pad, y + pad, box.w - pad * 2, rowH - pad * 2);
-          ctx.fillStyle = contrastText(color);
-          ctx.font = '11px Segoe UI, Arial, sans-serif';
-          ctx.fillText(cell.name, box.x + pad + 5, y + rowH / 2, box.w - pad * 2 - 10);
-        }
-      });
-      y += rowH;
-    }
+    y += m.groupH;
   }
-  return y;
+
+  for (const r of block.rows) {
+    if (r.kind === 'spacer') {
+      const spacerH = Math.max(6, m.rowH / 2);
+      if (r.bgColor) { ctx.fillStyle = r.bgColor; ctx.fillRect(x0, y, width, spacerH); }
+      y += spacerH;
+      continue;
+    }
+    const rowH = m.rowH;
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeRect(x0 + 0.5, y + 0.5, width - 1, rowH - 1);
+    colBoxes.forEach(box => {
+      const cell = tb.cells[r.id + '_' + box.c.id];
+      const eff = effectiveKind(r, box.c, cell);
+      if (eff === 'spacer') {
+        const spacerColor = (cell && cell.bgColor) || (r.kind === 'spacer' && r.bgColor) || box.c.bgColor || null;
+        if (spacerColor) { ctx.fillStyle = spacerColor; ctx.fillRect(box.x, y, box.w, rowH); }
+        return;
+      }
+      if (eff === 'text') {
+        if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
+        ctx.fillStyle = (cell && cell.textColor) || '#c7cfe8';
+        const fontFamily = (cell && CELL_FONT_STACKS[cell.font]) || 'Segoe UI, Arial, sans-serif';
+        ctx.font = `${(cell && cell.bold) ? 'bold ' : ''}11px ${fontFamily}`;
+        const parts = parseCellText(cell && cell.textContent);
+        const iconSize = 13;
+        const maxX = box.x + box.w - 4;
+        let tx = box.x + 6;
+        for (const p of parts) {
+          if (tx >= maxX) break;
+          if (p.type === 'icon') {
+            drawRaidIcon(ctx, p.key, tx, y + rowH / 2 - iconSize / 2, iconSize);
+            tx += iconSize + 2;
+          } else {
+            ctx.fillText(p.value, tx, y + rowH / 2, maxX - tx);
+            tx += measureTextPx(p.value, ctx.font);
+          }
+        }
+        return;
+      }
+      if (eff === 'icon') {
+        if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
+        if (cell && cell.icon) {
+          const size = Math.min(rowH - 8, 26);
+          drawRaidIcon(ctx, cell.icon, box.x + (box.w - size) / 2, y + (rowH - size) / 2, size);
+        }
+        return;
+      }
+      if (cell && cell.bgColor) { ctx.fillStyle = cell.bgColor; ctx.fillRect(box.x, y, box.w, rowH); }
+      if (cell && cell.name) {
+        const color = classColor(cell.class);
+        const pad = 3;
+        ctx.fillStyle = color;
+        ctx.fillRect(box.x + pad, y + pad, box.w - pad * 2, rowH - pad * 2);
+        ctx.fillStyle = contrastText(color);
+        ctx.font = '11px Segoe UI, Arial, sans-serif';
+        ctx.fillText(cell.name, box.x + pad + 5, y + rowH / 2, box.w - pad * 2 - 10);
+      }
+    });
+    y += rowH;
+  }
 }
 
-function renderRaidCanvas() {
+function buildPostCanvas(blocks) {
   const m = raidCanvasMetrics();
-  m.width = Math.max(700, measureRaidCanvasWidth() + m.pad * 2);
-  const height = Math.max(80, measureRaidCanvasHeight(m));
+  const widths = blocks.map(b => discordTableWidth(b.tb));
+  const heights = blocks.map(b => measureBlockHeight(b, m));
+  const totalW = Math.max(200, m.pad * 2 + widths.reduce((a, w) => a + w, 0) + DISCORD_GAP * Math.max(0, blocks.length - 1));
+  const totalH = Math.max(60, m.pad * 2 + Math.max(0, ...heights));
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = m.width * dpr;
-  canvas.height = height * dpr;
-  canvas.style.width = m.width + 'px';
-  canvas.style.height = height + 'px';
+  canvas.width = totalW * dpr;
+  canvas.height = totalH * dpr;
+  canvas.style.width = totalW + 'px';
+  canvas.style.height = totalH + 'px';
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#0b0e1a';
-  ctx.fillRect(0, 0, m.width, height);
-
-  let y = m.pad;
-  for (const sec of sections) {
-    const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
-    const headColor = sec.color || meta.color;
-    ctx.fillStyle = headColor;
-    ctx.fillRect(m.pad, y, m.width - m.pad * 2, m.sectionHeadH);
-    ctx.fillStyle = contrastText(headColor);
-    ctx.font = 'bold 15px Segoe UI, Arial, sans-serif';
-    ctx.fillText(`${meta.icon} ${sec.title}`.trim(), m.pad + 10, y + m.sectionHeadH / 2);
-    y += m.sectionHeadH + 6;
-
-    if (sec.bgColor) {
-      ctx.fillStyle = sec.bgColor;
-      ctx.fillRect(m.pad, y, m.width - m.pad * 2, measureSectionBodyHeight(sec, m));
-    }
-
-    const tables = flattenSectionTables(sec.tables);
-    if (!tables.length) {
-      ctx.fillStyle = '#8892b0';
-      ctx.font = '13px Segoe UI, Arial, sans-serif';
-      ctx.fillText('No tables in this section.', m.pad + 10, y + 12);
-      y += 24;
-    }
-    for (const tb of tables) {
-      y = drawTable(ctx, tb, m, y);
-      y += m.gapTable;
-    }
-    y += m.gapSection;
-  }
+  ctx.fillRect(0, 0, totalW, totalH);
+  let x = m.pad;
+  blocks.forEach((b, i) => {
+    drawBlock(ctx, b, m, x, m.pad);
+    x += widths[i] + DISCORD_GAP;
+  });
   return canvas;
+}
+
+function buildDividerCanvas(sec, width) {
+  const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
+  const headColor = sec.color || meta.color;
+  const m = raidCanvasMetrics();
+  const w = Math.max(400, width);
+  const h = m.dividerH;
+  const canvas = document.createElement('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = headColor;
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillRect(0, 0, w, 3);
+  ctx.fillRect(0, h - 3, w, 3);
+  ctx.fillStyle = contrastText(headColor);
+  ctx.font = 'bold 20px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${meta.icon} ${sec.title}`.trim(), w / 2, h / 2, w - 24);
+  return canvas;
+}
+
+// Builds the full ordered posting plan: one divider image + N table-group images per
+// non-empty section, in section order (already kind-grouped -- see groupSectionsByKind).
+function buildDiscordPlan() {
+  const plan = [];
+  for (const sec of sections) {
+    const tables = flattenSectionTables(sec.tables);
+    if (!tables.length) continue;
+    const blocks = buildDiscordBlocks(tables);
+    const posts = groupBlocksIntoPosts(blocks);
+    if (!posts.length) continue;
+    const dividerWidth = Math.max(...posts.map(measurePostWidth));
+    plan.push({ kind: 'divider', sec, canvas: buildDividerCanvas(sec, dividerWidth) });
+    for (const post of posts) plan.push({ kind: 'post', sec, canvas: buildPostCanvas(post) });
+  }
+  return plan;
 }
 
 function wireDiscordControls() {
@@ -1683,38 +1753,50 @@ function wireDiscordControls() {
   const postBtn = document.getElementById('discordPostBtn');
   const select = document.getElementById('discordWebhookSelect');
   const statusEl = document.getElementById('discordStatus');
+  const previewWrap = document.getElementById('discordPreviewWrap');
+  let plan = [];
 
   toggleBtn.addEventListener('click', () => {
-    const canvas = renderRaidCanvas();
-    canvas.id = 'discordPreviewCanvas';
-    const old = document.getElementById('discordPreviewCanvas');
-    old.parentElement.replaceChild(canvas, old);
-    statusEl.textContent = '';
+    plan = buildDiscordPlan();
+    previewWrap.innerHTML = plan.length
+      ? plan.map((item, i) => `<div class="discord-preview-item"><div class="discord-preview-label">${item.kind === 'divider' ? 'Section header — ' + esc(item.sec.title) : 'Post'}</div></div>`).join('')
+      : '<p class="empty">Nothing to post.</p>';
+    plan.forEach((item, i) => {
+      const holder = previewWrap.children[i];
+      if (holder) holder.appendChild(item.canvas);
+    });
+    statusEl.textContent = plan.length ? `${plan.length} image${plan.length === 1 ? '' : 's'} will be posted, in order.` : '';
     backdrop.classList.add('open');
   });
   if (closeBtn) closeBtn.addEventListener('click', () => backdrop.classList.remove('open'));
   backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.classList.remove('open'); });
 
-  if (postBtn) postBtn.addEventListener('click', () => {
+  if (postBtn) postBtn.addEventListener('click', async () => {
     const url = select ? select.value : '';
     if (!url) { statusEl.textContent = 'No webhook selected.'; return; }
-    const canvas = document.getElementById('discordPreviewCanvas');
+    if (!plan.length) { statusEl.textContent = 'Nothing to post.'; return; }
     postBtn.disabled = true;
-    statusEl.textContent = 'Posting…';
-    canvas.toBlob(blob => {
-      if (!blob) { statusEl.textContent = 'Could not render image.'; postBtn.disabled = false; return; }
-      const message = document.getElementById('discordMessageInput').value.trim();
-      const form = new FormData();
-      form.append('files[0]', blob, 'raid.png');
-      form.append('payload_json', JSON.stringify({ username: 'RaidRoster', content: message || undefined }));
-      fetch(url, { method: 'POST', body: form })
-        .then(r => {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          statusEl.textContent = 'Posted!';
-          postBtn.disabled = false;
-        })
-        .catch(() => { statusEl.textContent = 'Failed to post — check the webhook.'; postBtn.disabled = false; });
-    }, 'image/png');
+    const message = document.getElementById('discordMessageInput').value.trim();
+    try {
+      for (let i = 0; i < plan.length; i++) {
+        statusEl.textContent = `Posting ${i + 1}/${plan.length}…`;
+        const blob = await new Promise(res => plan[i].canvas.toBlob(res, 'image/png'));
+        if (!blob) throw new Error('Could not render image ' + (i + 1));
+        const form = new FormData();
+        form.append('files[0]', blob, (plan[i].kind === 'divider' ? 'divider' : 'post') + i + '.png');
+        const payload = { username: 'RaidRoster', content: '' };
+        if (i === 0 && message) payload.content = message;
+        form.append('payload_json', JSON.stringify(payload));
+        const resp = await fetch(url, { method: 'POST', body: form });
+        if (!resp.ok) throw new Error('Discord error: HTTP ' + resp.status);
+        if (i < plan.length - 1) await new Promise(r => setTimeout(r, 500));
+      }
+      statusEl.textContent = `Posted ${plan.length} image${plan.length === 1 ? '' : 's'}!`;
+    } catch (e) {
+      statusEl.textContent = 'Failed: ' + e.message;
+    } finally {
+      postBtn.disabled = false;
+    }
   });
 }
 
