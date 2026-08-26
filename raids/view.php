@@ -292,7 +292,7 @@ function fmtTime($t) {
     .pool-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; align-content: start; }
     .pool-chip-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
     .pool-chip { flex: 1; min-width: 0; cursor: grab; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; }
-    .pool-chip.stamped { outline: 2px solid #f0c04a; outline-offset: 1px; }
+    .toon-chip.stamped { outline: 2px solid #f0c04a; outline-offset: 1px; }
     .pool-tag { font-size: 9px; font-weight: 700; opacity: .75; margin-left: 4px; }
     .pool-tag.pug { color: #5a3d00; }
     .pool-remove { flex-shrink: 0; background: none; border: none; color: #7f8bad; font-size: 15px; cursor: pointer; line-height: 1; padding: 2px 4px; }
@@ -803,9 +803,24 @@ function render() {
       });
       chip.addEventListener('dragend', () => { dragPayload = null; });
       chip.addEventListener('click', e => {
-        if (!e.altKey) return;
+        if (e.altKey) {
+          e.stopPropagation();
+          showAltPopup(chip);
+          return;
+        }
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
         e.stopPropagation();
-        showAltPopup(chip);
+        const next = {
+          toonKind: chip.dataset.toonKind,
+          toonId: chip.dataset.toonId || null,
+          pugName: chip.dataset.pugName || null,
+          pugClass: chip.dataset.pugClass || null,
+        };
+        const same = stampToon && stampToon.toonKind === next.toonKind
+          && stampToon.toonId === next.toonId && stampToon.pugName === next.pugName;
+        stampToon = same ? null : next;
+        updateStampVisuals();
       });
     });
     el.querySelectorAll('.chip-clear').forEach(btn => {
@@ -827,6 +842,7 @@ function render() {
         clearCall({ action: 'clear_section', sectionId: parseInt(btn.dataset.sectionId, 10) });
       });
     });
+    updateStampVisuals();
   }
 }
 
@@ -1387,7 +1403,7 @@ function renderPool() {
 function updateStampVisuals() {
   const drawer = document.getElementById('poolDrawer');
   if (drawer) drawer.classList.toggle('stamp-mode', !!stampToon);
-  document.querySelectorAll('.pool-chip').forEach(chip => {
+  document.querySelectorAll('.toon-chip').forEach(chip => {
     const match = stampToon && chip.dataset.toonKind === stampToon.toonKind
       && (chip.dataset.toonId || null) === (stampToon.toonId || null)
       && (chip.dataset.pugName || null) === (stampToon.pugName || null);
