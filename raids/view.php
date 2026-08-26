@@ -174,6 +174,7 @@ function fmtTime($t) {
     table.grid td.icon-cell { text-align: center; }
     table.grid th.group-th { font-size: 13px; letter-spacing: .04em; }
     td.cell { min-width: 90px; background: rgba(255,255,255,0.04); }
+    td.cell.filled { padding: 0; }
     .inline-raid-icon { margin: 0 1px; }
     .raid-icon-cell { display: inline-block; }
     th.spacer-th, td.spacer-cell { background: none; border-color: transparent; padding: 8px 4px; }
@@ -181,6 +182,13 @@ function fmtTime($t) {
     .toon-chip {
       position: relative; display: inline-flex; align-items: center; gap: 4px; border-radius: 5px; padding: 3px 10px;
       font-size: 11px; font-weight: 700; color: #000; white-space: nowrap; cursor: default;
+    }
+    /* Discord export fills each assigned cell edge-to-edge with the class color; mirror
+       that on-screen instead of a small pill floating in a dark cell, so the live table
+       looks the same as the posted image. */
+    td.cell.filled .toon-chip {
+      display: flex; width: 100%; height: 100%; box-sizing: border-box; border-radius: 0;
+      justify-content: center; padding: 6px 8px;
     }
     td.cell.editable .toon-chip[draggable="true"] { cursor: grab; }
     td.cell.editable.drop-hover { background: rgba(88,101,242,0.18); }
@@ -1116,8 +1124,9 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
     } else {
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
+      const filledCls = (cell && cell.name) ? ' filled' : '';
       const bgStyle = (minWidthStyle || (cell && cell.bgColor)) ? ` style="${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}"` : '';
-      out.push(`<td${colspanAttr}${rowspanAttr} class="cell${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell${editableCls}${filledCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
     }
     i += colspan;
   }
