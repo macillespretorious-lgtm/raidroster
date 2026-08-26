@@ -188,11 +188,14 @@ function fmtTime($t) {
     }
     /* Discord export fills each assigned cell edge-to-edge with the class color; mirror
        that on-screen instead of a small pill floating in a dark cell, so the live table
-       looks the same as the posted image. Matched by .empty-slot below so a row's height
-       doesn't change depending on which of its cells are filled yet. */
+       looks the same as the posted image. Matched by .empty-slot below at the same font
+       size/padding so a row's height doesn't change depending on which of its cells are
+       filled yet -- a size mismatch here is what causes a row to visibly grow/shrink as
+       its last empty slot gets assigned. */
     td.cell.slot .toon-chip {
       display: flex; width: 100%; height: 100%; box-sizing: border-box; border-radius: 0;
-      justify-content: center; padding: 8px;
+      justify-content: flex-start; padding: 8px; font-size: 13px; letter-spacing: .02em;
+      text-transform: uppercase; text-shadow: 0 1px 1px rgba(0,0,0,0.2);
     }
     td.cell.editable .toon-chip[draggable="true"] { cursor: grab; }
     td.cell.editable.drop-hover { background: rgba(88,101,242,0.18); }
@@ -200,12 +203,13 @@ function fmtTime($t) {
     .chip-clear {
       display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;
       margin-left: 2px; border-radius: 50%; background: rgba(0,0,0,0.25); color: inherit; font-size: 11px;
-      line-height: 1; cursor: pointer;
+      line-height: 1; cursor: pointer; flex-shrink: 0;
     }
+    td.cell.slot .toon-chip .chip-clear { margin-left: auto; }
     .chip-clear:hover { background: rgba(0,0,0,0.45); }
     td.cell.slot .empty-slot {
       display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
-      box-sizing: border-box; padding: 8px; color: #4a5578; font-size: 14px;
+      box-sizing: border-box; padding: 8px; color: #4a5578; font-size: 13px;
     }
     .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
     .chip-marker { display: inline-block; margin-left: 4px; font-weight: 800; font-size: 11px; line-height: 1; color: rgba(255,255,255,0.35); }
@@ -669,7 +673,7 @@ function chipHtml(cell, noteEnabled) {
   const dragAttrs = CAN_MANAGE
     ? ` draggable="true" data-source="cell" data-cell-id="${cell.id}" data-toon-kind="${esc(cell.toonKind)}" data-toon-id="${esc(cell.toonId || '')}" data-pug-name="${esc(cell.pugName || '')}" data-pug-class="${esc(cell.pugClass || '')}"`
     : '';
-  let html = `<span class="toon-chip"${dragAttrs} style="background:${color};">${esc(cell.name)}`;
+  let html = `<span class="toon-chip"${dragAttrs} style="background:${color};color:${contrastText(color)};">${esc(cell.name)}`;
   if (noteEnabled && (cell.marked || CAN_MANAGE)) {
     const cls = 'chip-marker' + (cell.marked ? ' active' : '') + (CAN_MANAGE ? ' clickable' : '');
     const actionAttrs = CAN_MANAGE ? ` data-action="toggle-marker" data-cell-id="${cell.id}"` : '';
@@ -1215,7 +1219,7 @@ function poolEntryHtml(p) {
     <span class="toon-chip pool-chip" draggable="true" data-source="pool" data-pool-id="${p.id}"
       data-toon-kind="${esc(p.toonKind)}" data-toon-id="${esc(p.toonId || '')}"
       data-pug-name="${esc(p.pugName || '')}" data-pug-class="${esc(p.pugClass || '')}"
-      style="background:${color};">${esc(p.name)}${tag}</span>
+      style="background:${color};color:${contrastText(color)};">${esc(p.name)}${tag}</span>
     <button type="button" class="pool-remove" data-pool-id="${p.id}" title="Remove from pool">&times;</button>
   </div>`;
 }
@@ -1682,7 +1686,7 @@ function drawBlock(ctx, block, m, x0, y0) {
         ctx.fillRect(box.x + pad, y + pad, box.w - pad * 2, rowH - pad * 2);
         ctx.fillStyle = contrastText(color);
         ctx.font = 'bold 11px Segoe UI, Arial, sans-serif';
-        ctx.fillText(cell.name, box.x + pad + 5, y + rowH / 2, box.w - pad * 2 - 10);
+        ctx.fillText(cell.name.toUpperCase(), box.x + pad + 5, y + rowH / 2, box.w - pad * 2 - 10);
       }
     });
     y += rowH;
