@@ -119,7 +119,10 @@ function fmtTime($t) {
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { min-height: 100vh; background: #0a0f1e; font-family: system-ui, -apple-system, sans-serif; color: #e8ecff; }
-    .wrap { max-width: 100%; margin: 0; padding: 32px 32px 110px; }
+    .wrap { max-width: 100%; margin: 0; padding: 32px 472px 110px 32px; transition: padding-right .18s ease; }
+    body.pool-minimized .wrap { padding-right: 32px; }
+    .raid-toolbar-stack { position: sticky; top: 0; z-index: 60; background: #0a0f1e; padding: 10px 0 6px; margin: 0 -32px; padding-left: 32px; padding-right: 32px; }
+    .lock-sync-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
     .back { color: #7f8bad; font-size: 12px; text-decoration: none; }
     .back:hover { color: #a3adfa; }
     h1 { font-size: 22px; margin: 10px 0 4px; }
@@ -184,8 +187,11 @@ function fmtTime($t) {
 
     .toon-chip {
       position: relative; display: inline-flex; align-items: center; gap: 4px; border-radius: 5px; padding: 3px 10px;
-      font-size: 11px; font-weight: 700; color: #000; white-space: nowrap; cursor: default;
+      font-size: 11px; font-weight: 700; color: #000; white-space: nowrap; cursor: default; max-width: 100%;
     }
+    /* Crop instead of expanding the cell/column: the name is the only shrinkable child of
+       the chip's flex row, so it's the only thing that clips when space runs out. */
+    .chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex-shrink: 1; }
     /* Discord export fills each assigned cell edge-to-edge with the class color; mirror
        that on-screen instead of a small pill floating in a dark cell, so the live table
        looks the same as the posted image. Matched by .empty-slot below at the same font
@@ -227,14 +233,29 @@ function fmtTime($t) {
       position: fixed; top: 0; right: 0; bottom: 0; width: 440px; max-width: 90vw; z-index: 400;
       background: #111827; border-left: 1px solid rgba(255,255,255,0.1); box-shadow: -8px 0 24px rgba(0,0,0,0.35);
       display: flex; flex-direction: column; padding: 16px; gap: 12px; overflow-y: auto;
-      transform: translateX(100%); transition: transform .18s ease, border-color .18s ease;
+      transform: translateX(0); transition: transform .18s ease, border-color .18s ease;
     }
-    .pool-drawer.open { transform: translateX(0); }
+    body.pool-minimized .pool-drawer { transform: translateX(100%); }
     .pool-drawer.stamp-mode { border-left-color: #f0c04a; box-shadow: -8px 0 24px rgba(240,192,74,0.25); }
-    .pool-drawer-head { display: flex; align-items: center; justify-content: space-between; }
+    .pool-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .pool-drawer-head h2 { font-size: 15px; }
-    .pool-drawer-close { background: none; border: none; color: #a8b4d0; font-size: 20px; cursor: pointer; line-height: 1; }
-    .pool-drawer-close:hover { color: #e8ecff; }
+    .pool-drawer-handle {
+      display: block; position: fixed; top: 50%; right: 440px; transform: translateY(-50%); z-index: 401;
+      writing-mode: vertical-rl; text-orientation: mixed;
+      background: #1a2338; border: 1px solid rgba(255,255,255,0.14); border-right: none; color: #a8b4d0;
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; border-radius: 8px 0 0 8px;
+      padding: 12px 6px; cursor: pointer; transition: right .18s ease, color .18s ease, background .18s ease;
+    }
+    .pool-drawer-handle:hover { color: #e8ecff; background: #232e4d; }
+    body.pool-minimized .pool-drawer-handle { display: none; }
+    #poolReopenTab {
+      display: none; position: fixed; top: 50%; right: 0; transform: translateY(-50%); z-index: 401;
+      writing-mode: vertical-rl; text-orientation: mixed;
+      background: #4a63e0; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+      border: none; border-radius: 8px 0 0 8px; padding: 14px 8px; cursor: pointer;
+      box-shadow: -4px 0 16px rgba(0,0,0,0.35);
+    }
+    body.pool-minimized #poolReopenTab { display: block; }
     .pool-search-wrap { position: relative; }
     #poolSearchInput {
       width: 100%; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px;
@@ -250,6 +271,19 @@ function fmtTime($t) {
     .pool-search-item:hover { background: rgba(88,101,242,0.15); color: #e8ecff; }
     .pool-search-empty { color: #7f8bad; font-style: italic; cursor: default; }
     .pool-search-empty:hover { background: none; }
+    .alt-popup {
+      position: absolute; z-index: 500; min-width: 150px; max-width: 240px;
+      background: #0a0f1e; border: 1px solid rgba(255,255,255,0.15); border-radius: 7px;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.4); overflow: hidden; padding: 4px;
+    }
+    .alt-popup-item {
+      display: flex; align-items: center; gap: 7px; padding: 7px 8px; font-size: 12.5px;
+      color: #c7cef2; cursor: pointer; border-radius: 5px; white-space: nowrap;
+    }
+    .alt-popup-item:hover { background: rgba(88,101,242,0.18); color: #e8ecff; }
+    .alt-popup-item.current { color: #7f8bad; cursor: default; font-style: italic; }
+    .alt-popup-item.current:hover { background: none; }
+    .alt-popup-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--dot, #8892b0); }
     .pool-add-pug { display: flex; gap: 6px; }
     #pugNameInput { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12.5px; font: inherit; }
     #pugClassInput { padding: 8px 6px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12px; font: inherit; }
@@ -276,6 +310,12 @@ function fmtTime($t) {
     .lock-banner { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; background: rgba(240,128,48,0.1); border: 1px solid rgba(240,128,48,0.3); color: #f0a030; font-size: 12px; }
     .lock-banner button.btn { background: #e05555; padding: 5px 12px; font-size: 11px; border: none; border-radius: 999px; color: #fff; font-weight: 600; cursor: pointer; }
     .lock-banner button.btn:hover { background: #c94444; }
+    .lock-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8fe0a8; }
+    .lock-dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf6a; flex-shrink: 0; }
+    .lock-release-btn { background: none; border: 1px solid rgba(255,255,255,0.15); color: #a8b4d0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; }
+    .lock-release-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
+    .lock-status.lock-released { color: #a8b4d0; }
+    .lock-status.lock-released .lock-release-btn { border-color: rgba(88,101,242,0.4); color: #b9c0ff; }
 
     .sync-bar { margin: 8px 0 4px; }
     .btn-sync { background: rgba(88,101,242,0.15); border: 1px solid rgba(88,101,242,0.4); color: #b9c0ff; font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
@@ -337,16 +377,22 @@ function fmtTime($t) {
   <div class="wrap">
     <a class="back" href="/<?= h($slug) ?>/raids">&larr; Back to calendar</a>
     <h1><?= h($raid['name']) ?><?php if ($raid['status'] === 'cancelled'): ?> <span class="status-cancelled">(cancelled)</span><?php endif; ?></h1>
-    <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
-    <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
-    <?php if ($tabExports): ?>
-    <div class="pool-toolbar" id="eraExportToolbar">
-      <?php foreach ($tabExports as $k => $te): ?>
-        <button type="button" class="btn-pool-toggle" data-era-kind="<?= h($k) ?>">Export: <?= h($te['exportName'] ?: $k) ?></button>
-      <?php endforeach; ?>
+    <div class="raid-toolbar-stack">
+      <?php if ($canManage || ($isAdmin && $templateId !== null)): ?>
+      <div class="lock-sync-row">
+        <?php if ($canManage): ?><div class="lock-bar" id="lockBar"></div><?php endif; ?>
+        <?php if ($isAdmin && $templateId !== null): ?><div class="sync-bar" id="syncBar"></div><?php endif; ?>
+      </div>
+      <?php endif; ?>
+      <?php if ($tabExports): ?>
+      <div class="pool-toolbar" id="eraExportToolbar">
+        <?php foreach ($tabExports as $k => $te): ?>
+          <button type="button" class="btn-pool-toggle" data-era-kind="<?= h($k) ?>">Export: <?= h($te['exportName'] ?: $k) ?></button>
+        <?php endforeach; ?>
+      </div>
+      <?php endif; ?>
+      <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="attendanceLockBtn">Attendance lock-in</button> <span id="attendanceStatus" class="attendance-status"></span> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
     </div>
-    <?php endif; ?>
-    <?php if ($canManage): ?><div class="pool-toolbar"><button type="button" class="btn-pool-toggle" id="poolToggleBtn">Available toons</button> <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button> <button type="button" class="btn-pool-toggle" id="discordToggleBtn">Discord post</button> <button type="button" class="btn-pool-toggle" id="attendanceLockBtn">Attendance lock-in</button> <span id="attendanceStatus" class="attendance-status"></span> <button type="button" class="btn-pool-toggle" id="clearAllBtn">Clear all</button></div><?php endif; ?>
     <p class="sub"><?= h($raid['raid_date']) ?><?php if ($raid['start_time']): ?> &middot; <?= h(fmtTime($raid['start_time'])) ?><?php endif; ?></p>
     <?php if (!$sections): ?>
       <p class="empty">This raid has no roster/assignment structure (its template may not have one, or it was created without one).</p>
@@ -406,10 +452,11 @@ function fmtTime($t) {
   <?php endif; ?>
 
   <?php if ($canManage): ?>
+  <button type="button" class="pool-drawer-handle" id="poolMinimizeBtn" title="Minimize the Available Toons sidebar">Minimize &raquo;</button>
   <div class="pool-drawer" id="poolDrawer">
     <div class="pool-drawer-head">
       <h2>Available toons</h2>
-      <button type="button" class="pool-drawer-close" id="poolDrawerClose">&times;</button>
+      <button type="button" class="btn-pool-toggle" id="importToggleBtn">Import Raid</button>
     </div>
     <div class="pool-search-wrap">
       <input type="text" id="poolSearchInput" placeholder="Search roster to add&hellip;" autocomplete="off">
@@ -425,8 +472,9 @@ function fmtTime($t) {
       <button type="button" id="pugAddBtn">Add</button>
     </div>
     <div class="pool-list" id="poolList"></div>
-    <p class="pool-hint">Drag a toon onto a slot to assign it. Alt+Click an assigned toon to cycle its alts. Ctrl/Cmd+Click a pool toon to stamp it repeatedly onto empty slots.</p>
+    <p class="pool-hint">Drag a toon onto a slot to assign it. Alt+Click an assigned toon to see its alts. Ctrl/Cmd+Click a pool toon to stamp it repeatedly onto empty slots.</p>
   </div>
+  <button type="button" id="poolReopenTab" title="Open the Available Toons sidebar">&laquo; Available Toons</button>
   <?php endif; ?>
 
 <script>
@@ -449,6 +497,7 @@ const TAB_EXPORTS = <?= json_encode($tabExports) ?>;
 const ATTENDANCE_SAVE_URL = <?= json_encode('/raids/attendance-save.php?slug=' . $slug) ?>;
 let stampToon = null;
 let importRows = [];
+let activeAltPopup = null; // currently-open Alt+Click sibling-picker popup, if any
 
 // The in-flight drag payload, captured at dragstart so dragover can check assignment
 // rules against it -- dataTransfer.getData() is not readable during dragover in most
@@ -482,19 +531,27 @@ if (CAN_MANAGE) {
     }
   });
 }
+// Auto-claims the lock for whoever loads this page first (no held lock yet) rather than
+// requiring a manual "claim" click -- matches template-edit.php's auto-lock behavior.
+// The lock stays purely advisory (see note above), so there's no real downside to
+// acquiring it eagerly on behalf of the first viewer.
 function checkLock() {
   return lockCall('lock_status').then(d => {
     const holder = d.holder;
     if (holder && holder.discordUserId === USER_ID) {
       lockHeldByMe = true; lockedByOther = null;
       if (!lockHeartbeatTimer) startHeartbeat();
+      renderLockBar(); render();
     } else if (holder) {
       lockedByOther = holder; lockHeldByMe = false;
+      renderLockBar(); render();
     } else {
-      lockedByOther = null; lockHeldByMe = false;
+      lockCall('lock_acquire').then(d2 => {
+        if (d2.success) { lockHeldByMe = true; lockedByOther = null; startHeartbeat(); }
+        else { lockedByOther = d2.holder; lockHeldByMe = false; }
+        renderLockBar(); render();
+      });
     }
-    renderLockBar();
-    render();
   });
 }
 function renderLockBar() {
@@ -510,22 +567,25 @@ function renderLockBar() {
       if (!confirm(`Force unlock? ${lockedByOther.username} may still be editing.`)) return;
       lockCall('lock_force_release').then(() => checkLock());
     });
+  } else if (lockHeldByMe) {
+    el.innerHTML = `<div class="lock-status">
+      <span class="lock-dot"></span> Editing (locked to you)
+      <button class="lock-release-btn" type="button" data-action="release-lock">Release</button>
+    </div>`;
+    el.querySelector('[data-action="release-lock"]').addEventListener('click', () => {
+      lockCall('lock_release').then(() => { lockHeldByMe = false; lockedByOther = null; stopHeartbeat(); renderLockBar(); render(); });
+    });
   } else {
-    el.innerHTML = `<label class="lock-toggle">
-      <input type="checkbox" id="lockToggle" ${lockHeldByMe ? 'checked' : ''}>
-      <span class="lock-switch"></span>
-      ${lockHeldByMe ? 'Editing (locked to you)' : 'Claim edit lock'}
-    </label>`;
-    document.getElementById('lockToggle').addEventListener('change', e => {
-      if (e.target.checked) {
-        lockCall('lock_acquire').then(d => {
-          if (d.success) { lockHeldByMe = true; lockedByOther = null; startHeartbeat(); }
-          else { lockedByOther = d.holder; lockHeldByMe = false; }
-          renderLockBar(); render();
-        });
-      } else {
-        lockCall('lock_release').then(() => { lockHeldByMe = false; stopHeartbeat(); renderLockBar(); render(); });
-      }
+    el.innerHTML = `<div class="lock-status lock-released">
+      Lock released &mdash; no one is actively editing.
+      <button class="lock-release-btn" type="button" data-action="reclaim-lock">Resume editing</button>
+    </div>`;
+    el.querySelector('[data-action="reclaim-lock"]').addEventListener('click', () => {
+      lockCall('lock_acquire').then(d => {
+        if (d.success) { lockHeldByMe = true; lockedByOther = null; startHeartbeat(); }
+        else { lockedByOther = d.holder; lockHeldByMe = false; }
+        renderLockBar(); render();
+      });
     });
   }
   renderSyncBar();
@@ -673,7 +733,7 @@ function chipHtml(cell, noteEnabled) {
   const dragAttrs = CAN_MANAGE
     ? ` draggable="true" data-source="cell" data-cell-id="${cell.id}" data-toon-kind="${esc(cell.toonKind)}" data-toon-id="${esc(cell.toonId || '')}" data-pug-name="${esc(cell.pugName || '')}" data-pug-class="${esc(cell.pugClass || '')}"`
     : '';
-  let html = `<span class="toon-chip"${dragAttrs} style="background:${color};color:${contrastText(color)};">${esc(cell.name)}`;
+  let html = `<span class="toon-chip"${dragAttrs} style="background:${color};color:${contrastText(color)};"><span class="chip-name">${esc(cell.name)}</span>`;
   if (noteEnabled && (cell.marked || CAN_MANAGE)) {
     const cls = 'chip-marker' + (cell.marked ? ' active' : '') + (CAN_MANAGE ? ' clickable' : '');
     const actionAttrs = CAN_MANAGE ? ` data-action="toggle-marker" data-cell-id="${cell.id}"` : '';
@@ -745,7 +805,7 @@ function render() {
       chip.addEventListener('click', e => {
         if (!e.altKey) return;
         e.stopPropagation();
-        cycleAlt(chip);
+        showAltPopup(chip);
       });
     });
     el.querySelectorAll('.chip-clear').forEach(btn => {
@@ -911,17 +971,51 @@ function siblingChain(toonKind, toonId) {
   return [];
 }
 
-function cycleAlt(chip) {
+// Alt+Click a chip: show every sibling (main + all alts) in a positioned popup so the
+// user can pick one directly, instead of blindly stepping to "the next" one.
+function closeAltPopup() {
+  if (activeAltPopup) { activeAltPopup.remove(); activeAltPopup = null; }
+}
+
+function showAltPopup(chip) {
+  closeAltPopup();
   const toonKind = chip.dataset.toonKind;
   const toonId = chip.dataset.toonId;
   if (toonKind !== 'main' && toonKind !== 'alt') return; // pugs have no siblings
   const chain = siblingChain(toonKind, toonId);
   if (chain.length < 2) return;
-  const idx = chain.findIndex(x => x.toonKind === toonKind && x.toonId === toonId);
-  const next = chain[(idx + 1) % chain.length];
   const cellId = parseInt(chip.dataset.cellId, 10);
-  saveCellPatch(cellId, { toonKind: next.toonKind, toonId: next.toonId, pugName: null, pugClass: null });
+
+  const popup = document.createElement('div');
+  popup.className = 'alt-popup';
+  popup.innerHTML = chain.map(t => {
+    const isCurrent = t.toonKind === toonKind && String(t.toonId) === String(toonId);
+    return `<div class="alt-popup-item${isCurrent ? ' current' : ''}" data-toon-kind="${esc(t.toonKind)}" data-toon-id="${esc(String(t.toonId))}" style="--dot:${esc(classColor(t.class))}">`
+      + `<span class="alt-popup-dot"></span>${esc(t.name)}${isCurrent ? ' (current)' : ''}</div>`;
+  }).join('');
+  document.body.appendChild(popup);
+
+  const rect = chip.getBoundingClientRect();
+  const left = Math.min(rect.left + window.scrollX, window.innerWidth + window.scrollX - popup.offsetWidth - 8);
+  popup.style.left = `${Math.max(8, left)}px`;
+  popup.style.top = `${rect.bottom + window.scrollY + 4}px`;
+
+  popup.querySelectorAll('.alt-popup-item:not(.current)').forEach(item => {
+    item.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const next = chain.find(t => t.toonKind === item.dataset.toonKind && String(t.toonId) === item.dataset.toonId);
+      if (next) saveCellPatch(cellId, { toonKind: next.toonKind, toonId: next.toonId, pugName: null, pugClass: null });
+      closeAltPopup();
+    });
+  });
+
+  activeAltPopup = popup;
 }
+
+document.addEventListener('click', () => closeAltPopup());
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeAltPopup();
+});
 
 const MAX_DATA_COLS = 10;
 
@@ -1003,16 +1097,17 @@ function measureTextPx(text, font) {
 }
 
 // Longest rendered value in this column, across every non-spacer row — Text cells measure
-// their own text_content, General cells measure the assigned toon's name — used to size a
-// width:0 ("shrink to content") column.
+// their own text_content, used to size a width:0 ("shrink to content") column. Assigned
+// toon names are deliberately excluded: a slot column must not keep widening every time a
+// longer name gets dropped into it — long names crop instead (see .toon-chip CSS).
 function longestCellText(c, tb) {
   let longest = c.label || '';
   for (const r of tb.rows) {
     if (r.kind === 'spacer') continue;
     const cell = tb.cells[r.id + '_' + c.id];
     const eff = effectiveKind(r, c, cell);
-    if (eff === 'spacer') continue;
-    const t = eff === 'text' ? (cell && cell.textContent) : (cell && cell.name);
+    if (eff !== 'text') continue;
+    const t = cell && cell.textContent;
     if (t && t.length > longest.length) longest = t;
   }
   return longest;
@@ -1195,7 +1290,7 @@ function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2', icon: '' };
   const headColor = sec.color || meta.color;
   const clearBtn = CAN_MANAGE ? `<button type="button" class="section-clear-btn" data-section-id="${sec.id}" title="Clear all assignments in this section">Clear section</button>` : '';
-  const mrtBar = sec.mrtExportEnabled ? `<div class="mrt-export-bar">
+  const mrtBar = sec.kind === 'roster' ? `<div class="mrt-export-bar">
       ${MRT_SERVERS.map(s => `<button type="button" class="btn-mrt-export" data-mrt-server="${s.key}" data-section-id="${sec.id}">${s.label}</button>`).join('')}
       <span class="mrt-info" data-tip="${MRT_TIP}">i</span>
     </div>` : '';
@@ -1267,6 +1362,7 @@ function renderPool() {
     chip.addEventListener('dragend', () => { dragPayload = null; });
     chip.addEventListener('click', e => {
       if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
       e.stopPropagation();
       const next = {
         toonKind: chip.dataset.toonKind,
@@ -1319,12 +1415,21 @@ function fullRosterFlat() {
   return out;
 }
 
+// Available Toons is a static sidebar by default; "minimized" is remembered per-raid so a
+// reload doesn't keep re-showing it for someone who deliberately tucked it away.
+const POOL_MIN_KEY = `raidroster_poolMinimized_${RAID_ID}`;
+function setPoolMinimized(min) {
+  document.body.classList.toggle('pool-minimized', min);
+  try { localStorage.setItem(POOL_MIN_KEY, min ? '1' : '0'); } catch (e) {}
+}
 function wirePoolControls() {
-  const toggleBtn = document.getElementById('poolToggleBtn');
-  const drawer = document.getElementById('poolDrawer');
-  const closeBtn = document.getElementById('poolDrawerClose');
-  if (toggleBtn && drawer) toggleBtn.addEventListener('click', () => drawer.classList.toggle('open'));
-  if (closeBtn && drawer) closeBtn.addEventListener('click', () => drawer.classList.remove('open'));
+  let startMinimized = false;
+  try { startMinimized = localStorage.getItem(POOL_MIN_KEY) === '1'; } catch (e) {}
+  setPoolMinimized(startMinimized);
+  const minimizeBtn = document.getElementById('poolMinimizeBtn');
+  const reopenTab = document.getElementById('poolReopenTab');
+  if (minimizeBtn) minimizeBtn.addEventListener('click', () => setPoolMinimized(true));
+  if (reopenTab) reopenTab.addEventListener('click', () => setPoolMinimized(false));
 
   const searchInput = document.getElementById('poolSearchInput');
   const resultsEl = document.getElementById('poolSearchResults');

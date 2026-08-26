@@ -644,6 +644,29 @@ if ($action === 'add_table') {
     respond_structure($pdo, $sec['template_id']);
 }
 
+if ($action === 'add_roster_table') {
+    $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['sectionId'] ?? 0));
+    if (!$sec) fail(404, 'Section not found');
+    $raidSize = (int)($body['raidSize'] ?? 0);
+    if ($raidSize !== 20 && $raidSize !== 40) fail(400, 'Raid size must be 20 or 40');
+    $numCols = $raidSize === 40 ? 8 : 4;
+
+    $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
+    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order) VALUES (?, ?, ?)');
+    $stmt->execute([$sec['id'], '', $order]);
+    $tableId = (int)$pdo->lastInsertId();
+
+    $colStmt = $pdo->prepare('INSERT INTO raid_template_columns (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
+    for ($i = 0; $i < $numCols; $i++) {
+        $colStmt->execute([$tableId, 'Grp' . ($i + 1), $i, 'general']);
+    }
+    $rowStmt = $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
+    for ($i = 0; $i < 5; $i++) {
+        $rowStmt->execute([$tableId, '', $i, 'general']);
+    }
+    respond_structure($pdo, $sec['template_id']);
+}
+
 if ($action === 'update_table') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$tb) fail(404, 'Table not found');

@@ -302,6 +302,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .lock-dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf6a; flex-shrink: 0; }
     .lock-release-btn { background: none; border: 1px solid rgba(255,255,255,0.15); color: #a8b4d0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; }
     .lock-release-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
+    .lock-status.lock-released { color: #a8b4d0; }
+    .lock-status.lock-released .lock-release-btn { border-color: rgba(88,101,242,0.4); color: #b9c0ff; }
 
     button.btn { display: inline-block; padding: 7px 16px; font: inherit; background: #5865f2; border: none; border-radius: 999px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     button.btn:hover { background: #4752c4; }
@@ -726,7 +728,17 @@ function renderLockBar() {
       lockCall('lock_release').then(() => { lockHeldByMe = false; lockedByOther = null; stopHeartbeat(); renderLockBar(); render(); });
     });
   } else {
-    el.innerHTML = '';
+    el.innerHTML = `<div class="lock-status lock-released">
+      Lock released &mdash; no one is actively editing.
+      <button class="lock-release-btn" type="button" data-action="reclaim-lock">Resume editing</button>
+    </div>`;
+    el.querySelector('[data-action="reclaim-lock"]').addEventListener('click', () => {
+      lockCall('lock_acquire').then(d => {
+        if (d.success) { lockHeldByMe = true; lockedByOther = null; startHeartbeat(); }
+        else { lockedByOther = d.holder; lockHeldByMe = false; }
+        renderLockBar(); render();
+      });
+    });
   }
 }
 function applyLockGate() {
@@ -1045,7 +1057,7 @@ const UNDO_EXCLUDED_ACTIONS = new Set([
 const UNDO_ACTION_LABELS = {
   add_section: 'Added tab section', delete_tab: 'Deleted tab', update_section: 'Edited section',
   set_section_mrt_export: 'Toggled MRT export', paint_section: 'Painted section', paint_table: 'Painted table',
-  add_table: 'Added table', update_table: 'Renamed table', delete_table: 'Deleted table',
+  add_table: 'Added table', add_roster_table: 'Added roster table', update_table: 'Renamed table', delete_table: 'Deleted table',
   add_column: 'Added column', add_row: 'Added row', update_column: 'Edited column', update_row: 'Edited row',
   delete_column: 'Deleted column', delete_row: 'Deleted row', update_cell: 'Edited cell',
   set_cell_kind_override: 'Set cell override', add_rule: 'Added rule', update_rule: 'Edited rule',
@@ -1298,12 +1310,18 @@ function render() {
       if (act === 'rename-section') call({ action: 'update_section', id, title: node.value.trim() });
       if (act === 'toggle-section-note') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteEnabled: node.checked }); }
       if (act === 'section-note-text') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteText: node.value }); }
-      if (act === 'toggle-section-mrt-export') { call({ action: 'set_section_mrt_export', id, enabled: node.checked }); }
       if (act === 'preview-section') openPreview(id);
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
       if (act === 'add-table-to-section') call({ action: 'add_table', sectionId: id });
+      if (act === 'add-roster-table') {
+        const size = prompt('Raid size for this roster table — 20 or 40:', '40');
+        if (size === null) return;
+        const raidSize = parseInt(size.trim(), 10);
+        if (raidSize !== 20 && raidSize !== 40) { alert('Raid size must be 20 or 40.'); return; }
+        call({ action: 'add_roster_table', sectionId: id, raidSize });
+      }
       if (act === 'add-section-for-kind') { const k = node.dataset.kind; call({ action: 'add_section', templateId: TEMPLATE_ID, kind: k, title: tabLabel(k) }); }
       if (act === 'delete-tab') {
         const k = node.dataset.kind;
@@ -1825,14 +1843,11 @@ function renderSection(sec) {
         Cell markers (*)
       </label>
       ${sec.noteEnabled ? `<input type="text" class="note-text-input" data-action="section-note-text" data-id="${sec.id}" placeholder="Note shown under the section header" value="${escAttr(sec.noteText || '')}" maxlength="255">` : ''}
-      <label class="note-toggle-label">
-        <input type="checkbox" data-action="toggle-section-mrt-export" data-id="${sec.id}" ${sec.mrtExportEnabled ? 'checked' : ''}>
-        MRT export
-      </label>
     </div>
     <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section"${bodyStyle}>
       ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables yet.</p>'}
       <button class="btn" data-action="add-table-to-section" data-id="${sec.id}">+ Table</button>
+      ${sec.kind === 'roster' ? `<button class="btn" data-action="add-roster-table" data-id="${sec.id}" title="Auto-build a roster table sized to your raid (5 rows &times; 4 or 8 groups)">+ Roster table</button>` : ''}
     </div>
   </div>`;
 }
