@@ -57,26 +57,29 @@ $roster = [];
 $pool = [];
 $webhooks = [];
 if ($canManage) {
-    $stmt = $pdo->prepare('SELECT id, main_name, class, status FROM toons WHERE guild_id = ? ORDER BY main_name');
+    $stmt = $pdo->prepare('SELECT id, main_name, class, status, main_spec, full_t2 FROM toons WHERE guild_id = ? ORDER BY main_name');
     $stmt->execute([$tenant['id']]);
     $mains = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $stmt = $pdo->prepare('SELECT id, main_id, name, class, status FROM toon_alts WHERE guild_id = ? ORDER BY name');
+    $stmt = $pdo->prepare('SELECT id, main_id, name, class, status, main_spec, full_t2 FROM toon_alts WHERE guild_id = ? ORDER BY name');
     $stmt->execute([$tenant['id']]);
     $altsByMain = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $a) {
-        $altsByMain[$a['main_id']][] = ['id' => $a['id'], 'name' => $a['name'], 'class' => $a['class'], 'status' => $a['status']];
+        $altsByMain[$a['main_id']][] = ['id' => $a['id'], 'name' => $a['name'], 'class' => $a['class'], 'status' => $a['status'], 'spec' => $a['main_spec'], 'fullT2' => (bool)$a['full_t2']];
     }
 
     $roster = array_map(fn($t) => [
         'id' => $t['id'], 'name' => $t['main_name'], 'class' => $t['class'], 'status' => $t['status'],
+        'spec' => $t['main_spec'], 'fullT2' => (bool)$t['full_t2'],
         'alts' => $altsByMain[$t['id']] ?? [],
     ], $mains);
 
     $stmt = $pdo->prepare(
         'SELECT p.id, p.toon_kind, p.toon_id, p.pug_name, p.pug_class, p.sort_order,
                 COALESCE(t.main_name, a.name) AS toon_name,
-                COALESCE(t.class, a.class) AS toon_class
+                COALESCE(t.class, a.class) AS toon_class,
+                COALESCE(t.main_spec, a.main_spec) AS toon_spec,
+                COALESCE(t.full_t2, a.full_t2) AS toon_full_t2
          FROM raid_pool p
          LEFT JOIN toons t ON p.toon_kind = \'main\' AND t.id = p.toon_id
          LEFT JOIN toon_alts a ON p.toon_kind = \'alt\' AND a.id = p.toon_id
@@ -91,6 +94,8 @@ if ($canManage) {
             'pugName' => $p['pug_name'], 'pugClass' => $p['pug_class'],
             'name' => $isPug ? $p['pug_name'] : $p['toon_name'],
             'class' => $isPug ? $p['pug_class'] : $p['toon_class'],
+            'spec' => $isPug ? null : $p['toon_spec'],
+            'fullT2' => $isPug ? false : (bool)$p['toon_full_t2'],
             'sortOrder' => (int)$p['sort_order'],
         ];
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -216,6 +221,20 @@ function fmtTime($t) {
     td.cell.slot .empty-slot {
       display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
       box-sizing: border-box; padding: 8px; color: #4a5578; font-size: 13px;
+    }
+    .role-icon-sm {
+      width: 16px; height: 16px; background-image: url('/assets/img/raid-roles.png');
+      background-size: 300% 100%; background-repeat: no-repeat; display: inline-block;
+      flex-shrink: 0; border-radius: 2px;
+    }
+    .role-icon-sm.role-tank   { background-position: 0% 0; }
+    .role-icon-sm.role-healer { background-position: 50% 0; }
+    .role-icon-sm.role-dps    { background-position: 100% 0; }
+    .t2-badge {
+      display: inline-block; padding: 0 4px; margin-left: auto; border-radius: 3px;
+      font-size: 9px; font-weight: 800; background: #c8a020; color: #000;
+      border: 1px solid rgba(0,0,0,0.35); letter-spacing: 0.02em; vertical-align: middle;
+      line-height: 14px; flex-shrink: 0;
     }
     .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
     .chip-marker { display: inline-block; margin-left: 4px; font-weight: 800; font-size: 11px; line-height: 1; color: rgba(255,255,255,0.35); }
@@ -718,6 +737,10 @@ function groupSectionsByKind(secs) {
 
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function classColor(cls) { return CLASS_COLORS[(cls || '').toLowerCase()] || '#8892b0'; }
+
+const SPEC_ROLE = { protection: 'Tank', holy: 'Healer', discipline: 'Healer', restoration: 'Healer' };
+function specRole(spec) { return SPEC_ROLE[(spec || '').toLowerCase()] || 'DPS'; }
+function roleKey(role) { return role ? 'role-' + role.toLowerCase() : 'role-dps'; }
 
 function contrastText(hex) {
   if (!hex) return '#e8ecff';
@@ -1326,11 +1349,14 @@ function poolEntryHtml(p) {
   const color = classColor(p.class);
   const tagLabel = p.toonKind === 'pug' ? 'PUG' : (p.toonKind === 'alt' ? 'ALT' : '');
   const tag = tagLabel ? `<span class="pool-tag${p.toonKind === 'pug' ? ' pug' : ''}">${tagLabel}</span>` : '';
+  const role = p.toonKind !== 'pug' ? specRole(p.spec) : null;
+  const roleIcon = role ? `<span class="role-icon-sm ${roleKey(role)}" title="${role}"></span>` : '';
+  const t2 = p.class === 'Priest' && p.fullT2 ? '<span class="t2-badge">T2</span>' : '';
   return `<div class="pool-chip-row">
     <span class="toon-chip pool-chip" draggable="true" data-source="pool" data-pool-id="${p.id}"
       data-toon-kind="${esc(p.toonKind)}" data-toon-id="${esc(p.toonId || '')}"
       data-pug-name="${esc(p.pugName || '')}" data-pug-class="${esc(p.pugClass || '')}"
-      style="background:${color};color:${contrastText(color)};">${esc(p.name)}${tag}</span>
+      style="background:${color};color:${contrastText(color)};">${roleIcon}${esc(p.name)}${t2}${tag}</span>
     <button type="button" class="pool-remove" data-pool-id="${p.id}" title="Remove from pool">&times;</button>
   </div>`;
 }
