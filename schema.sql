@@ -5,6 +5,7 @@ CREATE TABLE guilds (
     discord_guild_id VARCHAR(32) NOT NULL UNIQUE,
     slug VARCHAR(64) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
+    faction ENUM('Alliance', 'Horde') NOT NULL DEFAULT 'Alliance',
     owner_discord_id VARCHAR(32) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     logo_path VARCHAR(255) NULL,

@@ -438,6 +438,18 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     </div>
 
     <div class="tab-panel" id="tab-branding">
+      <h2>Faction</h2>
+      <div class="card">
+        <form method="post" action="/admin/save-branding.php?slug=<?= h($slug) ?>" class="brand-row">
+          <select name="faction" class="input">
+            <option value="Alliance" <?= ($tenant['faction'] ?? 'Alliance') === 'Alliance' ? 'selected' : '' ?>>Alliance</option>
+            <option value="Horde" <?= ($tenant['faction'] ?? 'Alliance') === 'Horde' ? 'selected' : '' ?>>Horde</option>
+          </select>
+          <button class="btn" type="submit">Save faction</button>
+        </form>
+        <p class="hint">Used to work out each signup's faction-impossible "flex" class (Shaman for Alliance, Paladin for Horde) when importing from Raid-Helper.</p>
+      </div>
+
       <h2>Logo</h2>
       <div class="card">
         <div class="brand-row">

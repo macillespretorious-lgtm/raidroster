@@ -36,6 +36,10 @@ if (!is_dir($dir)) {
 $pdo     = db_connect();
 $updates = [];
 
+if (isset($_POST['faction']) && in_array($_POST['faction'], ['Alliance', 'Horde'], true)) {
+    $updates['faction'] = $_POST['faction'];
+}
+
 foreach (['logo', 'banner'] as $field) {
     if (empty($_FILES[$field]) || $_FILES[$field]['error'] === UPLOAD_ERR_NO_FILE) {
         continue;

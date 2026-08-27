@@ -1535,9 +1535,10 @@ function importRowHtml(row, idx) {
   const state = row.added ? 'added' : (row.matched ? 'matched' : 'unmatched');
   const status = row.added ? 'Added' : (row.matched ? `Matched: ${esc(row.toonName)}` : 'Not matched');
   const detail = row.matched ? esc(row.toonClass || '') : esc(row.suggestedPugClass || row.rawClass || '');
+  const roleIcon = row.role ? `<span class="role-icon-sm ${roleKey(row.role)}" title="${esc(row.role)}"></span>` : '';
   const btnLabel = row.matched ? 'Add' : 'Add as PUG';
   return `<div class="import-row ${state}">
-    <div><span class="name">${esc(row.name)}</span> <span class="detail">${detail}</span></div>
+    <div>${roleIcon}<span class="name">${esc(row.name)}</span> <span class="detail">${detail}</span></div>
     <div class="status">${status}${row.added ? '' : `<button type="button" data-idx="${idx}">${btnLabel}</button>`}</div>
   </div>`;
 }

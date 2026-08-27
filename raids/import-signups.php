@@ -108,6 +108,25 @@ const RH_CLS_MAP = [
     'Shaman' => 'Shaman', 'Tank' => 'Warrior',
 ];
 
+// Per faction, the class that isn't playable on that side is used by players as a
+// deliberate "assign me wherever" flex signup. When the raid leader resolves that
+// flex signup to a real toon whose class is one of the faction's three hybrid-healer
+// classes, default the role to Healer -- that's what choosing to place a flex signup
+// into a hybrid class means.
+const FACTION_FLEX = [
+    'Alliance' => ['flexClass' => 'Shaman',  'healerClasses' => ['Paladin', 'Druid', 'Priest']],
+    'Horde'    => ['flexClass' => 'Paladin', 'healerClasses' => ['Shaman', 'Druid', 'Priest']],
+];
+
+function rh_role_for_signup($spec, $roleGroup) {
+    $s = strtolower(trim(preg_replace('/\d+/', '', $spec ?? '')));
+    if ($s === 'protection' || $s === 'guardian') return 'Tank';
+    if ($s === 'holy' || $s === 'discipline' || $s === 'restoration') return 'Healer';
+    if ($roleGroup === 'Tanks') return 'Tank';
+    if ($roleGroup === 'Healers') return 'Healer';
+    return 'DPS';
+}
+
 function find_match($mains, $userid, $discordName) {
     foreach ($mains as $m) {
         if ($m['discordId'] !== '' && (string)$m['discordId'] === (string)$userid) return ['main' => $m, 'directAlt' => null];
@@ -142,6 +161,8 @@ function find_match($mains, $userid, $discordName) {
     return null;
 }
 
+$flex = FACTION_FLEX[$tenant['faction'] ?? 'Alliance'] ?? FACTION_FLEX['Alliance'];
+
 $rows = [];
 foreach (($data['signups'] ?? []) as $su) {
     $rawClass = $su['class'] ?? '';
@@ -154,7 +175,8 @@ foreach (($data['signups'] ?? []) as $su) {
 
     $match = find_match($mains, $userid, $discordName);
     $row = [
-        'name' => $name, 'userid' => $userid, 'rawClass' => $rawClass, 'spec' => $su['spec'] ?? '', 'role' => $su['role'] ?? '',
+        'name' => $name, 'userid' => $userid, 'rawClass' => $rawClass, 'spec' => $su['spec'] ?? '',
+        'role' => rh_role_for_signup($su['spec'] ?? '', $su['role'] ?? ''),
         'matched' => false, 'toonKind' => null, 'toonId' => null, 'toonName' => null, 'toonClass' => null,
         'suggestedPugClass' => RH_CLS_MAP[$rawClass] ?? null,
     ];
@@ -177,6 +199,10 @@ foreach (($data['signups'] ?? []) as $su) {
         $row['toonId']    = $chosen['id'];
         $row['toonName']  = $chosen['name'];
         $row['toonClass'] = $chosen['class'];
+
+        if ($rawClass === $flex['flexClass'] && in_array($chosen['class'], $flex['healerClasses'], true)) {
+            $row['role'] = 'Healer';
+        }
     }
 
     $rows[] = $row;
