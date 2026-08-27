@@ -111,8 +111,8 @@ const RH_CLS_MAP = [
 // Per faction, the class that isn't playable on that side is used by players as a
 // deliberate "assign me wherever" flex signup. When the raid leader resolves that
 // flex signup to a real toon whose class is one of the faction's three hybrid-healer
-// classes, default the role to Healer -- that's what choosing to place a flex signup
-// into a hybrid class means.
+// classes, this suggests a *default* role of Healer -- a starting guess, not a fixed
+// value. The raid leader can still change it in the import review list before adding.
 const FACTION_FLEX = [
     'Alliance' => ['flexClass' => 'Shaman',  'healerClasses' => ['Paladin', 'Druid', 'Priest']],
     'Horde'    => ['flexClass' => 'Paladin', 'healerClasses' => ['Shaman', 'Druid', 'Priest']],

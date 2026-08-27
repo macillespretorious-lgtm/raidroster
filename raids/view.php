@@ -230,6 +230,8 @@ function fmtTime($t) {
     .role-icon-sm.role-tank   { background-position: 0% 0; }
     .role-icon-sm.role-healer { background-position: 50% 0; }
     .role-icon-sm.role-dps    { background-position: 100% 0; }
+    .role-icon-sm.role-clickable { cursor: pointer; }
+    .role-icon-sm.role-clickable:hover { outline: 1px solid rgba(255,255,255,.5); }
     .t2-badge {
       display: inline-block; padding: 0 4px; margin-left: auto; border-radius: 3px;
       font-size: 9px; font-weight: 800; background: #c8a020; color: #000;
@@ -1531,11 +1533,23 @@ function importItemFor(row) {
     : { toonKind: 'pug', pugName: row.name, pugClass: row.suggestedPugClass || null };
 }
 
+const IMPORT_ROLES = ['Tank', 'Healer', 'DPS'];
+
+function cycleImportRole(idx) {
+  const row = importRows[idx];
+  if (!row || row.added) return;
+  const cur = IMPORT_ROLES.indexOf(row.role);
+  row.role = IMPORT_ROLES[(cur + 1) % IMPORT_ROLES.length];
+  renderImportRows();
+}
+
 function importRowHtml(row, idx) {
   const state = row.added ? 'added' : (row.matched ? 'matched' : 'unmatched');
   const status = row.added ? 'Added' : (row.matched ? `Matched: ${esc(row.toonName)}` : 'Not matched');
   const detail = row.matched ? esc(row.toonClass || '') : esc(row.suggestedPugClass || row.rawClass || '');
-  const roleIcon = row.role ? `<span class="role-icon-sm ${roleKey(row.role)}" title="${esc(row.role)}"></span>` : '';
+  const roleClickable = row.added ? '' : ' role-clickable';
+  const roleTitle = row.added ? esc(row.role || '') : `${esc(row.role || '')} (suggested — click to change)`;
+  const roleIcon = row.role ? `<span class="role-icon-sm${roleClickable} ${roleKey(row.role)}" title="${roleTitle}" ${row.added ? '' : `onclick="cycleImportRole(${idx})"`}></span>` : '';
   const btnLabel = row.matched ? 'Add' : 'Add as PUG';
   return `<div class="import-row ${state}">
     <div>${roleIcon}<span class="name">${esc(row.name)}</span> <span class="detail">${detail}</span></div>
