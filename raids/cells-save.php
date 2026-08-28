@@ -66,6 +66,22 @@ function toon_class_for($pdo, $guildId, $toonKind, $toonId, $pugClass) {
     return fetch_toon_class($pdo, $guildId, $toonKind, $toonId);
 }
 
+function toon_spec_for($pdo, $guildId, $toonKind, $toonId) {
+    if ($toonKind === 'main' && $toonId) {
+        $stmt = $pdo->prepare('SELECT main_spec FROM toons WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$toonId, $guildId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? $row['main_spec'] : null;
+    }
+    if ($toonKind === 'alt' && $toonId) {
+        $stmt = $pdo->prepare('SELECT main_spec FROM toon_alts WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$toonId, $guildId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? $row['main_spec'] : null;
+    }
+    return null;
+}
+
 // Checks class_restrict/max_count raid_rules scoped to (tableId, rowId, columnId) against the
 // toon about to occupy that cell. $excludeCellIds keeps a toon's own current cell(s) -- the one
 // being reassigned, or both sides of a move -- out of its own max_count tally.
@@ -135,7 +151,8 @@ function fetch_cell_out($pdo, $cellId) {
     $stmt = $pdo->prepare(
         'SELECT c.id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.role, c.marked,
                 COALESCE(t.main_name, a.name) AS toon_name,
-                COALESCE(t.class, a.class) AS toon_class
+                COALESCE(t.class, a.class) AS toon_class,
+                COALESCE(t.main_spec, a.main_spec) AS toon_spec
          FROM raid_cells c
          LEFT JOIN toons t ON c.toon_kind = \'main\' AND t.id = c.toon_id
          LEFT JOIN toon_alts a ON c.toon_kind = \'alt\' AND a.id = c.toon_id
@@ -146,6 +163,7 @@ function fetch_cell_out($pdo, $cellId) {
     if (!$c) return null;
     $isPug = $c['toon_kind'] === 'pug';
     $class = $isPug ? $c['pug_class'] : $c['toon_class'];
+    $spec  = $isPug ? null : $c['toon_spec'];
     return [
         'id'            => (int)$c['id'],
         'toonKind'      => $c['toon_kind'],
@@ -154,7 +172,7 @@ function fetch_cell_out($pdo, $cellId) {
         'pugClass'      => $c['pug_class'],
         'name'          => $isPug ? $c['pug_name'] : $c['toon_name'],
         'class'         => $class,
-        'role'          => $class ? ($c['role'] ?: default_role_for_class($class)) : null,
+        'role'          => $class ? ($c['role'] ?: default_role_for_class($class, $spec)) : null,
         'roleConfirmed' => $c['role'] !== null,
         'marked'        => (bool)$c['marked'],
     ];
@@ -276,7 +294,8 @@ if ($action === 'setRole') {
     $stmt->execute([$cellId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     $class = toon_class_for($pdo, $tenant['id'], $row['toon_kind'], $row['toon_id'], $row['pug_class']);
-    $current = $row['role'] ?: default_role_for_class($class);
+    $spec = toon_spec_for($pdo, $tenant['id'], $row['toon_kind'], $row['toon_id']);
+    $current = $row['role'] ?: default_role_for_class($class, $spec);
     $next = $class ? cycle_role_for_class($class, $current) : null;
     $stmt = $pdo->prepare('UPDATE raid_cells SET role = ? WHERE id = ?');
     $stmt->execute([$next, $cellId]);

@@ -42,6 +42,7 @@ function fetch_table_full($pdo, $tb) {
                 c.text_content, c.bg_color, c.text_color, c.bold, c.font, c.icon, c.kind_override,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class,
+                COALESCE(t.main_spec, a.main_spec) AS toon_spec,
                 COALESCE(t.server, a.server) AS toon_server
          FROM raid_cells c
          LEFT JOIN toons t ON c.toon_kind = \'main\' AND t.id = c.toon_id
@@ -53,6 +54,7 @@ function fetch_table_full($pdo, $tb) {
     foreach ($stmtCell->fetchAll(PDO::FETCH_ASSOC) as $cell) {
         $isPug = $cell['toon_kind'] === 'pug';
         $class = $isPug ? $cell['pug_class'] : $cell['toon_class'];
+        $spec  = $isPug ? null : $cell['toon_spec'];
         $cells[$cell['row_id'] . '_' . $cell['column_id']] = [
             'id'          => (int)$cell['id'],
             'toonKind'    => $cell['toon_kind'],
@@ -61,7 +63,7 @@ function fetch_table_full($pdo, $tb) {
             'pugClass'    => $cell['pug_class'],
             'name'        => $isPug ? $cell['pug_name'] : $cell['toon_name'],
             'class'       => $class,
-            'role'        => $class ? ($cell['role'] ?: default_role_for_class($class)) : null,
+            'role'        => $class ? ($cell['role'] ?: default_role_for_class($class, $spec)) : null,
             'roleConfirmed' => $cell['role'] !== null,
             'server'      => $isPug ? null : $cell['toon_server'],
             'marked'      => (bool)$cell['marked'],

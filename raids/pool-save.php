@@ -87,6 +87,15 @@ function pool_item_class($pdo, $tenant, $toonKind, $toonId, $pugClass) {
     return $row ? $row['class'] : null;
 }
 
+function pool_item_spec($pdo, $tenant, $toonKind, $toonId) {
+    if ($toonKind !== 'main' && $toonKind !== 'alt') return null;
+    $table = $toonKind === 'main' ? 'toons' : 'toon_alts';
+    $stmt = $pdo->prepare("SELECT main_spec FROM $table WHERE id = ? AND guild_id = ?");
+    $stmt->execute([$toonId, $tenant['id']]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ? $row['main_spec'] : null;
+}
+
 // Validates/inserts a single pool item. Returns null on success, or an error string.
 function add_pool_item($pdo, $tenant, $raidId, $toonKind, $toonId, $pugName, $pugClass, $role = null) {
     if ($toonKind === 'main') {
@@ -155,7 +164,8 @@ if ($action === 'add') {
         exit;
     }
     $class = pool_item_class($pdo, $tenant, $row['toon_kind'], $row['toon_id'], $row['pug_class']);
-    $current = $row['role'] ?: default_role_for_class($class);
+    $spec = pool_item_spec($pdo, $tenant, $row['toon_kind'], $row['toon_id']);
+    $current = $row['role'] ?: default_role_for_class($class, $spec);
     $next = cycle_role_for_class($class, $current);
     $stmt = $pdo->prepare('UPDATE raid_pool SET role = ? WHERE id = ? AND raid_id = ?');
     $stmt->execute([$next, $poolId, $raidId]);
