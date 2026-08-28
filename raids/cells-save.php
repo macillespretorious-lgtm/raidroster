@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
 require_once __DIR__ . '/../includes/raid_fetch.php';
+require_once __DIR__ . '/../includes/class_roles.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -132,7 +133,7 @@ function resolve_toon_fields($pdo, $guildId, $toonKind, $toonId, $pugName, $pugC
 
 function fetch_cell_out($pdo, $cellId) {
     $stmt = $pdo->prepare(
-        'SELECT c.id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.marked,
+        'SELECT c.id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.role, c.marked,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class
          FROM raid_cells c
@@ -144,15 +145,18 @@ function fetch_cell_out($pdo, $cellId) {
     $c = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$c) return null;
     $isPug = $c['toon_kind'] === 'pug';
+    $class = $isPug ? $c['pug_class'] : $c['toon_class'];
     return [
-        'id'       => (int)$c['id'],
-        'toonKind' => $c['toon_kind'],
-        'toonId'   => $c['toon_id'],
-        'pugName'  => $c['pug_name'],
-        'pugClass' => $c['pug_class'],
-        'name'     => $isPug ? $c['pug_name'] : $c['toon_name'],
-        'class'    => $isPug ? $c['pug_class'] : $c['toon_class'],
-        'marked'   => (bool)$c['marked'],
+        'id'            => (int)$c['id'],
+        'toonKind'      => $c['toon_kind'],
+        'toonId'        => $c['toon_id'],
+        'pugName'       => $c['pug_name'],
+        'pugClass'      => $c['pug_class'],
+        'name'          => $isPug ? $c['pug_name'] : $c['toon_name'],
+        'class'         => $class,
+        'role'          => $class ? ($c['role'] ?: default_role_for_class($class)) : null,
+        'roleConfirmed' => $c['role'] !== null,
+        'marked'        => (bool)$c['marked'],
     ];
 }
 
@@ -167,7 +171,7 @@ if ($action === 'move') {
         exit;
     }
     $pdo->beginTransaction();
-    $stmt = $pdo->prepare('SELECT toon_id, toon_kind, pug_name, pug_class FROM raid_cells WHERE id = ? FOR UPDATE');
+    $stmt = $pdo->prepare('SELECT toon_id, toon_kind, pug_name, pug_class, role FROM raid_cells WHERE id = ? FOR UPDATE');
     $stmt->execute([$fromCellId]);
     $from = $stmt->fetch(PDO::FETCH_ASSOC);
     $stmt->execute([$toCellId]);
@@ -187,9 +191,9 @@ if ($action === 'move') {
         exit;
     }
 
-    $upd = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ? WHERE id = ?');
-    $upd->execute([$to['toon_id'], $to['toon_kind'], $to['pug_name'], $to['pug_class'], $fromCellId]);
-    $upd->execute([$from['toon_id'], $from['toon_kind'], $from['pug_name'], $from['pug_class'], $toCellId]);
+    $upd = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ?, role = ? WHERE id = ?');
+    $upd->execute([$to['toon_id'], $to['toon_kind'], $to['pug_name'], $to['pug_class'], $to['role'], $fromCellId]);
+    $upd->execute([$from['toon_id'], $from['toon_kind'], $from['pug_name'], $from['pug_class'], $from['role'], $toCellId]);
     $pdo->commit();
 
     echo json_encode(['success' => true, 'from' => fetch_cell_out($pdo, $fromCellId), 'to' => fetch_cell_out($pdo, $toCellId)]);
@@ -261,6 +265,25 @@ if ($action === 'mark') {
     exit;
 }
 
+if ($action === 'setRole') {
+    $cellId = isset($body['cellId']) ? (int)$body['cellId'] : 0;
+    if (!fetch_cell_owned($pdo, $cellId, $tenant['id'])) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Cell not found']);
+        exit;
+    }
+    $stmt = $pdo->prepare('SELECT toon_kind, toon_id, pug_class, role FROM raid_cells WHERE id = ?');
+    $stmt->execute([$cellId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $class = toon_class_for($pdo, $tenant['id'], $row['toon_kind'], $row['toon_id'], $row['pug_class']);
+    $current = $row['role'] ?: default_role_for_class($class);
+    $next = $class ? cycle_role_for_class($class, $current) : null;
+    $stmt = $pdo->prepare('UPDATE raid_cells SET role = ? WHERE id = ?');
+    $stmt->execute([$next, $cellId]);
+    echo json_encode(['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)]);
+    exit;
+}
+
 // default: assign
 $cellId = isset($body['cellId']) ? (int)$body['cellId'] : 0;
 $cell = fetch_cell_owned($pdo, $cellId, $tenant['id']);
@@ -279,7 +302,10 @@ if ($violation) {
     exit;
 }
 
-$stmt = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ? WHERE id = ?');
-$stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_name'], $resolved['pug_class'], $cellId]);
+$role = array_key_exists('role', $body) ? $body['role'] : null;
+if (!valid_role_for_class($toonClass, $role)) $role = null;
+
+$stmt = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ?, role = ? WHERE id = ?');
+$stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_name'], $resolved['pug_class'], $role, $cellId]);
 
 echo json_encode(['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)]);

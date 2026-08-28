@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
 require_once __DIR__ . '/../includes/nav.php';
 require_once __DIR__ . '/../includes/raid_fetch.php';
+require_once __DIR__ . '/../includes/class_roles.php';
 
 $slug   = $_GET['slug'] ?? '';
 $tenant = guild_by_slug($slug);
@@ -75,7 +76,7 @@ if ($canManage) {
     ], $mains);
 
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.toon_kind, p.toon_id, p.pug_name, p.pug_class, p.sort_order,
+        'SELECT p.id, p.toon_kind, p.toon_id, p.pug_name, p.pug_class, p.role, p.sort_order,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class,
                 COALESCE(t.main_spec, a.main_spec) AS toon_spec,
@@ -89,13 +90,17 @@ if ($canManage) {
     $stmt->execute([$raidId]);
     $pool = array_map(function ($p) {
         $isPug = $p['toon_kind'] === 'pug';
+        $class = $isPug ? $p['pug_class'] : $p['toon_class'];
+        $spec  = $isPug ? null : $p['toon_spec'];
         return [
             'id' => (int)$p['id'], 'toonKind' => $p['toon_kind'], 'toonId' => $p['toon_id'],
             'pugName' => $p['pug_name'], 'pugClass' => $p['pug_class'],
             'name' => $isPug ? $p['pug_name'] : $p['toon_name'],
-            'class' => $isPug ? $p['pug_class'] : $p['toon_class'],
-            'spec' => $isPug ? null : $p['toon_spec'],
+            'class' => $class,
+            'spec' => $spec,
             'fullT2' => $isPug ? false : (bool)$p['toon_full_t2'],
+            'role' => $p['role'] ?: default_role_for_class($class, $spec),
+            'roleConfirmed' => $p['role'] !== null,
             'sortOrder' => (int)$p['sort_order'],
         ];
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -740,9 +745,15 @@ function groupSectionsByKind(secs) {
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function classColor(cls) { return CLASS_COLORS[(cls || '').toLowerCase()] || '#8892b0'; }
 
-const SPEC_ROLE = { protection: 'Tank', holy: 'Healer', discipline: 'Healer', restoration: 'Healer' };
-function specRole(spec) { return SPEC_ROLE[(spec || '').toLowerCase()] || 'DPS'; }
 function roleKey(role) { return role ? 'role-' + role.toLowerCase() : 'role-dps'; }
+
+// Mirrors includes/class_roles.php's CLASS_ROLES -- which roles a class may cycle through.
+const CLASS_ROLES = {
+  Druid: ['Tank', 'Healer', 'DPS'], Paladin: ['Tank', 'Healer', 'DPS'],
+  Warrior: ['Tank', 'DPS'], Rogue: ['DPS'], Warlock: ['DPS'], Mage: ['DPS'],
+  Priest: ['Healer', 'DPS'], Hunter: ['DPS'], Shaman: ['Healer', 'DPS'],
+};
+function classRoles(cls) { return CLASS_ROLES[cls] || ['Tank', 'Healer', 'DPS']; }
 
 function contrastText(hex) {
   if (!hex) return '#e8ecff';
@@ -756,9 +767,13 @@ function chipHtml(cell, noteEnabled) {
   if (!cell || !cell.name) return '<span class="empty-slot">+</span>';
   const color = classColor(cell.class);
   const dragAttrs = CAN_MANAGE
-    ? ` draggable="true" data-source="cell" data-cell-id="${cell.id}" data-toon-kind="${esc(cell.toonKind)}" data-toon-id="${esc(cell.toonId || '')}" data-pug-name="${esc(cell.pugName || '')}" data-pug-class="${esc(cell.pugClass || '')}"`
+    ? ` draggable="true" data-source="cell" data-cell-id="${cell.id}" data-toon-kind="${esc(cell.toonKind)}" data-toon-id="${esc(cell.toonId || '')}" data-pug-name="${esc(cell.pugName || '')}" data-pug-class="${esc(cell.pugClass || '')}" data-role="${esc(cell.role || '')}"`
     : '';
-  let html = `<span class="toon-chip"${dragAttrs} style="background:${color};color:${contrastText(color)};"><span class="chip-name">${esc(cell.name)}</span>`;
+  const roleTitle = cell.role ? `${cell.role}${cell.roleConfirmed ? '' : ' (default — click to change)'}` : '';
+  const roleIcon = cell.role
+    ? `<span class="role-icon-sm${CAN_MANAGE ? ' role-clickable' : ''} ${roleKey(cell.role)}" title="${esc(roleTitle)}"${CAN_MANAGE ? ` data-action="cycle-cell-role" data-cell-id="${cell.id}"` : ''}></span>`
+    : '';
+  let html = `<span class="toon-chip"${dragAttrs} style="background:${color};color:${contrastText(color)};">${roleIcon}<span class="chip-name">${esc(cell.name)}</span>`;
   if (noteEnabled && (cell.marked || CAN_MANAGE)) {
     const cls = 'chip-marker' + (cell.marked ? ' active' : '') + (CAN_MANAGE ? ' clickable' : '');
     const actionAttrs = CAN_MANAGE ? ` data-action="toggle-marker" data-cell-id="${cell.id}"` : '';
@@ -809,7 +824,7 @@ function render() {
         if (cur && cur.name) return; // stamp mode only fills empty slots
         const violation = clientRuleViolation(td, { source: 'pool', toonKind: stampToon.toonKind, toonId: stampToon.toonId, pugName: stampToon.pugName, pugClass: stampToon.pugClass });
         if (violation) { alert(violation); return; }
-        saveCellPatch(cellId, { toonKind: stampToon.toonKind, toonId: stampToon.toonId, pugName: stampToon.pugName, pugClass: stampToon.pugClass });
+        saveCellPatch(cellId, { toonKind: stampToon.toonKind, toonId: stampToon.toonId, pugName: stampToon.pugName, pugClass: stampToon.pugClass, role: stampToon.role });
       });
     });
     el.querySelectorAll('.toon-chip[draggable="true"]').forEach(chip => {
@@ -821,6 +836,7 @@ function render() {
           toonId: chip.dataset.toonId || null,
           pugName: chip.dataset.pugName || null,
           pugClass: chip.dataset.pugClass || null,
+          role: chip.dataset.role || null,
         };
         dragPayload = payload;
         e.dataTransfer.setData('text/plain', JSON.stringify(payload));
@@ -841,6 +857,7 @@ function render() {
           toonId: chip.dataset.toonId || null,
           pugName: chip.dataset.pugName || null,
           pugClass: chip.dataset.pugClass || null,
+          role: chip.dataset.role || null,
         };
         const same = stampToon && stampToon.toonKind === next.toonKind
           && stampToon.toonId === next.toonId && stampToon.pugName === next.pugName;
@@ -848,11 +865,17 @@ function render() {
         updateStampVisuals();
       });
     });
+    el.querySelectorAll('[data-action="cycle-cell-role"]').forEach(el2 => {
+      el2.addEventListener('click', e => {
+        e.stopPropagation();
+        cycleCellRole(parseInt(el2.dataset.cellId, 10));
+      });
+    });
     el.querySelectorAll('.chip-clear').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         const cellId = parseInt(btn.dataset.cellId, 10);
-        saveCellPatch(cellId, { toonKind: null, toonId: null, pugName: null, pugClass: null });
+        saveCellPatch(cellId, { toonKind: null, toonId: null, pugName: null, pugClass: null, role: null });
       });
     });
     el.querySelectorAll('.chip-marker.clickable').forEach(btn => {
@@ -902,8 +925,18 @@ function saveCellPatch(cellId, patch) {
     toonId: patch.toonId !== undefined ? patch.toonId : (cur ? cur.toonId : null),
     pugName: patch.pugName !== undefined ? patch.pugName : (cur ? cur.pugName : null),
     pugClass: patch.pugClass !== undefined ? patch.pugClass : (cur ? cur.pugClass : null),
+    role: patch.role !== undefined ? patch.role : (cur ? cur.role : null),
   };
   return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json()).then(d => {
+      if (!d.success) { alert(d.error || 'Save failed'); return; }
+      updateCellInPlace(d.cell);
+      render();
+    });
+}
+
+function cycleCellRole(cellId) {
+  return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'setRole', cellId }) })
     .then(r => r.json()).then(d => {
       if (!d.success) { alert(d.error || 'Save failed'); return; }
       updateCellInPlace(d.cell);
@@ -944,7 +977,7 @@ function handleDrop(td, e) {
     if (payload.cellId === toCellId) return;
     persistMove(payload.cellId, toCellId);
   } else if (payload.source === 'pool') {
-    saveCellPatch(toCellId, { toonKind: payload.toonKind, toonId: payload.toonId, pugName: payload.pugName, pugClass: payload.pugClass });
+    saveCellPatch(toCellId, { toonKind: payload.toonKind, toonId: payload.toonId, pugName: payload.pugName, pugClass: payload.pugClass, role: payload.role });
   }
 }
 
@@ -1045,7 +1078,7 @@ function showAltPopup(chip) {
     item.addEventListener('click', ev => {
       ev.stopPropagation();
       const next = chain.find(t => t.toonKind === item.dataset.toonKind && String(t.toonId) === item.dataset.toonId);
-      if (next) saveCellPatch(cellId, { toonKind: next.toonKind, toonId: next.toonId, pugName: null, pugClass: null });
+      if (next) saveCellPatch(cellId, { toonKind: next.toonKind, toonId: next.toonId, pugName: null, pugClass: null, role: null });
       closeAltPopup();
     });
   });
@@ -1351,13 +1384,15 @@ function poolEntryHtml(p) {
   const color = classColor(p.class);
   const tagLabel = p.toonKind === 'pug' ? 'PUG' : (p.toonKind === 'alt' ? 'ALT' : '');
   const tag = tagLabel ? `<span class="pool-tag${p.toonKind === 'pug' ? ' pug' : ''}">${tagLabel}</span>` : '';
-  const role = p.toonKind !== 'pug' ? specRole(p.spec) : null;
-  const roleIcon = role ? `<span class="role-icon-sm ${roleKey(role)}" title="${role}"></span>` : '';
+  const roleTitle = p.role ? `${p.role}${p.roleConfirmed ? '' : ' (default — click to change)'}` : '';
+  const roleIcon = p.role
+    ? `<span class="role-icon-sm role-clickable ${roleKey(p.role)}" title="${esc(roleTitle)}" data-action="cycle-pool-role" data-pool-id="${p.id}"></span>`
+    : '';
   const t2 = p.class === 'Priest' && p.fullT2 ? '<span class="t2-badge">T2</span>' : '';
   return `<div class="pool-chip-row">
     <span class="toon-chip pool-chip" draggable="true" data-source="pool" data-pool-id="${p.id}"
       data-toon-kind="${esc(p.toonKind)}" data-toon-id="${esc(p.toonId || '')}"
-      data-pug-name="${esc(p.pugName || '')}" data-pug-class="${esc(p.pugClass || '')}"
+      data-pug-name="${esc(p.pugName || '')}" data-pug-class="${esc(p.pugClass || '')}" data-role="${esc(p.role || '')}"
       style="background:${color};color:${contrastText(color)};">${roleIcon}${esc(p.name)}${t2}${tag}</span>
     <button type="button" class="pool-remove" data-pool-id="${p.id}" title="Remove from pool">&times;</button>
   </div>`;
@@ -1398,6 +1433,7 @@ function renderPool() {
         toonId: chip.dataset.toonId || null,
         pugName: chip.dataset.pugName || null,
         pugClass: chip.dataset.pugClass || null,
+        role: chip.dataset.role || null,
       };
       dragPayload = payload;
       e.dataTransfer.setData('text/plain', JSON.stringify(payload));
@@ -1413,11 +1449,18 @@ function renderPool() {
         toonId: chip.dataset.toonId || null,
         pugName: chip.dataset.pugName || null,
         pugClass: chip.dataset.pugClass || null,
+        role: chip.dataset.role || null,
       };
       const same = stampToon && stampToon.toonKind === next.toonKind
         && stampToon.toonId === next.toonId && stampToon.pugName === next.pugName;
       stampToon = same ? null : next;
       updateStampVisuals();
+    });
+  });
+  listEl.querySelectorAll('[data-action="cycle-pool-role"]').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      poolCall({ action: 'setRole', poolId: parseInt(el.dataset.poolId, 10) });
     });
   });
   listEl.querySelectorAll('.pool-remove').forEach(btn => {
@@ -1529,17 +1572,16 @@ function wirePoolControls() {
 // into cells, since RR templates have no fixed notion of e.g. "healer slot 2".
 function importItemFor(row) {
   return row.matched
-    ? { toonKind: row.toonKind, toonId: row.toonId }
-    : { toonKind: 'pug', pugName: row.name, pugClass: row.suggestedPugClass || null };
+    ? { toonKind: row.toonKind, toonId: row.toonId, role: row.role }
+    : { toonKind: 'pug', pugName: row.name, pugClass: row.suggestedPugClass || null, role: row.role };
 }
-
-const IMPORT_ROLES = ['Tank', 'Healer', 'DPS'];
 
 function cycleImportRole(idx) {
   const row = importRows[idx];
   if (!row || row.added) return;
-  const cur = IMPORT_ROLES.indexOf(row.role);
-  row.role = IMPORT_ROLES[(cur + 1) % IMPORT_ROLES.length];
+  const roles = classRoles(row.matched ? row.toonClass : row.suggestedPugClass);
+  const cur = roles.indexOf(row.role);
+  row.role = roles[(cur + 1) % roles.length];
   renderImportRows();
 }
 

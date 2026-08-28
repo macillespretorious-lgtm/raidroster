@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
+require_once __DIR__ . '/../includes/class_roles.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -203,6 +204,14 @@ foreach (($data['signups'] ?? []) as $su) {
         if ($rawClass === $flex['flexClass'] && in_array($chosen['class'], $flex['healerClasses'], true)) {
             $row['role'] = 'Healer';
         }
+    }
+
+    // Clamp the suggested role to what the resolved (or, if unmatched, suggested-pug) class
+    // can actually hold -- e.g. a misconfigured Raid-Helper "Healers" group signup for a
+    // Rogue shouldn't suggest an impossible Healer role.
+    $clampClass = $row['matched'] ? $row['toonClass'] : $row['suggestedPugClass'];
+    if ($clampClass && !valid_role_for_class($clampClass, $row['role'])) {
+        $row['role'] = default_role_for_class($clampClass, $su['spec'] ?? '');
     }
 
     $rows[] = $row;

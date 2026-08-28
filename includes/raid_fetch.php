@@ -3,6 +3,8 @@
 // for the initial page render and by raids/cells-save.php to return the refreshed
 // tree after a bulk clear (clear_section/clear_all), so both stay in the exact same shape.
 
+require_once __DIR__ . '/class_roles.php';
+
 function fetch_table_full($pdo, $tb) {
     $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, bg_color, group_id, header_colspan FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmtC->execute([$tb['id']]);
@@ -36,7 +38,7 @@ function fetch_table_full($pdo, $tb) {
     }
 
     $stmtCell = $pdo->prepare(
-        'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.marked,
+        'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.role, c.marked,
                 c.text_content, c.bg_color, c.text_color, c.bold, c.font, c.icon, c.kind_override,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class,
@@ -50,6 +52,7 @@ function fetch_table_full($pdo, $tb) {
     $cells = [];
     foreach ($stmtCell->fetchAll(PDO::FETCH_ASSOC) as $cell) {
         $isPug = $cell['toon_kind'] === 'pug';
+        $class = $isPug ? $cell['pug_class'] : $cell['toon_class'];
         $cells[$cell['row_id'] . '_' . $cell['column_id']] = [
             'id'          => (int)$cell['id'],
             'toonKind'    => $cell['toon_kind'],
@@ -57,7 +60,9 @@ function fetch_table_full($pdo, $tb) {
             'pugName'     => $cell['pug_name'],
             'pugClass'    => $cell['pug_class'],
             'name'        => $isPug ? $cell['pug_name'] : $cell['toon_name'],
-            'class'       => $isPug ? $cell['pug_class'] : $cell['toon_class'],
+            'class'       => $class,
+            'role'        => $class ? ($cell['role'] ?: default_role_for_class($class)) : null,
+            'roleConfirmed' => $cell['role'] !== null,
             'server'      => $isPug ? null : $cell['toon_server'],
             'marked'      => (bool)$cell['marked'],
             'textContent' => $cell['text_content'],

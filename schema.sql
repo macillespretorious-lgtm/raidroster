@@ -64,9 +64,35 @@ CREATE TABLE raid_pool (
     toon_id VARCHAR(64) NULL,
     pug_name VARCHAR(60) NULL,
     pug_class VARCHAR(30) NULL,
+    role ENUM('Tank', 'Healer', 'DPS') NULL,
     sort_order INT NOT NULL DEFAULT 0,
     UNIQUE KEY uniq_pool_toon (raid_id, toon_kind, toon_id),
     FOREIGN KEY (raid_id) REFERENCES raids(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Live production table, not previously documented here -- reconstructed from
+-- `DESCRIBE raid_cells` against the live DB (2026-08-28). One row per grid slot;
+-- independent of raid_pool (no FK between them), see includes/raid_fetch.php.
+CREATE TABLE raid_cells (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    table_id INT NOT NULL,
+    row_id INT NOT NULL,
+    column_id INT NOT NULL,
+    toon_id VARCHAR(64) NULL,
+    toon_kind ENUM('main', 'alt', 'pug') NOT NULL DEFAULT 'main',
+    pug_name VARCHAR(60) NULL,
+    pug_class VARCHAR(30) NULL,
+    role ENUM('Tank', 'Healer', 'DPS') NULL,
+    note VARCHAR(60) NULL,
+    marked TINYINT(1) NOT NULL DEFAULT 0,
+    text_content VARCHAR(500) NULL,
+    bg_color VARCHAR(9) NULL,
+    text_color VARCHAR(9) NULL,
+    kind_override ENUM('general', 'text', 'spacer', 'icon') NULL,
+    bold TINYINT(1) NOT NULL DEFAULT 0,
+    font VARCHAR(10) NULL,
+    icon VARCHAR(10) NULL,
+    KEY (table_id), KEY (row_id), KEY (column_id), KEY (toon_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Advisory editing lock for templates/raids (see includes/edit_lock.php).
