@@ -207,8 +207,18 @@ function grow_benched_table($pdo, $tableId) {
 function ensure_benched_capacity($pdo, $tableId) {
     $stmt = $pdo->prepare('SELECT kind FROM raid_tables WHERE id = ?');
     $stmt->execute([$tableId]);
-    if ($stmt->fetchColumn() !== 'benched') return;
-    if (benched_table_full($pdo, $tableId)) grow_benched_table($pdo, $tableId);
+    if ($stmt->fetchColumn() !== 'benched') return false;
+    if (benched_table_full($pdo, $tableId)) {
+        grow_benched_table($pdo, $tableId);
+        return true;
+    }
+    return false;
+}
+
+function raid_id_for_table($pdo, $tableId) {
+    $stmt = $pdo->prepare('SELECT s.raid_id FROM raid_tables tb JOIN raid_sections s ON s.id = tb.section_id WHERE tb.id = ?');
+    $stmt->execute([$tableId]);
+    return (int)$stmt->fetchColumn();
 }
 
 if ($action === 'bench_import') {
@@ -299,10 +309,12 @@ if ($action === 'move') {
     $upd->execute([$from['toon_id'], $from['toon_kind'], $from['pug_name'], $from['pug_class'], $from['role'], $toCellId]);
     $pdo->commit();
 
-    ensure_benched_capacity($pdo, $fromCell['table_id']);
-    ensure_benched_capacity($pdo, $toCell['table_id']);
+    $grew = ensure_benched_capacity($pdo, $fromCell['table_id']);
+    $grew = ensure_benched_capacity($pdo, $toCell['table_id']) || $grew;
 
-    echo json_encode(['success' => true, 'from' => fetch_cell_out($pdo, $fromCellId), 'to' => fetch_cell_out($pdo, $toCellId)]);
+    $response = ['success' => true, 'from' => fetch_cell_out($pdo, $fromCellId), 'to' => fetch_cell_out($pdo, $toCellId)];
+    if ($grew) $response['sections'] = fetch_raid_structure($pdo, raid_id_for_table($pdo, $fromCell['table_id']));
+    echo json_encode($response);
     exit;
 }
 
@@ -476,6 +488,8 @@ if (!valid_role_for_class($toonClass, $role)) $role = null;
 $stmt = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ?, role = ? WHERE id = ?');
 $stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_name'], $resolved['pug_class'], $role, $cellId]);
 
-ensure_benched_capacity($pdo, $cell['table_id']);
+$grew = ensure_benched_capacity($pdo, $cell['table_id']);
 
-echo json_encode(['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)]);
+$response = ['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)];
+if ($grew) $response['sections'] = fetch_raid_structure($pdo, raid_id_for_table($pdo, $cell['table_id']));
+echo json_encode($response);

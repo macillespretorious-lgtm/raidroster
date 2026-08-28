@@ -951,7 +951,7 @@ function saveCellPatch(cellId, patch) {
   return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(r => r.json()).then(d => {
       if (!d.success) { alert(d.error || 'Save failed'); return; }
-      updateCellInPlace(d.cell);
+      if (d.sections) { sections = groupSectionsByKind(d.sections); } else { updateCellInPlace(d.cell); }
       render();
     });
 }
@@ -980,8 +980,7 @@ function persistMove(fromCellId, toCellId) {
   return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'move', fromCellId, toCellId }) })
     .then(r => r.json()).then(d => {
       if (!d.success) { alert(d.error || 'Move failed'); return; }
-      updateCellInPlace(d.from);
-      updateCellInPlace(d.to);
+      if (d.sections) { sections = groupSectionsByKind(d.sections); } else { updateCellInPlace(d.from); updateCellInPlace(d.to); }
       render();
     });
 }
