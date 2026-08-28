@@ -1041,12 +1041,18 @@ function clientRuleViolation(td, payload) {
       const cls = (toonClass || '').trim().toLowerCase();
       if (!cls || !allowed.includes(cls)) return rule.label || `Only ${rule.classes} may be assigned here`;
     } else if (rule.ruleType === 'max_count') {
-      if (toonKind === 'pug') continue; // no stable identity to count against
       const max = rule.maxCount || 1;
       const scopedCells = rule.scope === 'table'
         ? Object.values(tb.cells)
         : rule.cellRefs.map(cr => tb.cells[cr.rowId + '_' + cr.columnId]).filter(Boolean);
-      const count = scopedCells.filter(c => c && String(c.toonKind) === String(toonKind) && String(c.toonId) === String(toonId) && !excludeCellIds.includes(c.id)).length;
+      let count;
+      if (toonKind === 'pug') {
+        const name = (payload.pugName || '').trim().toLowerCase();
+        if (!name) continue; // no identity to count against
+        count = scopedCells.filter(c => c && c.toonKind === 'pug' && (c.pugName || '').trim().toLowerCase() === name && !excludeCellIds.includes(c.id)).length;
+      } else {
+        count = scopedCells.filter(c => c && String(c.toonKind) === String(toonKind) && String(c.toonId) === String(toonId) && !excludeCellIds.includes(c.id)).length;
+      }
       if (count >= max) return rule.label || `This toon can only be assigned ${max} time${max === 1 ? '' : 's'} here`;
     }
   }

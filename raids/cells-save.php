@@ -85,7 +85,7 @@ function toon_spec_for($pdo, $guildId, $toonKind, $toonId) {
 // Checks class_restrict/max_count raid_rules scoped to (tableId, rowId, columnId) against the
 // toon about to occupy that cell. $excludeCellIds keeps a toon's own current cell(s) -- the one
 // being reassigned, or both sides of a move -- out of its own max_count tally.
-function rule_violation($pdo, $tableId, $rowId, $columnId, $toonKind, $toonId, $toonClass, array $excludeCellIds) {
+function rule_violation($pdo, $tableId, $rowId, $columnId, $toonKind, $toonId, $toonClass, array $excludeCellIds, $pugName = null) {
     if (!$toonKind || (!$toonId && $toonKind !== 'pug')) return null; // clearing a cell never violates a rule
 
     $stmt = $pdo->prepare(
@@ -106,16 +106,32 @@ function rule_violation($pdo, $tableId, $rowId, $columnId, $toonKind, $toonId, $
                 return $rule['label'] ?: ('Only ' . $rule['classes'] . ' may be assigned here');
             }
         } elseif ($rule['rule_type'] === 'max_count') {
-            if ($toonKind === 'pug') continue; // no stable identity to count against
             $max = $rule['max_count'] !== null ? (int)$rule['max_count'] : 1;
-            if ($rule['scope'] === 'table') {
-                $sql = "SELECT COUNT(*) FROM raid_cells WHERE table_id = ? AND toon_kind = ? AND toon_id = ? AND id NOT IN ($excludePlaceholders)";
-                $params = array_merge([$tableId, $toonKind, $toonId], $excludeCellIds);
+            if ($toonKind === 'pug') {
+                // PUGs have no toon_id, so identity for this check is their (trimmed,
+                // case-insensitive) pug_name instead -- an unnamed PUG has no identity to
+                // count against and can't be checked.
+                $name = trim((string)$pugName);
+                if ($name === '') continue;
+                if ($rule['scope'] === 'table') {
+                    $sql = "SELECT COUNT(*) FROM raid_cells WHERE table_id = ? AND toon_kind = 'pug' AND LOWER(TRIM(pug_name)) = LOWER(?) AND id NOT IN ($excludePlaceholders)";
+                    $params = array_merge([$tableId, $name], $excludeCellIds);
+                } else {
+                    $sql = "SELECT COUNT(*) FROM raid_cells c
+                            JOIN raid_rule_cells rc ON rc.row_id = c.row_id AND rc.column_id = c.column_id
+                            WHERE rc.rule_id = ? AND c.table_id = ? AND c.toon_kind = 'pug' AND LOWER(TRIM(c.pug_name)) = LOWER(?) AND c.id NOT IN ($excludePlaceholders)";
+                    $params = array_merge([$rule['id'], $tableId, $name], $excludeCellIds);
+                }
             } else {
-                $sql = "SELECT COUNT(*) FROM raid_cells c
-                        JOIN raid_rule_cells rc ON rc.row_id = c.row_id AND rc.column_id = c.column_id
-                        WHERE rc.rule_id = ? AND c.table_id = ? AND c.toon_kind = ? AND c.toon_id = ? AND c.id NOT IN ($excludePlaceholders)";
-                $params = array_merge([$rule['id'], $tableId, $toonKind, $toonId], $excludeCellIds);
+                if ($rule['scope'] === 'table') {
+                    $sql = "SELECT COUNT(*) FROM raid_cells WHERE table_id = ? AND toon_kind = ? AND toon_id = ? AND id NOT IN ($excludePlaceholders)";
+                    $params = array_merge([$tableId, $toonKind, $toonId], $excludeCellIds);
+                } else {
+                    $sql = "SELECT COUNT(*) FROM raid_cells c
+                            JOIN raid_rule_cells rc ON rc.row_id = c.row_id AND rc.column_id = c.column_id
+                            WHERE rc.rule_id = ? AND c.table_id = ? AND c.toon_kind = ? AND c.toon_id = ? AND c.id NOT IN ($excludePlaceholders)";
+                    $params = array_merge([$rule['id'], $tableId, $toonKind, $toonId], $excludeCellIds);
+                }
             }
             $stmtCnt = $pdo->prepare($sql);
             $stmtCnt->execute($params);
@@ -178,12 +194,29 @@ function fetch_cell_out($pdo, $cellId) {
     ];
 }
 
-// Benched tables auto-grow: whenever every existing 'general' cell is occupied, one more row
-// (and its cells) is appended so the table never "runs out" of bench slots. "Empty" matches
-// resolve_toon_fields()'s own definition of a cleared cell (main/null/null/null).
-function benched_table_full($pdo, $tableId) {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM raid_cells WHERE table_id = ? AND toon_kind = 'main' AND toon_id IS NULL");
+// Benched tables auto-grow: whenever the LAST general-kind row is fully occupied, one more row
+// (and its cells) is appended so there's always exactly one spare trailing row. Deliberately
+// only looks at the last row, not "every cell in the table" -- a bench filled out of order
+// (some earlier slot left empty) must still grow once its bottom row fills, otherwise it can
+// permanently get stuck one spare short. "Occupied"/general-only matches shrink_benched_table's
+// own definition, so the two stay symmetric. "Empty" matches resolve_toon_fields()'s own
+// definition of a cleared cell (main/null/null/null).
+function last_general_row_order($pdo, $tableId) {
+    $stmt = $pdo->prepare("SELECT MAX(sort_order) FROM raid_rows WHERE table_id = ? AND kind = 'general'");
     $stmt->execute([$tableId]);
+    $v = $stmt->fetchColumn();
+    return $v === null ? null : (int)$v;
+}
+
+function benched_table_full($pdo, $tableId) {
+    $lastOrder = last_general_row_order($pdo, $tableId);
+    if ($lastOrder === null) return false;
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM raid_cells c JOIN raid_rows r ON r.id = c.row_id
+         WHERE c.table_id = ? AND r.kind = 'general' AND r.sort_order = ?
+           AND c.toon_kind = 'main' AND c.toon_id IS NULL"
+    );
+    $stmt->execute([$tableId, $lastOrder]);
     return (int)$stmt->fetchColumn() === 0;
 }
 
@@ -212,7 +245,7 @@ function shrink_benched_table($pdo, $tableId) {
     $stmt = $pdo->prepare(
         "SELECT r.id, SUM(CASE WHEN c.toon_kind = 'main' AND c.toon_id IS NULL THEN 0 ELSE 1 END) AS occupied
          FROM raid_rows r JOIN raid_cells c ON c.row_id = r.id
-         WHERE r.table_id = ? GROUP BY r.id ORDER BY r.sort_order DESC"
+         WHERE r.table_id = ? AND r.kind = 'general' GROUP BY r.id ORDER BY r.sort_order DESC"
     );
     $stmt->execute([$tableId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -322,8 +355,8 @@ if ($action === 'move') {
     $toClass = toon_class_for($pdo, $tenant['id'], $to['toon_kind'], $to['toon_id'], $to['pug_class']);
     $fromClass = toon_class_for($pdo, $tenant['id'], $from['toon_kind'], $from['toon_id'], $from['pug_class']);
 
-    $violation = rule_violation($pdo, $fromCell['table_id'], $fromCell['row_id'], $fromCell['column_id'], $to['toon_kind'], $to['toon_id'], $toClass, [$fromCellId, $toCellId])
-        ?? rule_violation($pdo, $toCell['table_id'], $toCell['row_id'], $toCell['column_id'], $from['toon_kind'], $from['toon_id'], $fromClass, [$fromCellId, $toCellId]);
+    $violation = rule_violation($pdo, $fromCell['table_id'], $fromCell['row_id'], $fromCell['column_id'], $to['toon_kind'], $to['toon_id'], $toClass, [$fromCellId, $toCellId], $to['pug_name'])
+        ?? rule_violation($pdo, $toCell['table_id'], $toCell['row_id'], $toCell['column_id'], $from['toon_kind'], $from['toon_id'], $fromClass, [$fromCellId, $toCellId], $from['pug_name']);
     if ($violation) {
         $pdo->rollBack();
         http_response_code(422);
@@ -504,7 +537,7 @@ if (!$cell) {
 $resolved = resolve_toon_fields($pdo, $tenant['id'], $body['toonKind'] ?? null, $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null);
 
 $toonClass = toon_class_for($pdo, $tenant['id'], $resolved['toon_kind'], $resolved['toon_id'], $resolved['pug_class']);
-$violation = rule_violation($pdo, $cell['table_id'], $cell['row_id'], $cell['column_id'], $resolved['toon_kind'], $resolved['toon_id'], $toonClass, [$cellId]);
+$violation = rule_violation($pdo, $cell['table_id'], $cell['row_id'], $cell['column_id'], $resolved['toon_kind'], $resolved['toon_id'], $toonClass, [$cellId], $resolved['pug_name']);
 if ($violation) {
     http_response_code(422);
     echo json_encode(['error' => $violation]);
