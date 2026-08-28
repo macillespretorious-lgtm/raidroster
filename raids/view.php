@@ -923,6 +923,7 @@ function clearCall(body) {
       if (!d.success) { alert(d.error || 'Clear failed'); return; }
       sections = groupSectionsByKind(d.sections);
       render();
+      if (d.pool) { pool = d.pool; renderPool(); }
     });
 }
 
@@ -2324,7 +2325,7 @@ function wireClearAll() {
   const btn = document.getElementById('clearAllBtn');
   if (!btn) return;
   btn.addEventListener('click', () => {
-    if (!confirm('This clears every assignment in this raid — cannot be undone. Continue?')) return;
+    if (!confirm('This clears every assignment in this raid, including the Available Toons pool — cannot be undone. Continue?')) return;
     clearCall({ action: 'clear_all' });
   });
 }

@@ -352,8 +352,9 @@ if ($action === 'clear_all') {
         }
     }
     clear_cells_for_tables($pdo, $tableIds);
+    $pdo->prepare('DELETE FROM raid_pool WHERE raid_id = ?')->execute([$raidId]);
 
-    echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $raidId)]);
+    echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $raidId), 'pool' => []]);
     exit;
 }
 
