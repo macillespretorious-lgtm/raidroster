@@ -108,18 +108,3 @@ CREATE TABLE edit_locks (
     heartbeat_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_entity (entity_type, entity_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- Attendance snapshot taken at "lock-in" time: everyone assigned to at least
--- one raid_cells row in the raid, captured as a point-in-time roster. Re-locking
--- overwrites the previous snapshot (raids/attendance-save.php deletes and
--- re-inserts). Locking does not freeze raid_cells editability.
-CREATE TABLE raid_attendance (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    raid_id INT NOT NULL,
-    toon_kind ENUM('main', 'alt', 'pug') NOT NULL,
-    toon_id VARCHAR(64) NULL,
-    pug_name VARCHAR(60) NULL,
-    locked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    locked_by_discord_user_id VARCHAR(32) NOT NULL,
-    FOREIGN KEY (raid_id) REFERENCES raids(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
