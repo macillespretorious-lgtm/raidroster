@@ -2547,15 +2547,15 @@ function ruleSummary(rule) {
   return `Max ${max} assignment${max === 1 ? '' : 's'} — ${scopeLabel}`;
 }
 
-function renderRulesList(tb) {
+function renderRulesList(tb, locked) {
   if (!tb.rules.length) return '<p class="empty">No rules on this table yet.</p>';
   return `<ul class="logic-rules-list">` + tb.rules.map(r => `
     <li class="logic-rule-row">
       <span class="logic-rule-summary">${esc(ruleSummary(r))}${r.label ? ` <em>(${esc(r.label)})</em>` : ''}</span>
-      <span class="logic-rule-actions">
+      ${locked ? '' : `<span class="logic-rule-actions">
         <button type="button" data-action="logic-edit-rule" data-rule-id="${r.id}" title="Edit rule">&#9998;</button>
         <button type="button" data-action="logic-delete-rule" data-rule-id="${r.id}" title="Delete rule">&times;</button>
-      </span>
+      </span>`}
     </li>`).join('') + `</ul>`;
 }
 
@@ -2676,13 +2676,28 @@ function logicTableLabel(tb, sec, idx, total) {
 
 function renderLogicTableCard(tb, label) {
   if (!tb.rules) tb.rules = []; // defensive: older cached data shapes may lack this field
+  const locked = tb.kind !== 'standard';
+  if (locked) {
+    const lockNote = tb.kind === 'benched'
+      ? 'Benched tables always carry exactly one fixed rule (a player can only occupy one bench slot) — it cannot be edited or removed.'
+      : 'Swaps tables have no assignable cells, so rules don\'t apply here.';
+    return `<div class="logic-table-card" data-table-id="${tb.id}">
+      <h4 class="logic-table-heading">${esc(label)}</h4>
+      <div class="logic-body">
+        <div class="logic-rules-col">
+          ${renderRulesList(tb, true)}
+          <p class="logic-hint">${lockNote}</p>
+        </div>
+      </div>
+    </div>`;
+  }
   const isDrafting = !!(logicDraft && logicDraft.tableId === tb.id);
   const draftHtml = isDrafting ? renderRuleDraftForm() : `<button type="button" class="btn" data-action="logic-add-rule" data-table-id="${tb.id}">+ Add Rule</button>`;
   return `<div class="logic-table-card" data-table-id="${tb.id}">
     <h4 class="logic-table-heading">${esc(label)}</h4>
     <div class="logic-body">
       <div class="logic-rules-col">
-        ${renderRulesList(tb)}
+        ${renderRulesList(tb, false)}
         ${draftHtml}
       </div>
       <div class="logic-grid-col">${logicRenderTable(tb)}</div>

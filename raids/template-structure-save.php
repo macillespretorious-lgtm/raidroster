@@ -623,16 +623,19 @@ if ($action === 'move_section') {
     respond_structure($pdo, $sec['template_id']);
 }
 
-// Seeds a freshly-inserted table with the fixed Benched layout: one 'general' column and a
-// handful of 'general' rows. Real growth happens at raid-time (cells-save.php) regardless --
-// this starting size is just enough to look like a real table in the editor immediately.
+// Seeds a freshly-inserted table with the fixed Benched layout: one 'general' column, a single
+// starting row (real growth happens at raid-time via cells-save.php's grow-on-full logic, so it
+// never needs more than one spare slot up front), and the one static rule every Benched table
+// carries -- a table-scoped max_count(1), preventing the same player from occupying two bench
+// slots. This rule is permanent: the Logic-mode UI and add_rule/update_rule/delete_rule below
+// all refuse to let it be edited or removed, or a second rule added, on a non-standard table.
 function seed_benched_table($pdo, $tableId) {
     $pdo->prepare('INSERT INTO raid_template_columns (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
         ->execute([$tableId, 'Bench', 'general']);
-    $rowStmt = $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
-    for ($i = 0; $i < 6; $i++) {
-        $rowStmt->execute([$tableId, '', $i, 'general']);
-    }
+    $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, '', 'general']);
+    $pdo->prepare('INSERT INTO raid_template_rules (table_id, rule_type, scope, classes, max_count, label, sort_order) VALUES (?, ?, ?, ?, ?, ?, 0)')
+        ->execute([$tableId, 'max_count', 'table', null, 1, 'A player can only be assigned once']);
 }
 
 // Validates a Swaps table's before/after table picks: both must exist, belong to the same
@@ -832,6 +835,7 @@ if ($action === 'set_cell_kind_override') {
 if ($action === 'add_rule') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['tableId'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
+    if ($tb['kind'] !== 'standard') fail(400, 'Rules on a Benched or Swaps table are fixed and cannot be edited');
 
     [$ruleType, $scope, $classes, $maxCount, $label, $cellRefs] = parse_rule_fields($pdo, $body, $tb['id']);
 
@@ -851,6 +855,8 @@ if ($action === 'add_rule') {
 if ($action === 'update_rule') {
     $rule = fetch_rule_owned($pdo, $tenant['id'], (int)($body['ruleId'] ?? 0));
     if (!$rule) fail(404, 'Rule not found');
+    $tb = fetch_table_owned($pdo, $tenant['id'], (int)$rule['table_id']);
+    if (!$tb || $tb['kind'] !== 'standard') fail(400, 'Rules on a Benched or Swaps table are fixed and cannot be edited');
 
     [$ruleType, $scope, $classes, $maxCount, $label, $cellRefs] = parse_rule_fields($pdo, $body, (int)$rule['table_id']);
 
@@ -869,6 +875,8 @@ if ($action === 'update_rule') {
 if ($action === 'delete_rule') {
     $rule = fetch_rule_owned($pdo, $tenant['id'], (int)($body['ruleId'] ?? 0));
     if (!$rule) fail(404, 'Rule not found');
+    $tb = fetch_table_owned($pdo, $tenant['id'], (int)$rule['table_id']);
+    if (!$tb || $tb['kind'] !== 'standard') fail(400, 'Rules on a Benched or Swaps table are fixed and cannot be edited');
 
     $pdo->prepare('DELETE FROM raid_template_rule_cells WHERE rule_id = ?')->execute([$rule['id']]);
     $pdo->prepare('DELETE FROM raid_template_rules WHERE id = ?')->execute([$rule['id']]);
