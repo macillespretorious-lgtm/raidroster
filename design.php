@@ -27,6 +27,19 @@ $raidTemplates = array_map(function ($t) {
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
+// is_starter templates are explicitly public (any tenant may read/clone them) -- excluding this
+// tenant's own guild_id here is just to hide the "clone your own template" affordance, not a
+// security boundary (clone_starter re-checks is_starter server-side regardless).
+$stmt = $pdo->prepare('SELECT id, name, description FROM raid_templates WHERE is_starter = 1 AND guild_id != ? ORDER BY name');
+$stmt->execute([$tenant['id']]);
+$starterTemplates = array_map(function ($t) {
+    return [
+        'id'          => (int)$t['id'],
+        'name'        => $t['name'],
+        'description' => $t['description'],
+    ];
+}, $stmt->fetchAll(PDO::FETCH_ASSOC));
+
 function h($s) { return htmlspecialchars($s ?? ''); }
 ?>
 <!doctype html>
@@ -98,6 +111,11 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     <h1>Design</h1>
     <p class="sub">Build and edit raid templates &mdash; their roster/assignment grid layout lives here. Scheduling which day runs which template is in Admin.</p>
 
+    <div class="section" id="starterSection">
+      <h2>Start from</h2>
+      <div id="starterList"></div>
+    </div>
+
     <div class="section">
       <h2>Raid templates</h2>
       <div id="templateList"></div>
@@ -133,7 +151,32 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     const SLUG = <?= json_encode($slug) ?>;
     const TPL_SAVE_URL = <?= json_encode('/raids/templates-save.php?slug=' . $slug) ?>;
     let templates = <?= json_encode($raidTemplates) ?>;
+    const starterTemplates = <?= json_encode($starterTemplates) ?>;
     let editingTplId = null;
+
+    function renderStarterList() {
+      const el = document.getElementById('starterList');
+      const section = document.getElementById('starterSection');
+      if (!starterTemplates.length) { section.classList.add('hidden'); return; }
+      el.innerHTML = starterTemplates.map(t => `<div class="card row">
+        <div class="name">${escH(t.name)}${t.description ? ' <span class="tpl-meta">&mdash; ' + escH(t.description) + '</span>' : ''}</div>
+        <div class="tpl-actions">
+          <button class="btn" style="padding:5px 12px;font-size:12px;" onclick="useStarter(${t.id})">Use this</button>
+        </div>
+      </div>`).join('');
+    }
+
+    function useStarter(id) {
+      const t = starterTemplates.find(x => x.id === id);
+      if (!t) return;
+      const name = prompt('Name for your new template:', t.name);
+      if (!name || !name.trim()) return;
+      fetch(TPL_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'clone_starter', sourceTemplateId: id, name: name.trim() }) })
+        .then(r => r.json()).then(d => {
+          if (!d.success) { alert(d.error || 'Could not clone template'); return; }
+          window.location.href = '/raids/template-edit.php?slug=' + encodeURIComponent(SLUG) + '&id=' + d.template.id;
+        });
+    }
 
     function escH(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -212,6 +255,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     }
 
     renderTemplateList();
+    renderStarterList();
   </script>
 </body>
 </html>

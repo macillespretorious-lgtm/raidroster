@@ -30,6 +30,7 @@ if (!role_at_least($role, 'admin')) {
 $body   = json_decode(file_get_contents('php://input'), true);
 $action = is_array($body) ? ($body['action'] ?? '') : '';
 $pdo    = db_connect();
+require_once __DIR__ . '/../includes/template_clone.php';
 
 function template_to_json($t) {
     return [
@@ -93,6 +94,37 @@ if ($action === 'delete') {
     $stmt = $pdo->prepare('DELETE FROM raid_templates WHERE id = ? AND guild_id = ?');
     $stmt->execute([$id, $tenant['id']]);
     echo json_encode(['success' => true]);
+    exit;
+}
+
+if ($action === 'clone_starter') {
+    $sourceId = isset($body['sourceTemplateId']) ? (int)$body['sourceTemplateId'] : 0;
+
+    // is_starter=1 is the tenant-isolation guard here: it's what makes reading a template that
+    // doesn't belong to this guild safe -- only explicitly public templates are clonable, and a
+    // forged/guessed id belonging to some other private template is rejected below.
+    $stmt = $pdo->prepare('SELECT id, name FROM raid_templates WHERE id = ? AND is_starter = 1');
+    $stmt->execute([$sourceId]);
+    $starter = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$starter) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Starter template not found']);
+        exit;
+    }
+
+    $name = substr(trim($body['name'] ?? ''), 0, 100);
+    if (!$name) $name = $starter['name'];
+
+    $newId = clone_template_to_guild($pdo, $sourceId, $tenant['id'], $name);
+    if (!$newId) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Clone failed']);
+        exit;
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM raid_templates WHERE id = ?');
+    $stmt->execute([$newId]);
+    echo json_encode(['success' => true, 'template' => template_to_json($stmt->fetch(PDO::FETCH_ASSOC))]);
     exit;
 }
 
