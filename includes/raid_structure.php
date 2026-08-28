@@ -167,3 +167,116 @@ function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
         }
     }
 }
+
+// Force-checked after every raid creation (template-based or blank) so a raid can never end up
+// without somewhere to build a starting roster. Idempotent and additive only: it looks for a
+// STANDARD table inside a roster-kind section (a roster-kind section can hold more than one
+// standard table -- the reference Naxx template's "Swaps and Benched" section is also
+// kind='roster' -- so the section's mere existence isn't enough to skip) and for a benched-kind
+// table anywhere in the raid, and builds whichever is missing. Shape mirrors the hand-built
+// reference Naxx tables (raid_template_tables id 1 & 55) exactly -- same '#1c234b' header tint,
+// same one-player-once rule -- so a force-created pair reads identically to a template-authored one.
+function ensure_starting_roster($pdo, $raidId, $size) {
+    $numCols = $size === '20' ? 4 : 8;
+
+    $stmt = $pdo->prepare(
+        "SELECT rt.id FROM raid_tables rt JOIN raid_sections rs ON rs.id = rt.section_id
+         WHERE rs.raid_id = ? AND rs.kind = 'roster' AND rt.kind = 'standard' LIMIT 1"
+    );
+    $stmt->execute([$raidId]);
+    $hasRosterTable = (bool)$stmt->fetch();
+
+    $stmt = $pdo->prepare(
+        "SELECT rt.id FROM raid_tables rt JOIN raid_sections rs ON rs.id = rt.section_id
+         WHERE rs.raid_id = ? AND rt.kind = 'benched' LIMIT 1"
+    );
+    $stmt->execute([$raidId]);
+    $hasBenchedTable = (bool)$stmt->fetch();
+
+    if ($hasRosterTable && $hasBenchedTable) return;
+
+    $stmt = $pdo->prepare("SELECT id FROM raid_sections WHERE raid_id = ? AND kind = 'roster' ORDER BY sort_order, id LIMIT 1");
+    $stmt->execute([$raidId]);
+    $sectionId = $stmt->fetchColumn();
+
+    if (!$sectionId) {
+        $order = (int)$pdo->query('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM raid_sections WHERE raid_id = ' . (int)$raidId)->fetchColumn();
+        $pdo->prepare('INSERT INTO raid_sections (raid_id, kind, title, sort_order) VALUES (?, ?, ?, ?)')
+            ->execute([$raidId, 'roster', 'Starting Roster', $order]);
+        $sectionId = (int)$pdo->lastInsertId();
+    } else {
+        $sectionId = (int)$sectionId;
+    }
+
+    if (!$hasRosterTable) build_roster_table($pdo, $sectionId, $numCols);
+    if (!$hasBenchedTable) build_benched_table($pdo, $sectionId);
+}
+
+// Builds a live 'standard' roster table sized to $numCols groups (4 for 20-man, 8 for 40-man):
+// a 'text' header row of "Grp 1".."Grp N" cells tinted '#1c234b', 5 empty 'general' data rows,
+// and the table-scoped max_count(1) rule every roster table in this app carries.
+function build_roster_table($pdo, $sectionId, $numCols) {
+    $order = (int)$pdo->query('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM raid_tables WHERE section_id = ' . (int)$sectionId)->fetchColumn();
+    $pdo->prepare('INSERT INTO raid_tables (section_id, title, sort_order, default_column_width, kind) VALUES (?, ?, ?, 120, ?)')
+        ->execute([$sectionId, '', $order, 'standard']);
+    $tableId = (int)$pdo->lastInsertId();
+
+    $colStmt = $pdo->prepare('INSERT INTO raid_columns (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
+    $colIds = [];
+    for ($i = 0; $i < $numCols; $i++) {
+        $colStmt->execute([$tableId, 'Group ' . ($i + 1), $i, 'general']);
+        $colIds[] = (int)$pdo->lastInsertId();
+    }
+
+    $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, '', 'text']);
+    $headerRowId = (int)$pdo->lastInsertId();
+
+    $headerCellStmt = $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id, text_content, bold, bg_color) VALUES (?, ?, ?, ?, 0, ?)');
+    foreach ($colIds as $i => $colId) {
+        $headerCellStmt->execute([$tableId, $headerRowId, $colId, 'Grp ' . ($i + 1), '#1c234b']);
+    }
+
+    $rowStmt = $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
+    $emptyCellStmt = $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id) VALUES (?, ?, ?)');
+    for ($r = 1; $r <= 5; $r++) {
+        $rowStmt->execute([$tableId, '', $r, 'general']);
+        $rowId = (int)$pdo->lastInsertId();
+        foreach ($colIds as $colId) {
+            $emptyCellStmt->execute([$tableId, $rowId, $colId]);
+        }
+    }
+
+    $pdo->prepare('INSERT INTO raid_rules (table_id, rule_type, scope, max_count, label, sort_order) VALUES (?, ?, ?, ?, ?, 0)')
+        ->execute([$tableId, 'max_count', 'table', 1, 'A player can only be assigned once']);
+}
+
+// Live-raid counterpart of template-structure-save.php's seed_benched_table(): one 'general'
+// Bench column, a 'BENCHED' 'text' header row tinted to match the roster table, one starting
+// 'general' data row (cells-save.php's grow-on-full logic adds more as it fills), and the same
+// table-scoped max_count(1) rule.
+function build_benched_table($pdo, $sectionId) {
+    $order = (int)$pdo->query('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM raid_tables WHERE section_id = ' . (int)$sectionId)->fetchColumn();
+    $pdo->prepare('INSERT INTO raid_tables (section_id, title, sort_order, kind) VALUES (?, ?, ?, ?)')
+        ->execute([$sectionId, '', $order, 'benched']);
+    $tableId = (int)$pdo->lastInsertId();
+
+    $pdo->prepare('INSERT INTO raid_columns (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, 'Bench', 'general']);
+    $colId = (int)$pdo->lastInsertId();
+
+    $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, '', 'text']);
+    $headerRowId = (int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id, text_content, bold, bg_color) VALUES (?, ?, ?, ?, 0, ?)')
+        ->execute([$tableId, $headerRowId, $colId, 'BENCHED', '#1c234b']);
+
+    $pdo->prepare('INSERT INTO raid_rows (table_id, label, sort_order, kind) VALUES (?, ?, 1, ?)')
+        ->execute([$tableId, '', 'general']);
+    $dataRowId = (int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id) VALUES (?, ?, ?)')
+        ->execute([$tableId, $dataRowId, $colId]);
+
+    $pdo->prepare('INSERT INTO raid_rules (table_id, rule_type, scope, max_count, label, sort_order) VALUES (?, ?, ?, ?, ?, 0)')
+        ->execute([$tableId, 'max_count', 'table', 1, 'A player can only be assigned once']);
+}

@@ -15,7 +15,7 @@ $role = require_role($tenant, 'admin');
 $user = auth_user();
 $pdo  = db_connect();
 
-$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes, size FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $raidTemplates = array_map(function ($t) {
     return [
@@ -24,19 +24,21 @@ $raidTemplates = array_map(function ($t) {
         'description'            => $t['description'],
         'defaultStartTime'       => $t['default_start_time'],
         'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
+        'size'                   => $t['size'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
 // is_starter templates are explicitly public (any tenant may read/clone them) -- excluding this
 // tenant's own guild_id here is just to hide the "clone your own template" affordance, not a
 // security boundary (clone_starter re-checks is_starter server-side regardless).
-$stmt = $pdo->prepare('SELECT id, name, description FROM raid_templates WHERE is_starter = 1 AND guild_id != ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, size FROM raid_templates WHERE is_starter = 1 AND guild_id != ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $starterTemplates = array_map(function ($t) {
     return [
         'id'          => (int)$t['id'],
         'name'        => $t['name'],
         'description' => $t['description'],
+        'size'        => $t['size'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
@@ -126,17 +128,26 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label for="tplStart">Default start time</label>
-            <input type="time" id="tplStart">
+            <label for="tplSize">Raid size</label>
+            <select id="tplSize">
+              <option value="40">40-man</option>
+              <option value="20">20-man</option>
+            </select>
           </div>
           <div class="form-group">
             <label for="tplDuration">Default duration (min)</label>
             <input type="number" id="tplDuration" min="0" step="15" placeholder="e.g. 180">
           </div>
         </div>
-        <div class="form-group">
-          <label for="tplDesc">Description</label>
-          <input type="text" id="tplDesc" placeholder="Optional notes">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tplStart">Default start time</label>
+            <input type="time" id="tplStart">
+          </div>
+          <div class="form-group">
+            <label for="tplDesc">Description</label>
+            <input type="text" id="tplDesc" placeholder="Optional notes">
+          </div>
         </div>
         <div class="form-buttons" style="display:flex;gap:8px;margin-top:10px;">
           <button class="btn" id="tplSaveBtn">Save template</button>
@@ -159,7 +170,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       const section = document.getElementById('starterSection');
       if (!starterTemplates.length) { section.classList.add('hidden'); return; }
       el.innerHTML = starterTemplates.map(t => `<div class="card row">
-        <div class="name">${escH(t.name)}${t.description ? ' <span class="tpl-meta">&mdash; ' + escH(t.description) + '</span>' : ''}</div>
+        <div class="name">${escH(t.name)} <span class="tpl-meta">(${t.size}-man)</span>${t.description ? ' <span class="tpl-meta">&mdash; ' + escH(t.description) + '</span>' : ''}</div>
         <div class="tpl-actions">
           <button class="btn" style="padding:5px 12px;font-size:12px;" onclick="useStarter(${t.id})">Use this</button>
         </div>
@@ -184,7 +195,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       const el = document.getElementById('templateList');
       if (!templates.length) { el.innerHTML = '<p class="empty">No templates yet — add one below.</p>'; return; }
       el.innerHTML = templates.map(t => {
-        const meta = [];
+        const meta = [t.size + '-man'];
         if (t.defaultStartTime) meta.push(t.defaultStartTime.slice(0,5));
         if (t.defaultDurationMinutes) meta.push(t.defaultDurationMinutes + ' min');
         return `<div class="card row tpl-item">
@@ -203,6 +214,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       if (!t) return;
       editingTplId = id;
       document.getElementById('tplName').value = t.name;
+      document.getElementById('tplSize').value = t.size;
       document.getElementById('tplStart').value = (t.defaultStartTime || '').slice(0, 5);
       document.getElementById('tplDuration').value = t.defaultDurationMinutes || '';
       document.getElementById('tplDesc').value = t.description || '';
@@ -215,6 +227,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     function resetTemplateForm() {
       editingTplId = null;
       document.getElementById('tplName').value = '';
+      document.getElementById('tplSize').value = '40';
       document.getElementById('tplStart').value = '';
       document.getElementById('tplDuration').value = '';
       document.getElementById('tplDesc').value = '';
@@ -230,6 +243,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         action: 'save',
         id: editingTplId,
         name,
+        size: document.getElementById('tplSize').value,
         defaultStartTime: document.getElementById('tplStart').value || null,
         defaultDurationMinutes: document.getElementById('tplDuration').value ? parseInt(document.getElementById('tplDuration').value, 10) : null,
         description: document.getElementById('tplDesc').value.trim() || null,

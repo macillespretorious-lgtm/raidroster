@@ -39,6 +39,7 @@ function template_to_json($t) {
         'description'            => $t['description'],
         'defaultStartTime'       => $t['default_start_time'],
         'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
+        'size'                   => $t['size'],
     ];
 }
 
@@ -48,6 +49,7 @@ if ($action === 'save') {
     $desc   = isset($body['description']) ? substr(trim($body['description']), 0, 65000) : null;
     $start  = $body['defaultStartTime'] ?? null;
     $dur    = isset($body['defaultDurationMinutes']) && $body['defaultDurationMinutes'] !== null ? (int)$body['defaultDurationMinutes'] : null;
+    $size   = ($body['size'] ?? '40') === '20' ? '20' : '40';
 
     if ($desc === '') $desc = null;
     if ($start !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) $start = null;
@@ -66,11 +68,11 @@ if ($action === 'save') {
             echo json_encode(['error' => 'Template not found']);
             exit;
         }
-        $stmt = $pdo->prepare('UPDATE raid_templates SET name = ?, description = ?, default_start_time = ?, default_duration_minutes = ? WHERE id = ? AND guild_id = ?');
-        $stmt->execute([$name, $desc, $start, $dur, $id, $tenant['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_templates SET name = ?, description = ?, default_start_time = ?, default_duration_minutes = ?, size = ? WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$name, $desc, $start, $dur, $size, $id, $tenant['id']]);
     } else {
-        $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, default_start_time, default_duration_minutes) VALUES (?, ?, ?, ?, ?)');
-        $stmt->execute([$tenant['id'], $name, $desc, $start, $dur]);
+        $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, default_start_time, default_duration_minutes, size) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$tenant['id'], $name, $desc, $start, $dur, $size]);
         $id = (int)$pdo->lastInsertId();
     }
 

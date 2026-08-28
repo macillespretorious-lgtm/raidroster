@@ -28,7 +28,7 @@ $endStr   = $rangeEnd->format('Y-m-d');
 
 // Lazy auto-population: for each date in range whose day-of-week has an active
 // recurring slot and has no existing raid row at all, insert one from the template.
-$stmt = $pdo->prepare('SELECT rs.day_of_week, rs.template_id, rs.start_time_override, t.name, t.description, t.default_start_time, t.default_duration_minutes
+$stmt = $pdo->prepare('SELECT rs.day_of_week, rs.template_id, rs.start_time_override, t.name, t.description, t.default_start_time, t.default_duration_minutes, t.size
                         FROM raid_recurring_slots rs
                         JOIN raid_templates t ON t.id = rs.template_id
                         WHERE rs.guild_id = ? AND rs.active = 1');
@@ -44,8 +44,8 @@ if ($slotsByDow) {
     $existingDates = array_flip($stmt->fetchAll(PDO::FETCH_COLUMN));
 
     $insAuto = $pdo->prepare(
-        'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via)
-         VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'auto\')'
+        'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size)
+         VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'auto\', ?)'
     );
 
     $cursor = clone $rangeStart;
@@ -62,8 +62,11 @@ if ($slotsByDow) {
                 $s['template_id'],
                 $s['name'],
                 $s['description'],
+                $s['size'],
             ]);
-            copy_template_structure_to_raid($pdo, $s['template_id'], (int)$pdo->lastInsertId());
+            $newRaidId = (int)$pdo->lastInsertId();
+            copy_template_structure_to_raid($pdo, $s['template_id'], $newRaidId);
+            ensure_starting_roster($pdo, $newRaidId, $s['size']);
         }
         $cursor->modify('+1 day');
     }
@@ -83,10 +86,11 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'description'     => $r['description'],
         'status'          => $r['status'],
         'createdVia'      => $r['created_via'],
+        'size'            => $r['size'],
     ];
 }
 
-$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes, size FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $templates = array_map(function ($t) {
     return [
@@ -95,6 +99,7 @@ $templates = array_map(function ($t) {
         'description'           => $t['description'],
         'defaultStartTime'      => $t['default_start_time'],
         'defaultDurationMinutes'=> $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
+        'size'                  => $t['size'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
@@ -231,6 +236,14 @@ function h($s) { return htmlspecialchars($s ?? ''); }
           <button type="button" class="mode-tab" data-mode="new">New raid</button>
         </div>
 
+        <div class="form-group" id="raidSizeGroup">
+          <label for="raidSize">Raid size</label>
+          <select id="raidSize">
+            <option value="40">40-man</option>
+            <option value="20">20-man</option>
+          </select>
+        </div>
+
         <div class="form-group" id="templatePickGroup">
           <label for="templateSelect">Template</label>
           <select id="templateSelect"></select>
@@ -314,21 +327,30 @@ renderCalendar();
 
 let modalDate = null, modalRaidId = null;
 
+function templatesForSize(size) { return templates.filter(t => t.size === size); }
+
 function populateTemplateSelect() {
   const sel = document.getElementById('templateSelect');
-  sel.innerHTML = templates.length
-    ? templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')
-    : '<option value="">No templates yet — add one in Admin</option>';
+  const size = document.getElementById('raidSize').value;
+  const matching = templatesForSize(size);
+  sel.innerHTML = matching.length
+    ? matching.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')
+    : `<option value="">No ${size}-man templates yet — add one in Design</option>`;
 }
 populateTemplateSelect();
 
 function setMode(mode) {
   document.querySelectorAll('.mode-tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.getElementById('templatePickGroup').classList.toggle('hidden', mode !== 'template');
-  if (mode === 'template' && templates.length) applyTemplate(document.getElementById('templateSelect').value || templates[0].id);
+  if (mode === 'template') {
+    populateTemplateSelect();
+    const sel = document.getElementById('templateSelect');
+    if (sel.value) applyTemplate(sel.value);
+  }
 }
 document.querySelectorAll('.mode-tab').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 document.getElementById('templateSelect').addEventListener('change', function () { applyTemplate(this.value); });
+document.getElementById('raidSize').addEventListener('change', function () { setMode(currentMode()); });
 
 function applyTemplate(id) {
   const t = templates.find(x => String(x.id) === String(id));
@@ -360,6 +382,8 @@ function openNewRaid(date) {
   document.getElementById('modalDeleteRaidBtn').classList.add('hidden');
   document.getElementById('modalSaveBtn').classList.remove('hidden');
   document.getElementById('modalViewLink').classList.add('hidden');
+  document.getElementById('raidSizeGroup').classList.remove('hidden');
+  document.getElementById('raidSize').value = '40';
   populateTemplateSelect();
   setMode('template');
   if (!templates.length) {
@@ -381,6 +405,7 @@ function openRaid(id) {
   document.getElementById('modalDate').textContent = raid.date;
   document.getElementById('modeTabs').classList.add('hidden');
   document.getElementById('templatePickGroup').classList.add('hidden');
+  document.getElementById('raidSizeGroup').classList.add('hidden');
   document.getElementById('modalReadonlyNote').classList.toggle('hidden', CAN_MANAGE);
   document.getElementById('modalForm').classList.toggle('hidden', !CAN_MANAGE);
   document.getElementById('raidName').value = raid.name;
@@ -431,6 +456,7 @@ document.getElementById('modalSaveBtn').addEventListener('click', function () {
     durationMinutes: document.getElementById('raidDuration').value ? parseInt(document.getElementById('raidDuration').value, 10) : null,
     description: document.getElementById('raidDesc').value.trim() || null,
     templateId: (!modalRaidId && currentMode() === 'template' && document.getElementById('templateSelect').value) ? parseInt(document.getElementById('templateSelect').value, 10) : null,
+    size: document.getElementById('raidSize').value,
   };
   persist(payload).then(d => { upsertLocal(d.raid); renderCalendar(); closeModal(); }).catch(e => setModalMsg(e.message));
 });

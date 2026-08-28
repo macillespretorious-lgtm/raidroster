@@ -43,6 +43,7 @@ function raid_to_json($r) {
         'description'     => $r['description'],
         'status'          => $r['status'],
         'createdVia'      => $r['created_via'],
+        'size'            => $r['size'],
     ];
 }
 
@@ -60,6 +61,7 @@ if ($action === 'save') {
     $dur    = isset($body['durationMinutes']) && $body['durationMinutes'] !== null ? (int)$body['durationMinutes'] : null;
     $desc   = isset($body['description']) ? substr(trim($body['description']), 0, 65000) : null;
     $tmplId = isset($body['templateId']) && $body['templateId'] ? (int)$body['templateId'] : null;
+    $size   = ($body['size'] ?? '40') === '20' ? '20' : '40';
 
     if ($start !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) $start = null;
     if ($desc === '') $desc = null;
@@ -71,9 +73,12 @@ if ($action === 'save') {
     }
 
     if ($tmplId !== null) {
-        $stmt = $pdo->prepare('SELECT id FROM raid_templates WHERE id = ? AND guild_id = ?');
+        // The template's own stored size is authoritative once a template is picked -- never
+        // trust the client's separately-sent size for the numCols math below.
+        $stmt = $pdo->prepare('SELECT id, size FROM raid_templates WHERE id = ? AND guild_id = ?');
         $stmt->execute([$tmplId, $tenant['id']]);
-        if (!$stmt->fetch()) $tmplId = null;
+        $tpl = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$tpl) { $tmplId = null; } else { $size = $tpl['size']; }
     }
 
     if ($id) {
@@ -87,14 +92,17 @@ if ($action === 'save') {
         $stmt->execute([$name, $start, $dur, $desc, $id, $tenant['id']]);
     } else {
         $stmt = $pdo->prepare(
-            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via)
-             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\')'
+            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size)
+             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\', ?)'
         );
-        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc]);
+        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc, $size]);
         $id = (int)$pdo->lastInsertId();
         if ($tmplId) {
             copy_template_structure_to_raid($pdo, $tmplId, $id);
         }
+        // Runs for template-based AND blank raids alike -- force-fills a roster/benched pair
+        // if the template didn't already provide one (or provides none at all for a blank raid).
+        ensure_starting_roster($pdo, $id, $size);
     }
 
     echo json_encode(['success' => true, 'raid' => raid_to_json(fetch_raid($pdo, $tenant['id'], $id))]);
