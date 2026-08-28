@@ -100,6 +100,9 @@ function fetch_table_full($pdo, $tb) {
         'headerColor' => $tb['header_color'],
         'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+        'kind' => $tb['kind'],
+        'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
+        'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
         'cellMerges' => $cellMerges, 'cells' => $cells, 'rules' => $rules,
     ];
@@ -263,6 +266,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .kind-picker[hidden] { display: none; }
     .kind-picker button { background: none; border: none; color: #e8ecff; text-align: left; padding: 6px 10px; border-radius: 5px; font: inherit; font-size: 12px; cursor: pointer; }
     .kind-picker button:hover { background: rgba(255,255,255,0.1); }
+
+    .tbl-kind-note { padding: 8px 12px; font-size: 12px; color: #a8b3d9; }
+    .btn-link { background: none; border: none; color: #8ea1e8; cursor: pointer; text-decoration: underline; font: inherit; padding: 0; margin-left: 4px; }
+    .btn-link:hover { color: #b0c0f5; }
 
     td.text-td { text-align: left; }
     .cell-bold-btn { width: 20px; height: 18px; padding: 0; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); background: #0a0f1e; color: #a8b4d0; font-weight: 800; font-size: 11px; line-height: 1; cursor: pointer; }
@@ -589,6 +596,22 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         <button class="btn btn-cancel-tpl" type="button" id="angryExportJsonBtn">Copy JSON export</button>
         <button class="btn btn-cancel-tpl" type="button" id="angryDeletePageBtn">Delete page</button>
         <button class="btn" type="button" id="angryAddPageBtn">+ Add page</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="swapsModalBackdrop">
+    <div class="modal cell-edit-modal">
+      <div class="preview-head">
+        <h2 id="swapsModalTitle">New Swaps table</h2>
+        <button class="icon-btn" id="swapsModalClose" type="button" title="Close">&times;</button>
+      </div>
+      <p class="preview-note">Pick the two Standard tables to diff — Swaps shows every player assigned a different toon between them.</p>
+      <label style="display:block; margin-bottom:8px;">Before<br><select id="swapsBeforeSelect" style="width:100%;"></select></label>
+      <label style="display:block; margin-bottom:8px;">After<br><select id="swapsAfterSelect" style="width:100%;"></select></label>
+      <div class="modal-actions">
+        <button class="btn btn-cancel-tpl" type="button" id="swapsModalCancel">Cancel</button>
+        <button class="btn" type="button" id="swapsModalCreate">Save</button>
       </div>
     </div>
   </div>
@@ -1314,7 +1337,8 @@ function render() {
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
-      if (act === 'add-table-to-section') call({ action: 'add_table', sectionId: id });
+      if (act === 'add-table-kind') { openKindPicker = null; call({ action: 'add_table', sectionId: id, kind: node.dataset.kind }); }
+      if (act === 'open-swaps-modal') { openKindPicker = null; render(); openSwapsModal(id, null); }
       if (act === 'add-roster-table') {
         const size = prompt('Raid size for this roster table — 20 or 40:', '40');
         if (size === null) return;
@@ -1336,6 +1360,7 @@ function render() {
         if (title && title.trim()) call({ action: 'add_table', groupId: id, title: title.trim() });
       }
       if (act === 'rename-table') call({ action: 'update_table', id, title: node.value.trim() });
+      if (act === 'edit-swaps-links') openSwapsEditModal(id);
       if (act === 'delete-table') { if (confirm('Delete this table?')) call({ action: 'delete_table', id }); }
       if (act === 'delete-col') call({ action: 'delete_column', id });
       if (act === 'rename-row') call({ action: 'update_row', id, label: node.value.trim() });
@@ -1763,11 +1788,25 @@ function renderColumnBlock(chunkCols, tb, groupsEnabled, sectionBg) {
 // parentKind/parentId identify where tb hangs off (a section, top-level, or a group, nested).
 // groupsEnabled is false for roster-kind sections, which don't use column-groups/nested
 // boss-tables at all — only tank/healer/misc assignment sections do.
+function swapTableLabel(tableId) {
+  if (!tableId) return '(none)';
+  const tb = findTable(tableId);
+  return tb ? (tb.title || `Table #${tb.id}`) : `#${tableId}`;
+}
+
 function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
-  const groupsWithTables = groupsEnabled ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
+  const isStandard = tb.kind === 'standard';
+  const groupsWithTables = (groupsEnabled && isStandard) ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
 
   const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, groupsEnabled, sectionBg)).join('');
+
+  const kindNote = tb.kind === 'benched'
+    ? `<div class="tbl-kind-note">Benched table &mdash; layout is fixed; it grows automatically as it fills up.</div>`
+    : tb.kind === 'swaps'
+      ? `<div class="tbl-kind-note">Swaps table &mdash; Before: <strong>${esc(swapTableLabel(tb.swapBeforeTableId))}</strong>, After: <strong>${esc(swapTableLabel(tb.swapAfterTableId))}</strong>
+          <button type="button" class="btn-link" data-action="edit-swaps-links" data-id="${tb.id}">change&hellip;</button></div>`
+      : '';
 
   const headerBg = tb.headerColor || '';
   const headerStyle = headerBg ? `background:${headerBg};` : '';
@@ -1788,9 +1827,10 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
       <div class="tbl-sizing">Col w<input type="number" class="width-input" draggable="false" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
-    ${groupsEnabled ? groupStrip(tb) : ''}
+    ${groupsEnabled && isStandard ? groupStrip(tb) : ''}
     ${blocks}
-    ${!isContainerOnly ? `<div class="tbl-actions-row">
+    ${kindNote}
+    ${isStandard && !isContainerOnly ? `<div class="tbl-actions-row">
       <div class="kind-picker-wrap">
         <button class="add-row-btn" data-action="open-kind-picker" data-kind="row" data-id="${tb.id}">+ Row</button>
         <div class="kind-picker" ${openKindPicker === `row-${tb.id}` ? '' : 'hidden'}>
@@ -1846,7 +1886,14 @@ function renderSection(sec) {
     </div>
     <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section"${bodyStyle}>
       ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables yet.</p>'}
-      <button class="btn" data-action="add-table-to-section" data-id="${sec.id}">+ Table</button>
+      <div class="kind-picker-wrap">
+        <button class="btn" data-action="open-kind-picker" data-kind="table" data-id="${sec.id}">+ Table</button>
+        <div class="kind-picker" ${openKindPicker === `table-${sec.id}` ? '' : 'hidden'}>
+          <button data-action="add-table-kind" data-kind="standard" data-id="${sec.id}">Standard</button>
+          <button data-action="add-table-kind" data-kind="benched" data-id="${sec.id}" title="Auto-fills from Raid-Helper Bench signups and grows automatically">Benched</button>
+          <button data-action="open-swaps-modal" data-id="${sec.id}" title="Auto-diffs two Standard tables">Swaps&hellip;</button>
+        </div>
+      </div>
       ${sec.kind === 'roster' ? `<button class="btn" data-action="add-roster-table" data-id="${sec.id}" title="Auto-build a roster table sized to your raid (5 rows &times; 4 or 8 groups)">+ Roster table</button>` : ''}
     </div>
   </div>`;
@@ -2754,6 +2801,73 @@ function closePreview() {
 document.getElementById('previewClose').addEventListener('click', closePreview);
 document.getElementById('previewBackdrop').addEventListener('click', e => {
   if (e.target.id === 'previewBackdrop') closePreview();
+});
+
+// Swaps-table creation/edit modal: needs a picker over every Standard table in the
+// template (any section, including nested boss-tables inside column groups), since a
+// Swaps table can diff two rosters that live anywhere.
+function collectStandardTables() {
+  const out = [];
+  function walk(tables, path) {
+    tables.forEach(tb => {
+      if (tb.kind === 'standard') out.push({ id: tb.id, label: `${path} — ${tb.title || 'Table #' + tb.id}` });
+      (tb.columnGroups || []).forEach(g => walk(g.tables, path));
+    });
+  }
+  sections.forEach(sec => walk(sec.tables, sec.title || (KIND_META[sec.kind] || {}).label || sec.kind));
+  return out;
+}
+
+let swapsModalSectionId = null;
+let swapsModalGroupId = null;
+let swapsModalTableId = null;
+
+function openSwapsModal(sectionId, groupId) {
+  const opts = collectStandardTables();
+  if (opts.length < 2) { alert('Need at least two Standard tables in this template before creating a Swaps table.'); return; }
+  swapsModalSectionId = sectionId;
+  swapsModalGroupId = groupId || null;
+  swapsModalTableId = null;
+  document.getElementById('swapsModalTitle').textContent = 'New Swaps table';
+  const optionsHtml = opts.map(o => `<option value="${o.id}">${esc(o.label)}</option>`).join('');
+  document.getElementById('swapsBeforeSelect').innerHTML = optionsHtml;
+  document.getElementById('swapsAfterSelect').innerHTML = optionsHtml;
+  document.getElementById('swapsAfterSelect').selectedIndex = Math.min(1, opts.length - 1);
+  document.getElementById('swapsModalBackdrop').classList.add('open');
+}
+function openSwapsEditModal(tableId) {
+  const tb = findTable(tableId);
+  const opts = collectStandardTables();
+  swapsModalSectionId = null;
+  swapsModalGroupId = null;
+  swapsModalTableId = tableId;
+  document.getElementById('swapsModalTitle').textContent = 'Edit Swaps links';
+  const optionsHtml = opts.map(o => `<option value="${o.id}">${esc(o.label)}</option>`).join('');
+  document.getElementById('swapsBeforeSelect').innerHTML = optionsHtml;
+  document.getElementById('swapsAfterSelect').innerHTML = optionsHtml;
+  document.getElementById('swapsBeforeSelect').value = tb.swapBeforeTableId;
+  document.getElementById('swapsAfterSelect').value = tb.swapAfterTableId;
+  document.getElementById('swapsModalBackdrop').classList.add('open');
+}
+function closeSwapsModal() {
+  document.getElementById('swapsModalBackdrop').classList.remove('open');
+  swapsModalSectionId = null;
+  swapsModalGroupId = null;
+  swapsModalTableId = null;
+}
+document.getElementById('swapsModalClose').addEventListener('click', closeSwapsModal);
+document.getElementById('swapsModalCancel').addEventListener('click', closeSwapsModal);
+document.getElementById('swapsModalBackdrop').addEventListener('click', e => {
+  if (e.target.id === 'swapsModalBackdrop') closeSwapsModal();
+});
+document.getElementById('swapsModalCreate').addEventListener('click', () => {
+  const beforeTableId = parseInt(document.getElementById('swapsBeforeSelect').value, 10);
+  const afterTableId = parseInt(document.getElementById('swapsAfterSelect').value, 10);
+  if (beforeTableId === afterTableId) { alert('Before and After must be different tables.'); return; }
+  const payload = swapsModalTableId
+    ? { action: 'update_table', id: swapsModalTableId, title: findTable(swapsModalTableId).title, beforeTableId, afterTableId }
+    : { action: 'add_table', kind: 'swaps', beforeTableId, afterTableId, ...(swapsModalGroupId ? { groupId: swapsModalGroupId } : { sectionId: swapsModalSectionId }) };
+  call(payload).then(d => { if (d) closeSwapsModal(); });
 });
 
 // Text-cell WYSIWYG popup: opened by clicking a Text-kind cell (see bodyCellsForRow's

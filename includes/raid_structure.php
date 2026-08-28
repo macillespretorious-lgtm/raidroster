@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/raid_fetch.php';
+
 // Snapshots a template's section/table/column/row structure into raid-scoped rows at
 // creation time, same rationale as raids.name being copied from the template: later
 // template edits shouldn't reshape a raid that already happened. Cells are pre-created
@@ -17,6 +19,45 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
             copy_table_recursive($pdo, $tb, $newSectionId, null);
         }
     }
+
+    backfill_swap_links($pdo, $raidId);
+}
+
+// Swaps tables carry swap_before_table_id/swap_after_table_id pointing at *template* table
+// ids. Run once after the whole section/table tree has been copied (or resynced), so every
+// referenced table is guaranteed to already have its raid-side counterpart in place. Uses
+// collect_table_ids() (raid_fetch.php) per top-level table so nested boss-tables (which hang
+// off column groups, not section_id) are included at any depth.
+function backfill_swap_links($pdo, $raidId) {
+    $stmtTop = $pdo->prepare('SELECT id FROM raid_tables WHERE section_id IN (SELECT id FROM raid_sections WHERE raid_id = ?)');
+    $stmtTop->execute([$raidId]);
+    $allIds = [];
+    foreach ($stmtTop->fetchAll(PDO::FETCH_COLUMN) as $topId) {
+        collect_table_ids($pdo, $topId, $allIds);
+    }
+    if (!$allIds) return;
+
+    $placeholders = implode(',', array_fill(0, count($allIds), '?'));
+    $stmt = $pdo->prepare("SELECT id, source_table_id FROM raid_tables WHERE id IN ($placeholders)");
+    $stmt->execute($allIds);
+    $bySource = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        if ($row['source_table_id'] !== null) $bySource[(int)$row['source_table_id']] = (int)$row['id'];
+    }
+
+    $stmtSwaps = $pdo->prepare(
+        "SELECT rt.id, tt.swap_before_table_id, tt.swap_after_table_id
+         FROM raid_tables rt
+         JOIN raid_template_tables tt ON tt.id = rt.source_table_id
+         WHERE rt.kind = 'swaps' AND rt.id IN ($placeholders)"
+    );
+    $stmtSwaps->execute($allIds);
+    $upd = $pdo->prepare('UPDATE raid_tables SET swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
+    foreach ($stmtSwaps->fetchAll(PDO::FETCH_ASSOC) as $sw) {
+        $beforeId = $sw['swap_before_table_id'] !== null ? ($bySource[(int)$sw['swap_before_table_id']] ?? null) : null;
+        $afterId  = $sw['swap_after_table_id']  !== null ? ($bySource[(int)$sw['swap_after_table_id']]  ?? null) : null;
+        $upd->execute([$beforeId, $afterId, $sw['id']]);
+    }
 }
 
 // Copies one template table (and, recursively, any nested boss-tables living inside its
@@ -24,10 +65,10 @@ function copy_template_structure_to_raid($pdo, $templateId, $raidId) {
 // $newParentGroupId is non-null, matching the section_id/parent_group_id invariant.
 function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $insT = $pdo->prepare(
-        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, bg_color, default_column_width, source_table_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, bg_color, default_column_width, source_table_id, kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['bg_color'], $tb['default_column_width'], $tb['id']]);
+    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['bg_color'], $tb['default_column_width'], $tb['id'], $tb['kind'] ?? 'standard']);
     $newTableId = (int)$pdo->lastInsertId();
 
     // Column groups first (columns FK into them), preserving parent_group_id links via an old->new id map.

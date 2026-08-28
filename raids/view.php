@@ -184,6 +184,9 @@ function fmtTime($t) {
     table.grid td[rowspan] { vertical-align: top; }
     table.grid th { background: rgba(255,255,255,0.04); color: #a8b4d0; font-weight: 800; white-space: nowrap; }
     table.grid td.text-cell { text-align: left; white-space: nowrap; }
+    table.grid td.swap-note-cell { cursor: pointer; }
+    table.grid td.swap-note-cell:hover { background: rgba(88,101,242,0.14); }
+    table.grid td.swap-note-cell .empty-slot { opacity: 0.35; }
     table.grid td.icon-cell { text-align: center; }
     table.grid th.group-th { font-size: 13px; letter-spacing: .04em; }
     td.cell { min-width: 90px; background: rgba(255,255,255,0.04); }
@@ -310,6 +313,23 @@ function fmtTime($t) {
     .alt-popup-item.current { color: #7f8bad; cursor: default; font-style: italic; }
     .alt-popup-item.current:hover { background: none; }
     .alt-popup-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--dot, #8892b0); }
+    .swap-note-popup {
+      position: absolute; z-index: 500; width: 220px;
+      background: #0a0f1e; border: 1px solid rgba(255,255,255,0.15); border-radius: 7px;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.4); padding: 10px;
+    }
+    .swap-note-popup label { display: block; font-size: 11px; color: #7f8bad; margin: 8px 0 3px; }
+    .swap-note-popup label:first-child { margin-top: 0; }
+    .swap-note-popup input {
+      width: 100%; padding: 6px 8px; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+      background: #131a30; color: #e8ecff; font-size: 12.5px; font: inherit; box-sizing: border-box;
+    }
+    .swap-note-popup .swap-note-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+    .swap-note-popup button {
+      padding: 5px 12px; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; font: inherit;
+    }
+    .swap-note-popup .swap-note-save { background: #5865f2; color: #fff; }
+    .swap-note-popup .swap-note-cancel { background: rgba(255,255,255,0.08); color: #c7cef2; }
     .pool-add-pug { display: flex; gap: 6px; }
     #pugNameInput { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12.5px; font: inherit; }
     #pugClassInput { padding: 8px 6px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12px; font: inherit; }
@@ -884,6 +904,9 @@ function render() {
         toggleMarker(parseInt(btn.dataset.cellId, 10));
       });
     });
+    el.querySelectorAll('[data-action="edit-swap-note"]').forEach(td => {
+      td.addEventListener('click', e => { e.stopPropagation(); showSwapNotePopup(td); });
+    });
     el.querySelectorAll('.section-clear-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         if (!confirm('Clear every assignment in this section? This cannot be undone.')) return;
@@ -1086,9 +1109,57 @@ function showAltPopup(chip) {
   activeAltPopup = popup;
 }
 
-document.addEventListener('click', () => closeAltPopup());
+let activeSwapPopup = null; // currently-open Swaps note/boss editor popup, if any
+
+function closeSwapNotePopup() {
+  if (activeSwapPopup) { activeSwapPopup.remove(); activeSwapPopup = null; }
+}
+
+function showSwapNotePopup(td) {
+  closeSwapNotePopup();
+  closeAltPopup();
+  const tableId = parseInt(td.dataset.tableId, 10);
+  const playerId = td.dataset.playerId;
+  const tb = findTable(tableId);
+  const row = tb && tb.rows.find(r => r.playerMainToonId === playerId);
+  if (!tb || !row) return;
+  const noteCell = tb.cells[row.id + '_-4'];
+  const bossCell = tb.cells[row.id + '_-5'];
+
+  const popup = document.createElement('div');
+  popup.className = 'swap-note-popup';
+  popup.innerHTML = `
+    <label>Note</label>
+    <input type="text" class="swap-note-input" maxlength="255" value="${esc(noteCell ? (noteCell.textContent || '') : '')}">
+    <label>Boss</label>
+    <input type="text" class="swap-boss-input" maxlength="60" value="${esc(bossCell ? (bossCell.textContent || '') : '')}">
+    <div class="swap-note-actions">
+      <button type="button" class="swap-note-cancel">Cancel</button>
+      <button type="button" class="swap-note-save">Save</button>
+    </div>`;
+  document.body.appendChild(popup);
+
+  const rect = td.getBoundingClientRect();
+  const left = Math.min(rect.left + window.scrollX, window.innerWidth + window.scrollX - popup.offsetWidth - 8);
+  popup.style.left = `${Math.max(8, left)}px`;
+  popup.style.top = `${rect.bottom + window.scrollY + 4}px`;
+
+  popup.addEventListener('click', e => e.stopPropagation());
+  popup.querySelector('.swap-note-cancel').addEventListener('click', closeSwapNotePopup);
+  popup.querySelector('.swap-note-save').addEventListener('click', () => {
+    const note = popup.querySelector('.swap-note-input').value;
+    const bossLabel = popup.querySelector('.swap-boss-input').value;
+    closeSwapNotePopup();
+    clearCall({ action: 'set_swap_note', tableId, playerMainToonId: playerId, note, bossLabel });
+  });
+  popup.querySelector(td.dataset.field === 'boss' ? '.swap-boss-input' : '.swap-note-input').focus();
+
+  activeSwapPopup = popup;
+}
+
+document.addEventListener('click', () => { closeAltPopup(); closeSwapNotePopup(); });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeAltPopup();
+  if (e.key === 'Escape') { closeAltPopup(); closeSwapNotePopup(); }
 });
 
 const MAX_DATA_COLS = 10;
@@ -1296,7 +1367,10 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
     }
     if (eff === 'text') {
       const style = `${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
-      out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-cell" style="${style}">${renderCellTextHtml(cell ? cell.textContent : '')}</td>`);
+      const isSwapNote = tb.kind === 'swaps' && CAN_MANAGE && (c.id === -4 || c.id === -5);
+      const swapAttrs = isSwapNote ? ` data-action="edit-swap-note" data-table-id="${tb.id}" data-player-id="${esc(r.playerMainToonId || '')}" data-field="${c.id === -4 ? 'note' : 'boss'}"` : '';
+      const textHtml = renderCellTextHtml(cell ? cell.textContent : '');
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-cell${isSwapNote ? ' swap-note-cell' : ''}" style="${style}"${swapAttrs}>${textHtml || (isSwapNote ? '<span class="empty-slot">+</span>' : '')}</td>`);
     } else if (eff === 'icon') {
       const bgStyle = ` style="${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}"`;
       const icon = (cell && cell.icon) ? `<span class="raid-icon-cell" style="${raidIconStyle(cell.icon, 26)}"></span>` : '';
@@ -1576,6 +1650,28 @@ function importItemFor(row) {
     : { toonKind: 'pug', pugName: row.name, pugClass: row.suggestedPugClass || null, role: row.role };
 }
 
+// Bench signups never go to the pool (pool items were never wired to place into cells) --
+// they route straight into the raid's Benched table via cells-save.php's bench_import action.
+function benchCall(body) {
+  return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raidId: RAID_ID, action: 'bench_import', ...body }) })
+    .then(r => r.json()).then(d => {
+      if (!d.success) { alert(d.error || 'Bench import failed'); return false; }
+      sections = groupSectionsByKind(d.sections);
+      render();
+      return true;
+    });
+}
+
+function addBenchImportRow(idx) {
+  const row = importRows[idx];
+  if (!row || row.added) return;
+  benchCall(importItemFor(row)).then(ok => {
+    if (!ok) return;
+    row.added = true;
+    renderImportRows();
+  });
+}
+
 function cycleImportRole(idx) {
   const row = importRows[idx];
   if (!row || row.added) return;
@@ -1592,9 +1688,10 @@ function importRowHtml(row, idx) {
   const roleClickable = row.added ? '' : ' role-clickable';
   const roleTitle = row.added ? esc(row.role || '') : `${esc(row.role || '')} (suggested — click to change)`;
   const roleIcon = row.role ? `<span class="role-icon-sm${roleClickable} ${roleKey(row.role)}" title="${roleTitle}" ${row.added ? '' : `onclick="cycleImportRole(${idx})"`}></span>` : '';
-  const btnLabel = row.matched ? 'Add' : 'Add as PUG';
+  const benchBadge = row.isBench ? '<span class="bench-badge" title="Benched signup — adds to the Benched table, not the pool">Bench</span>' : '';
+  const btnLabel = row.isBench ? 'Add to Bench' : (row.matched ? 'Add' : 'Add as PUG');
   return `<div class="import-row ${state}">
-    <div>${roleIcon}<span class="name">${esc(row.name)}</span> <span class="detail">${detail}</span></div>
+    <div>${roleIcon}<span class="name">${esc(row.name)}</span> ${benchBadge}<span class="detail">${detail}</span></div>
     <div class="status">${status}${row.added ? '' : `<button type="button" data-idx="${idx}">${btnLabel}</button>`}</div>
   </div>`;
 }
@@ -1604,7 +1701,8 @@ function renderImportRows() {
   if (!el) return;
   el.innerHTML = importRows.map((r, i) => importRowHtml(r, i)).join('');
   el.querySelectorAll('button[data-idx]').forEach(btn => {
-    btn.addEventListener('click', () => addImportRow(parseInt(btn.dataset.idx, 10)));
+    const idx = parseInt(btn.dataset.idx, 10);
+    btn.addEventListener('click', () => (importRows[idx] && importRows[idx].isBench ? addBenchImportRow(idx) : addImportRow(idx)));
   });
   const allBtn = document.getElementById('importAllBtn');
   if (allBtn) allBtn.disabled = !importRows.some(r => !r.added);
@@ -1620,9 +1718,14 @@ function addImportRow(idx) {
 }
 
 function addAllImportRows() {
-  const items = importRows.filter(r => !r.added).map(importItemFor);
-  if (!items.length) return;
-  poolCall({ action: 'bulkAdd', items }).then(() => {
+  const pending = importRows.filter(r => !r.added);
+  if (!pending.length) return;
+  const benchRows = pending.filter(r => r.isBench);
+  const poolRows = pending.filter(r => !r.isBench);
+  Promise.all([
+    poolRows.length ? poolCall({ action: 'bulkAdd', items: poolRows.map(importItemFor) }) : Promise.resolve(),
+    ...benchRows.map(r => benchCall(importItemFor(r))),
+  ]).then(() => {
     importRows.forEach(r => { r.added = true; });
     renderImportRows();
   });
@@ -2030,6 +2133,10 @@ function wireDiscordControls() {
 function walkHealerSlots(secs, cb) {
   function walk(tables) {
     for (const tb of tables) {
+      // Benched/Swaps tables have no admin-authored slot labels to export against --
+      // skip them so a Benched table sharing a tab with real assignment tables can't
+      // accidentally contribute a spurious {{slot}} token.
+      if (tb.kind !== 'standard') continue;
       for (const r of tb.rows) {
         if (r.kind === 'spacer' || !r.label) continue;
         const dataCols = tb.columns.filter(c => effectiveKind(r, c, tb.cells[r.id + '_' + c.id]) === 'general');
@@ -2155,6 +2262,9 @@ function _mrtBuildSectionNames(sec, homeServer) {
   let groupIdx = 0;
   function walk(tables) {
     for (const tb of tables) {
+      // A Benched table's single 'general' column isn't a raid group -- skip it so it
+      // can't consume a groupIdx slot and shift the numbering of the real groups after it.
+      if (tb.kind !== 'standard') continue;
       const generalCols = tb.columns.filter(c => c.kind === 'general');
       const generalRows = tb.rows.filter(r => r.kind === 'general');
       for (const c of generalCols) {

@@ -103,6 +103,10 @@ $mains = array_map(fn($t) => [
 ], $mainsRaw);
 
 const RH_SKIP_CLASSES = ['Absence'];
+// Raid-Helper reports a benched signup's class as this literal string, same constant name IO
+// uses for the same purpose. Verify against a live event before relying on this in production
+// -- unconfirmed whether the API always reports it this way vs. preserving the real class.
+const RH_BENCH_CLS = 'Bench';
 const RH_CLS_MAP = [
     'Warrior' => 'Warrior', 'Paladin' => 'Paladin', 'Druid' => 'Druid', 'Priest' => 'Priest',
     'Mage' => 'Mage', 'Warlock' => 'Warlock', 'Hunter' => 'Hunter', 'Rogue' => 'Rogue',
@@ -174,12 +178,16 @@ foreach (($data['signups'] ?? []) as $su) {
     $discordName   = mb_strtolower($name);
     $suClass       = RH_CLS_MAP[$rawClass] ?? $rawClass;
 
+    $isBench = $rawClass === RH_BENCH_CLS;
     $match = find_match($mains, $userid, $discordName);
     $row = [
         'name' => $name, 'userid' => $userid, 'rawClass' => $rawClass, 'spec' => $su['spec'] ?? '',
         'role' => rh_role_for_signup($su['spec'] ?? '', $su['role'] ?? ''),
         'matched' => false, 'toonKind' => null, 'toonId' => null, 'toonName' => null, 'toonClass' => null,
-        'suggestedPugClass' => RH_CLS_MAP[$rawClass] ?? null,
+        // No sensible class guess for an unmatched bench pug -- a matched player keeps their
+        // real class from the toons/toon_alts join below regardless of what Raid-Helper reports.
+        'suggestedPugClass' => $isBench ? null : (RH_CLS_MAP[$rawClass] ?? null),
+        'isBench' => $isBench,
     ];
 
     if ($match) {

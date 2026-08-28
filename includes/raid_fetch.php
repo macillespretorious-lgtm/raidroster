@@ -4,8 +4,72 @@
 // tree after a bulk clear (clear_section/clear_all), so both stay in the exact same shape.
 
 require_once __DIR__ . '/class_roles.php';
+require_once __DIR__ . '/raid_swaps.php';
 
-function fetch_table_full($pdo, $tb) {
+// Synthesizes a Swaps table's read shape -- 5 fixed text-kind columns (negative ids,
+// never persisted) and one row per computed before/after pair -- so the existing DOM
+// table renderer and Discord-canvas block builder can draw it with no new code, exactly
+// like they draw any other text-kind table. The Before/After pairing itself is never
+// stored; it's recomputed live from the two source tables' current cells on every read.
+function fetch_swaps_table($pdo, $tb, $guildId) {
+    $stmtBt = $pdo->prepare('SELECT * FROM raid_tables WHERE id = ?');
+    $beforeTb = null;
+    $afterTb = null;
+    if ($tb['swap_before_table_id']) {
+        $stmtBt->execute([$tb['swap_before_table_id']]);
+        $beforeTb = $stmtBt->fetch(PDO::FETCH_ASSOC);
+    }
+    if ($tb['swap_after_table_id']) {
+        $stmtBt->execute([$tb['swap_after_table_id']]);
+        $afterTb = $stmtBt->fetch(PDO::FETCH_ASSOC);
+    }
+    $beforeFull = $beforeTb ? fetch_table_full($pdo, $beforeTb, $guildId) : ['cells' => []];
+    $afterFull  = $afterTb  ? fetch_table_full($pdo, $afterTb, $guildId)  : ['cells' => []];
+    $swapRows = compute_swap_rows($pdo, $guildId, (int)$tb['id'], $beforeFull, $afterFull);
+
+    $mkCol = fn($id, $label) => ['id' => $id, 'label' => $label, 'kind' => 'text', 'width' => null, 'headerColor' => null, 'bgColor' => null, 'groupId' => null, 'headerColspan' => 1];
+    $columns = [$mkCol(-1, 'Player'), $mkCol(-2, 'Before'), $mkCol(-3, 'After'), $mkCol(-4, 'Note'), $mkCol(-5, 'Boss')];
+
+    $mkCell = fn($text) => [
+        'id' => 0, 'toonKind' => null, 'toonId' => null, 'pugName' => null, 'pugClass' => null,
+        'name' => null, 'class' => null, 'role' => null, 'roleConfirmed' => false, 'server' => null,
+        'marked' => false, 'textContent' => $text, 'bgColor' => null, 'textColor' => null,
+        'bold' => false, 'font' => null, 'icon' => null, 'kindOverride' => null,
+    ];
+
+    $rows = [];
+    $cells = [];
+    $rowId = -1;
+    foreach ($swapRows as $sr) {
+        $rows[] = ['id' => $rowId, 'label' => '', 'kind' => 'text', 'height' => null, 'bgColor' => null, 'playerMainToonId' => $sr['playerMainToonId']];
+        $vals = [
+            -1 => $sr['playerName'],
+            -2 => trim($sr['before']['name'] . ($sr['before']['class'] ? ' (' . $sr['before']['class'] . ')' : '')),
+            -3 => trim($sr['after']['name'] . ($sr['after']['class'] ? ' (' . $sr['after']['class'] . ')' : '')),
+            -4 => $sr['note'],
+            -5 => $sr['bossLabel'],
+        ];
+        foreach ($vals as $colId => $text) {
+            $cells[$rowId . '_' . $colId] = $mkCell($text);
+        }
+        $rowId--;
+    }
+
+    return [
+        'id' => (int)$tb['id'], 'title' => $tb['title'],
+        'headerColor' => $tb['header_color'], 'bgColor' => $tb['bg_color'],
+        'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+        'kind' => 'swaps',
+        'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
+        'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
+        'columns' => $columns, 'rows' => $rows, 'columnGroups' => [], 'cells' => $cells,
+        'cellMerges' => [], 'rules' => [],
+    ];
+}
+
+function fetch_table_full($pdo, $tb, $guildId = null) {
+    if ($tb['kind'] === 'swaps') return fetch_swaps_table($pdo, $tb, $guildId);
+
     $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, bg_color, group_id, header_colspan FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmtC->execute([$tb['id']]);
     $columns = array_map(fn($c) => [
@@ -28,7 +92,7 @@ function fetch_table_full($pdo, $tb) {
     foreach ($groupRows as $g) {
         $stmtGT = $pdo->prepare('SELECT * FROM raid_tables WHERE parent_group_id = ? ORDER BY sort_order, id');
         $stmtGT->execute([$g['id']]);
-        $childTables = array_map(fn($ctb) => fetch_table_full($pdo, $ctb), $stmtGT->fetchAll(PDO::FETCH_ASSOC));
+        $childTables = array_map(fn($ctb) => fetch_table_full($pdo, $ctb, $guildId), $stmtGT->fetchAll(PDO::FETCH_ASSOC));
         $columnGroups[] = [
             'id' => (int)$g['id'],
             'parentGroupId' => $g['parent_group_id'] !== null ? (int)$g['parent_group_id'] : null,
@@ -111,12 +175,17 @@ function fetch_table_full($pdo, $tb) {
         'headerColor' => $tb['header_color'],
         'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+        'kind' => $tb['kind'],
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
         'cellMerges' => $cellMerges, 'rules' => $rules,
     ];
 }
 
 function fetch_raid_structure($pdo, $raidId) {
+    $stmtG = $pdo->prepare('SELECT guild_id FROM raids WHERE id = ?');
+    $stmtG->execute([$raidId]);
+    $guildId = $stmtG->fetchColumn();
+
     $out = [];
     $stmt = $pdo->prepare(
         'SELECT rs.*, COALESCE(rts.mrt_export_enabled, 0) AS mrt_export_enabled
@@ -128,7 +197,7 @@ function fetch_raid_structure($pdo, $raidId) {
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $sec) {
         $stmtT = $pdo->prepare('SELECT * FROM raid_tables WHERE section_id = ? ORDER BY sort_order, id');
         $stmtT->execute([$sec['id']]);
-        $tables = array_map(fn($tb) => fetch_table_full($pdo, $tb), $stmtT->fetchAll(PDO::FETCH_ASSOC));
+        $tables = array_map(fn($tb) => fetch_table_full($pdo, $tb, $guildId), $stmtT->fetchAll(PDO::FETCH_ASSOC));
         $out[] = [
             'id' => (int)$sec['id'], 'kind' => $sec['kind'], 'title' => $sec['title'], 'color' => $sec['color'], 'bgColor' => $sec['bg_color'], 'tables' => $tables,
             'noteEnabled' => (bool)$sec['note_enabled'], 'noteText' => $sec['note_text'],

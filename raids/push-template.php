@@ -181,6 +181,13 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
         }
     }
 
+    // Benched/Swaps tables have no template-authored row/column/group/cell structure to
+    // diff -- their rows grow live (benched) or are computed on read (swaps), so a routine
+    // resync must never treat a live-grown row as "raidOnly" and delete it. Kind itself is
+    // immutable post-creation (never in diff_scalar_fields above), so this only needs to
+    // read the table's own kind, not the template's.
+    if ($raidTb['kind'] !== 'standard') return;
+
     // --- Column groups ---
     $stmt = $pdo->prepare('SELECT * FROM raid_column_groups WHERE table_id = ? ORDER BY sort_order, id');
     $stmt->execute([$raidTableId]);
@@ -517,6 +524,8 @@ function sync_raid_from_template($pdo, $raid, $template, $apply, $confirmRemoval
             }
         }
     }
+
+    if ($apply) backfill_swap_links($pdo, $raidId);
 
     return $diff;
 }

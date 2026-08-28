@@ -178,6 +178,91 @@ function fetch_cell_out($pdo, $cellId) {
     ];
 }
 
+// Benched tables auto-grow: whenever every existing 'general' cell is occupied, one more row
+// (and its cells) is appended so the table never "runs out" of bench slots. "Empty" matches
+// resolve_toon_fields()'s own definition of a cleared cell (main/null/null/null).
+function benched_table_full($pdo, $tableId) {
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM raid_cells WHERE table_id = ? AND toon_kind = 'main' AND toon_id IS NULL");
+    $stmt->execute([$tableId]);
+    return (int)$stmt->fetchColumn() === 0;
+}
+
+function grow_benched_table($pdo, $tableId) {
+    $stmt = $pdo->prepare("SELECT id FROM raid_columns WHERE table_id = ? AND kind != 'spacer' ORDER BY sort_order, id");
+    $stmt->execute([$tableId]);
+    $colIds = array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
+    if (!$colIds) return;
+
+    $stmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM raid_rows WHERE table_id = ?');
+    $stmt->execute([$tableId]);
+    $order = (int)$stmt->fetchColumn();
+    $insR = $pdo->prepare("INSERT INTO raid_rows (table_id, label, sort_order, kind) VALUES (?, '', ?, 'general')");
+    $insR->execute([$tableId, $order]);
+    $newRowId = (int)$pdo->lastInsertId();
+
+    $insC = $pdo->prepare('INSERT INTO raid_cells (table_id, row_id, column_id) VALUES (?, ?, ?)');
+    foreach ($colIds as $colId) $insC->execute([$tableId, $newRowId, $colId]);
+}
+
+function ensure_benched_capacity($pdo, $tableId) {
+    $stmt = $pdo->prepare('SELECT kind FROM raid_tables WHERE id = ?');
+    $stmt->execute([$tableId]);
+    if ($stmt->fetchColumn() !== 'benched') return;
+    if (benched_table_full($pdo, $tableId)) grow_benched_table($pdo, $tableId);
+}
+
+if ($action === 'bench_import') {
+    $raidId = isset($body['raidId']) ? (int)$body['raidId'] : 0;
+    $stmt = $pdo->prepare('SELECT id FROM raids WHERE id = ? AND guild_id = ?');
+    $stmt->execute([$raidId, $tenant['id']]);
+    if (!$stmt->fetch()) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Raid not found']);
+        exit;
+    }
+
+    $stmt = $pdo->prepare("SELECT rt.id FROM raid_tables rt JOIN raid_sections s ON s.id = rt.section_id WHERE s.raid_id = ? AND rt.kind = 'benched' ORDER BY rt.id LIMIT 1");
+    $stmt->execute([$raidId]);
+    $tableId = $stmt->fetchColumn();
+    if (!$tableId) {
+        http_response_code(400);
+        echo json_encode(['error' => "This raid's template has no Benched table"]);
+        exit;
+    }
+    $tableId = (int)$tableId;
+
+    $stmtEmpty = $pdo->prepare("SELECT id FROM raid_cells WHERE table_id = ? AND toon_kind = 'main' AND toon_id IS NULL ORDER BY row_id LIMIT 1");
+    $stmtEmpty->execute([$tableId]);
+    $cellId = $stmtEmpty->fetchColumn();
+    if (!$cellId) {
+        grow_benched_table($pdo, $tableId);
+        $stmtEmpty->execute([$tableId]);
+        $cellId = $stmtEmpty->fetchColumn();
+    }
+    if (!$cellId) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Could not create a bench slot']);
+        exit;
+    }
+    $cellId = (int)$cellId;
+
+    $resolved = resolve_toon_fields($pdo, $tenant['id'], $body['toonKind'] ?? null, $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null);
+    $toonClass = toon_class_for($pdo, $tenant['id'], $resolved['toon_kind'], $resolved['toon_id'], $resolved['pug_class']);
+    $role = array_key_exists('role', $body) ? $body['role'] : null;
+    if (!valid_role_for_class($toonClass, $role)) $role = null;
+
+    $stmt = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ?, role = ? WHERE id = ?');
+    $stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_name'], $resolved['pug_class'], $role, $cellId]);
+
+    ensure_benched_capacity($pdo, $tableId);
+
+    // A grown table means new rows/cells exist that the client's in-memory copy doesn't have
+    // yet, so return the whole raid tree (same shape clear_section/clear_all already return)
+    // rather than just the one cell.
+    echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $raidId)]);
+    exit;
+}
+
 if ($action === 'move') {
     $fromCellId = isset($body['fromCellId']) ? (int)$body['fromCellId'] : 0;
     $toCellId   = isset($body['toCellId']) ? (int)$body['toCellId'] : 0;
@@ -213,6 +298,9 @@ if ($action === 'move') {
     $upd->execute([$to['toon_id'], $to['toon_kind'], $to['pug_name'], $to['pug_class'], $to['role'], $fromCellId]);
     $upd->execute([$from['toon_id'], $from['toon_kind'], $from['pug_name'], $from['pug_class'], $from['role'], $toCellId]);
     $pdo->commit();
+
+    ensure_benched_capacity($pdo, $fromCell['table_id']);
+    ensure_benched_capacity($pdo, $toCell['table_id']);
 
     echo json_encode(['success' => true, 'from' => fetch_cell_out($pdo, $fromCellId), 'to' => fetch_cell_out($pdo, $toCellId)]);
     exit;
@@ -303,6 +391,66 @@ if ($action === 'setRole') {
     exit;
 }
 
+if ($action === 'set_swap_note') {
+    $raidId = isset($body['raidId']) ? (int)$body['raidId'] : 0;
+    $stmt = $pdo->prepare('SELECT id FROM raids WHERE id = ? AND guild_id = ?');
+    $stmt->execute([$raidId, $tenant['id']]);
+    if (!$stmt->fetch()) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Raid not found']);
+        exit;
+    }
+
+    $tableId = isset($body['tableId']) ? (int)$body['tableId'] : 0;
+    $stmt = $pdo->prepare('SELECT kind FROM raid_tables WHERE id = ?');
+    $stmt->execute([$tableId]);
+    $kind = $stmt->fetchColumn();
+    if ($kind !== 'swaps') {
+        http_response_code(404);
+        echo json_encode(['error' => 'Swaps table not found']);
+        exit;
+    }
+
+    // Verify the table actually belongs to this raid (walk every top-level table's tree).
+    $stmtS = $pdo->prepare('SELECT id FROM raid_sections WHERE raid_id = ?');
+    $stmtS->execute([$raidId]);
+    $allIds = [];
+    foreach ($stmtS->fetchAll(PDO::FETCH_COLUMN) as $sectionId) {
+        $stmtT = $pdo->prepare('SELECT id FROM raid_tables WHERE section_id = ?');
+        $stmtT->execute([$sectionId]);
+        foreach ($stmtT->fetchAll(PDO::FETCH_COLUMN) as $tid) collect_table_ids($pdo, $tid, $allIds);
+    }
+    if (!in_array($tableId, $allIds, true)) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Swaps table not found']);
+        exit;
+    }
+
+    $playerMainToonId = (string)($body['playerMainToonId'] ?? '');
+    if ($playerMainToonId === '') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Missing player']);
+        exit;
+    }
+    $note = isset($body['note']) ? substr(trim((string)$body['note']), 0, 255) : null;
+    $bossLabel = isset($body['bossLabel']) ? substr(trim((string)$body['bossLabel']), 0, 60) : null;
+    if ($note === '') $note = null;
+    if ($bossLabel === '') $bossLabel = null;
+
+    if ($note === null && $bossLabel === null) {
+        $pdo->prepare('DELETE FROM raid_swap_notes WHERE table_id = ? AND player_main_toon_id = ?')->execute([$tableId, $playerMainToonId]);
+    } else {
+        $stmt = $pdo->prepare(
+            'INSERT INTO raid_swap_notes (table_id, player_main_toon_id, note, boss_label) VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE note = VALUES(note), boss_label = VALUES(boss_label)'
+        );
+        $stmt->execute([$tableId, $playerMainToonId, $note, $bossLabel]);
+    }
+
+    echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $raidId)]);
+    exit;
+}
+
 // default: assign
 $cellId = isset($body['cellId']) ? (int)$body['cellId'] : 0;
 $cell = fetch_cell_owned($pdo, $cellId, $tenant['id']);
@@ -326,5 +474,7 @@ if (!valid_role_for_class($toonClass, $role)) $role = null;
 
 $stmt = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ?, role = ? WHERE id = ?');
 $stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_name'], $resolved['pug_class'], $role, $cellId]);
+
+ensure_benched_capacity($pdo, $cell['table_id']);
 
 echo json_encode(['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)]);

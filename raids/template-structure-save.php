@@ -324,6 +324,9 @@ function fetch_table_full($pdo, $tb) {
         'headerColor' => $tb['header_color'],
         'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+        'kind' => $tb['kind'],
+        'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
+        'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'columns' => $columns,
         'rows' => $rows,
         'columnGroups' => $columnGroups,
@@ -620,8 +623,36 @@ if ($action === 'move_section') {
     respond_structure($pdo, $sec['template_id']);
 }
 
+// Seeds a freshly-inserted table with the fixed Benched layout: one 'general' column and a
+// handful of 'general' rows. Real growth happens at raid-time (cells-save.php) regardless --
+// this starting size is just enough to look like a real table in the editor immediately.
+function seed_benched_table($pdo, $tableId) {
+    $pdo->prepare('INSERT INTO raid_template_columns (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, 'Bench', 'general']);
+    $rowStmt = $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
+    for ($i = 0; $i < 6; $i++) {
+        $rowStmt->execute([$tableId, '', $i, 'general']);
+    }
+}
+
+// Validates a Swaps table's before/after table picks: both must exist, belong to the same
+// template as the Swaps table itself, and be 'standard' (never trust the client's kind label
+// for another table -- it could be stale or tampered).
+function resolve_swap_tables($pdo, $guildId, $templateId, $body) {
+    $beforeId = (int)($body['beforeTableId'] ?? 0);
+    $afterId  = (int)($body['afterTableId'] ?? 0);
+    if (!$beforeId || !$afterId) fail(400, 'Pick a Before and After table');
+    foreach ([$beforeId, $afterId] as $id) {
+        $t = fetch_table_owned($pdo, $guildId, $id);
+        if (!$t || $t['template_id'] !== $templateId) fail(404, 'Before/After table not found');
+        if ($t['kind'] !== 'standard') fail(400, 'Before/After must be Standard tables');
+    }
+    return [$beforeId, $afterId];
+}
+
 if ($action === 'add_table') {
     $groupId = (int)($body['groupId'] ?? 0);
+    $kind = in_array($body['kind'] ?? 'standard', ['standard', 'benched', 'swaps'], true) ? $body['kind'] : 'standard';
 
     if ($groupId) {
         $grp = fetch_group_owned($pdo, $tenant['id'], $groupId);
@@ -629,8 +660,10 @@ if ($action === 'add_table') {
         $title = substr(trim($body['title'] ?? ''), 0, 100);
         if (!$title) fail(400, 'Title is required');
         $order = next_sort_order($pdo, 'raid_template_tables', 'parent_group_id', $grp['id']);
-        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order) VALUES (?, ?, ?)');
-        $stmt->execute([$grp['id'], $title, $order]);
+        [$beforeId, $afterId] = $kind === 'swaps' ? resolve_swap_tables($pdo, $tenant['id'], $grp['template_id'], $body) : [null, null];
+        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$grp['id'], $title, $order, $kind, $beforeId, $afterId]);
+        if ($kind === 'benched') seed_benched_table($pdo, (int)$pdo->lastInsertId());
         respond_structure($pdo, $grp['template_id']);
     }
 
@@ -639,8 +672,10 @@ if ($action === 'add_table') {
     // Top-level tables are numbered automatically in the UI, so a title is optional here.
     $title = substr(trim($body['title'] ?? ''), 0, 100);
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
-    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order) VALUES (?, ?, ?)');
-    $stmt->execute([$sec['id'], $title, $order]);
+    [$beforeId, $afterId] = $kind === 'swaps' ? resolve_swap_tables($pdo, $tenant['id'], $sec['template_id'], $body) : [null, null];
+    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id) VALUES (?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$sec['id'], $title, $order, $kind, $beforeId, $afterId]);
+    if ($kind === 'benched') seed_benched_table($pdo, (int)$pdo->lastInsertId());
     respond_structure($pdo, $sec['template_id']);
 }
 
@@ -675,8 +710,16 @@ if ($action === 'update_table') {
     if ($isNested && !$title) fail(400, 'Title is required');
     $headerColor = array_key_exists('headerColor', $body) ? ($body['headerColor'] ?: null) : $tb['header_color'];
     $colWidth    = array_key_exists('defaultColumnWidth', $body) ? ($body['defaultColumnWidth'] !== null && $body['defaultColumnWidth'] !== '' ? (int)$body['defaultColumnWidth'] : null) : $tb['default_column_width'];
-    $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ? WHERE id = ?');
-    $stmt->execute([$title, $headerColor, $colWidth, $tb['id']]);
+
+    if ($tb['kind'] === 'swaps' && (array_key_exists('beforeTableId', $body) || array_key_exists('afterTableId', $body))) {
+        $mergedBody = ['beforeTableId' => $body['beforeTableId'] ?? $tb['swap_before_table_id'], 'afterTableId' => $body['afterTableId'] ?? $tb['swap_after_table_id']];
+        [$beforeId, $afterId] = resolve_swap_tables($pdo, $tenant['id'], $tb['template_id'], $mergedBody);
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $beforeId, $afterId, $tb['id']]);
+    } else {
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $tb['id']]);
+    }
     respond_structure($pdo, $tb['template_id']);
 }
 
@@ -684,6 +727,11 @@ if ($action === 'delete_table') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
     $templateId = $tb['template_id'];
+    $stmt = $pdo->prepare('SELECT id, title FROM raid_template_tables WHERE swap_before_table_id = ? OR swap_after_table_id = ?');
+    $stmt->execute([$tb['id'], $tb['id']]);
+    if ($blocker = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        fail(400, 'Used as a Swaps source by "' . ($blocker['title'] ?: 'a Swaps table') . '" — remove that link first');
+    }
     $stmt = $pdo->prepare('DELETE FROM raid_template_tables WHERE id = ?');
     $stmt->execute([$tb['id']]);
     respond_structure($pdo, $templateId);
