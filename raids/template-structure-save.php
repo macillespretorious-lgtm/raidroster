@@ -640,8 +640,12 @@ function seed_benched_table($pdo, $tableId) {
     $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, 1, ?)')
         ->execute([$tableId, '', 'general']);
     $colId = (int)$pdo->query('SELECT id FROM raid_template_columns WHERE table_id = ' . (int)$tableId . ' ORDER BY sort_order, id LIMIT 1')->fetchColumn();
-    $pdo->prepare('INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bold) VALUES (?, ?, ?, ?, 1)')
-        ->execute([$tableId, $headerRowId, $colId, 'Benched']);
+    // bg_color pins the header to the same subtle tint td.cell already gives every roster
+    // slot by default (view.php's `rgba(255,255,255,0.04)` CSS rule, expressed here as its
+    // closest 8-digit hex+alpha equivalent since bg_color is a varchar(9) hex column) --
+    // explicit rather than relying on that CSS default holding forever.
+    $pdo->prepare('INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bold, bg_color) VALUES (?, ?, ?, ?, 0, ?)')
+        ->execute([$tableId, $headerRowId, $colId, 'BENCHED', '#FFFFFF0A']);
     $pdo->prepare('INSERT INTO raid_template_rules (table_id, rule_type, scope, classes, max_count, label, sort_order) VALUES (?, ?, ?, ?, ?, ?, 0)')
         ->execute([$tableId, 'max_count', 'table', null, 1, 'A player can only be assigned once']);
 }
