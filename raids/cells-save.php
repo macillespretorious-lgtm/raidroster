@@ -204,6 +204,33 @@ function grow_benched_table($pdo, $tableId) {
     foreach ($colIds as $colId) $insC->execute([$tableId, $newRowId, $colId]);
 }
 
+// Mirror of grow_benched_table: when a player is cleared off the bench, trim any trailing
+// empty rows back down to a single spare (never below 1 row total, and never touching a row
+// that isn't part of the unbroken empty run at the very end -- an emptied middle slot stays
+// put, since it's still a usable bench position, not excess capacity).
+function shrink_benched_table($pdo, $tableId) {
+    $stmt = $pdo->prepare(
+        "SELECT r.id, SUM(CASE WHEN c.toon_kind = 'main' AND c.toon_id IS NULL THEN 0 ELSE 1 END) AS occupied
+         FROM raid_rows r JOIN raid_cells c ON c.row_id = r.id
+         WHERE r.table_id = ? GROUP BY r.id ORDER BY r.sort_order DESC"
+    );
+    $stmt->execute([$tableId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (count($rows) <= 1) return false;
+
+    $trailingEmptyIds = [];
+    foreach ($rows as $r) {
+        if ((int)$r['occupied'] !== 0) break;
+        $trailingEmptyIds[] = $r['id'];
+    }
+    $toDelete = array_slice($trailingEmptyIds, 1); // keep the last trailing-empty row as the one spare
+    if (!$toDelete) return false;
+
+    $placeholders = implode(',', array_fill(0, count($toDelete), '?'));
+    $pdo->prepare("DELETE FROM raid_rows WHERE id IN ($placeholders)")->execute($toDelete);
+    return true;
+}
+
 function ensure_benched_capacity($pdo, $tableId) {
     $stmt = $pdo->prepare('SELECT kind FROM raid_tables WHERE id = ?');
     $stmt->execute([$tableId]);
@@ -212,7 +239,7 @@ function ensure_benched_capacity($pdo, $tableId) {
         grow_benched_table($pdo, $tableId);
         return true;
     }
-    return false;
+    return shrink_benched_table($pdo, $tableId);
 }
 
 function raid_id_for_table($pdo, $tableId) {
@@ -338,6 +365,7 @@ if ($action === 'clear_section') {
         collect_table_ids($pdo, $tid, $tableIds);
     }
     clear_cells_for_tables($pdo, $tableIds);
+    foreach ($tableIds as $tid) ensure_benched_capacity($pdo, $tid);
 
     echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $section['raid_id'])]);
     exit;
@@ -364,6 +392,7 @@ if ($action === 'clear_all') {
         }
     }
     clear_cells_for_tables($pdo, $tableIds);
+    foreach ($tableIds as $tid) ensure_benched_capacity($pdo, $tid);
     $pdo->prepare('DELETE FROM raid_pool WHERE raid_id = ?')->execute([$raidId]);
 
     echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $raidId), 'pool' => []]);
