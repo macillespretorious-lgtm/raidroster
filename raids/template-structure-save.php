@@ -623,17 +623,25 @@ if ($action === 'move_section') {
     respond_structure($pdo, $sec['template_id']);
 }
 
-// Seeds a freshly-inserted table with the fixed Benched layout: one 'general' column, a single
-// starting row (real growth happens at raid-time via cells-save.php's grow-on-full logic, so it
-// never needs more than one spare slot up front), and the one static rule every Benched table
-// carries -- a table-scoped max_count(1), preventing the same player from occupying two bench
-// slots. This rule is permanent: the Logic-mode UI and add_rule/update_rule/delete_rule below
-// all refuse to let it be edited or removed, or a second rule added, on a non-standard table.
+// Seeds a freshly-inserted table with the fixed Benched layout: one 'general' column, a fixed
+// 'text' header row reading "Benched" (row 0 -- excluded from cells-save.php's grow/shrink
+// capacity math, which only ever looks at kind='general' rows), one 'general' starting row
+// (real growth happens at raid-time via cells-save.php's grow-on-full logic, so it never needs
+// more than one spare slot up front), and the one static rule every Benched table carries -- a
+// table-scoped max_count(1), preventing the same player from occupying two bench slots. This
+// rule is permanent: the Logic-mode UI and add_rule/update_rule/delete_rule below all refuse to
+// let it be edited or removed, or a second rule added, on a non-standard table.
 function seed_benched_table($pdo, $tableId) {
     $pdo->prepare('INSERT INTO raid_template_columns (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
         ->execute([$tableId, 'Bench', 'general']);
     $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, '', 'text']);
+    $headerRowId = (int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, 1, ?)')
         ->execute([$tableId, '', 'general']);
+    $colId = (int)$pdo->query('SELECT id FROM raid_template_columns WHERE table_id = ' . (int)$tableId . ' ORDER BY sort_order, id LIMIT 1')->fetchColumn();
+    $pdo->prepare('INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bold) VALUES (?, ?, ?, ?, 1)')
+        ->execute([$tableId, $headerRowId, $colId, 'Benched']);
     $pdo->prepare('INSERT INTO raid_template_rules (table_id, rule_type, scope, classes, max_count, label, sort_order) VALUES (?, ?, ?, ?, ?, ?, 0)')
         ->execute([$tableId, 'max_count', 'table', null, 1, 'A player can only be assigned once']);
 }
