@@ -34,14 +34,15 @@ $pdo    = db_connect();
 if ($action === 'save') {
     $dow    = isset($body['dayOfWeek']) ? (int)$body['dayOfWeek'] : -1;
     $tmplId = isset($body['templateId']) && $body['templateId'] ? (int)$body['templateId'] : null;
-    $start  = $body['startTimeOverride'] ?? null;
+    $start  = $body['startTime'] ?? null;
+    $dur    = isset($body['durationMinutes']) && $body['durationMinutes'] !== null ? (int)$body['durationMinutes'] : null;
     $active = !empty($body['active']);
 
     if ($start !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) $start = null;
 
-    if ($dow < 0 || $dow > 6 || !$tmplId) {
+    if ($dow < 0 || $dow > 6 || !$tmplId || !$start || !$dur) {
         http_response_code(400);
-        echo json_encode(['error' => 'Invalid recurring slot submission']);
+        echo json_encode(['error' => 'A recurring slot needs a template, start time, and duration']);
         exit;
     }
 
@@ -54,11 +55,11 @@ if ($action === 'save') {
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO raid_recurring_slots (guild_id, day_of_week, template_id, start_time_override, active)
-         VALUES (?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE template_id = VALUES(template_id), start_time_override = VALUES(start_time_override), active = VALUES(active)'
+        'INSERT INTO raid_recurring_slots (guild_id, day_of_week, template_id, start_time, duration_minutes, active)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE template_id = VALUES(template_id), start_time = VALUES(start_time), duration_minutes = VALUES(duration_minutes), active = VALUES(active)'
     );
-    $stmt->execute([$tenant['id'], $dow, $tmplId, $start, $active ? 1 : 0]);
+    $stmt->execute([$tenant['id'], $dow, $tmplId, $start, $dur, $active ? 1 : 0]);
 
     echo json_encode(['success' => true]);
     exit;

@@ -129,26 +129,25 @@ if (!$webhookDays) {
     $webhookDays = array_map(fn($n) => ['name' => $n, 'webhook' => ''], $WEBHOOK_DAY_DEFAULTS);
 }
 
-$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $raidTemplates = array_map(function ($t) {
     return [
-        'id'                     => (int)$t['id'],
-        'name'                   => $t['name'],
-        'description'            => $t['description'],
-        'defaultStartTime'       => $t['default_start_time'],
-        'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
+        'id'          => (int)$t['id'],
+        'name'        => $t['name'],
+        'description' => $t['description'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
-$stmt = $pdo->prepare('SELECT day_of_week, template_id, start_time_override, active FROM raid_recurring_slots WHERE guild_id = ?');
+$stmt = $pdo->prepare('SELECT day_of_week, template_id, start_time, duration_minutes, active FROM raid_recurring_slots WHERE guild_id = ?');
 $stmt->execute([$tenant['id']]);
 $recurringByDow = [];
 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
     $recurringByDow[(int)$r['day_of_week']] = [
-        'templateId'        => (int)$r['template_id'],
-        'startTimeOverride' => $r['start_time_override'],
-        'active'            => (bool)$r['active'],
+        'templateId'       => (int)$r['template_id'],
+        'startTime'        => $r['start_time'],
+        'durationMinutes'  => $r['duration_minutes'] !== null ? (int)$r['duration_minutes'] : null,
+        'active'           => (bool)$r['active'],
     ];
 }
 $WEEKDAY_LABELS = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday', 0 => 'Sunday'];
@@ -278,11 +277,13 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .recurring-row:last-child { border-bottom: none; }
     .recurring-day { width: 90px; flex-shrink: 0; font-size: 13px; font-weight: 600; }
     .recurring-row select { flex: 1; min-width: 140px; }
-    .recurring-row input[type=time] {
+    .recurring-row input[type=time], .recurring-row input[type=number] {
       background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff;
       border-radius: 6px; padding: 7px 10px; font-size: 13px; font: inherit; width: 110px;
     }
+    .recurring-row input[type=number] { width: 90px; }
     .recurring-active-label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #a8b4d0; white-space: nowrap; }
+    .recurring-hint { flex-basis: 100%; font-size: 11px; color: #e8c477; }
 
     .brand-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
     .brand-preview {
@@ -432,8 +433,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         <div id="recurringRows"></div>
       </div>
       <div class="instr-box">
-        Map a weekday to a template to auto-populate that day's raid on the calendar as weeks come into view. Toggle a row off to stop generating new instances without deleting past ones.
-        Templates themselves (name, default time, and roster/assignment layout) are built in <a href="/<?= h($slug) ?>/design" style="color:#a3adfa;">Design</a>.
+        Map a weekday to a template, start time, and duration to auto-populate that day's raid on the calendar as weeks come into view. Toggle a row off to stop generating new instances without deleting past ones.
+        Templates themselves (name, size, and roster/assignment layout) are built in <a href="/<?= h($slug) ?>/design" style="color:#a3adfa;">Design</a>.
       </div>
     </div>
 
@@ -575,20 +576,24 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       el.innerHTML = WEEKDAYS.map(w => {
         const slot = recurring[w.dow];
         const tplOptions = templates.map(t => `<option value="${t.id}" ${slot && slot.templateId === t.id ? 'selected' : ''}>${escH(t.name)}</option>`).join('');
+        const showHint = slot && slot.templateId && (!slot.startTime || !slot.durationMinutes);
         return `<div class="recurring-row" data-dow="${w.dow}">
           <span class="recurring-day">${w.label}</span>
           <select class="recur-template">
             <option value="">— None —</option>
             ${tplOptions}
           </select>
-          <input type="time" class="recur-time" value="${slot && slot.startTimeOverride ? slot.startTimeOverride.slice(0,5) : ''}" title="Override start time">
+          <input type="time" class="recur-time" value="${slot && slot.startTime ? slot.startTime.slice(0,5) : ''}" title="Start time">
+          <input type="number" class="recur-duration" min="0" step="15" placeholder="min" value="${slot && slot.durationMinutes ? slot.durationMinutes : ''}" title="Duration (minutes)">
           <label class="recurring-active-label"><input type="checkbox" class="recur-active" ${!slot || slot.active ? 'checked' : ''}> Active</label>
+          ${showHint ? '<span class="recurring-hint">Set a start time and duration to activate this day.</span>' : ''}
         </div>`;
       }).join('');
       el.querySelectorAll('.recurring-row').forEach(row => {
         const dow = row.dataset.dow;
         row.querySelector('.recur-template').addEventListener('change', () => saveRecurringRow(dow, row));
         row.querySelector('.recur-time').addEventListener('change', () => saveRecurringRow(dow, row));
+        row.querySelector('.recur-duration').addEventListener('change', () => saveRecurringRow(dow, row));
         row.querySelector('.recur-active').addEventListener('change', () => saveRecurringRow(dow, row));
       });
     }
@@ -597,20 +602,20 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       const templateId = row.querySelector('.recur-template').value;
       if (!templateId) {
         fetch(RECUR_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', dayOfWeek: parseInt(dow, 10) }) })
-          .then(r => r.json()).then(d => { if (d.success) { delete recurring[dow]; } });
+          .then(r => r.json()).then(d => { if (d.success) { delete recurring[dow]; renderRecurringRows(); } });
         return;
       }
-      const payload = {
-        action: 'save',
-        dayOfWeek: parseInt(dow, 10),
-        templateId: parseInt(templateId, 10),
-        startTimeOverride: row.querySelector('.recur-time').value || null,
-        active: row.querySelector('.recur-active').checked,
-      };
+      const startTime = row.querySelector('.recur-time').value || null;
+      const durationMinutes = row.querySelector('.recur-duration').value ? parseInt(row.querySelector('.recur-duration').value, 10) : null;
+      const active = row.querySelector('.recur-active').checked;
+      recurring[dow] = { templateId: parseInt(templateId, 10), startTime, durationMinutes, active };
+      if (!startTime || !durationMinutes) {
+        renderRecurringRows();
+        return;
+      }
+      const payload = { action: 'save', dayOfWeek: parseInt(dow, 10), templateId: parseInt(templateId, 10), startTime, durationMinutes, active };
       fetch(RECUR_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-        .then(r => r.json()).then(d => {
-          if (d.success) recurring[dow] = { templateId: payload.templateId, startTimeOverride: payload.startTimeOverride, active: payload.active };
-        });
+        .then(r => r.json()).then(d => { if (d.success) renderRecurringRows(); });
     }
 
     renderRecurringRows();

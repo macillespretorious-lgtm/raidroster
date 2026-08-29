@@ -28,7 +28,7 @@ $endStr   = $rangeEnd->format('Y-m-d');
 
 // Lazy auto-population: for each date in range whose day-of-week has an active
 // recurring slot and has no existing raid row at all, insert one from the template.
-$stmt = $pdo->prepare('SELECT rs.day_of_week, rs.template_id, rs.start_time_override, t.name, t.description, t.default_start_time, t.default_duration_minutes, t.size
+$stmt = $pdo->prepare('SELECT rs.day_of_week, rs.template_id, rs.start_time, rs.duration_minutes, t.name, t.description, t.size
                         FROM raid_recurring_slots rs
                         JOIN raid_templates t ON t.id = rs.template_id
                         WHERE rs.guild_id = ? AND rs.active = 1');
@@ -57,8 +57,8 @@ if ($slotsByDow) {
             $insAuto->execute([
                 $tenant['id'],
                 $dateStr,
-                $s['start_time_override'] ?: $s['default_start_time'],
-                $s['default_duration_minutes'],
+                $s['start_time'],
+                $s['duration_minutes'],
                 $s['template_id'],
                 $s['name'],
                 $s['description'],
@@ -90,16 +90,14 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
     ];
 }
 
-$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes, size FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, size FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $templates = array_map(function ($t) {
     return [
-        'id'                    => (int)$t['id'],
-        'name'                  => $t['name'],
-        'description'           => $t['description'],
-        'defaultStartTime'      => $t['default_start_time'],
-        'defaultDurationMinutes'=> $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
-        'size'                  => $t['size'],
+        'id'          => (int)$t['id'],
+        'name'        => $t['name'],
+        'description' => $t['description'],
+        'size'        => $t['size'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
@@ -143,9 +141,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
     .cal-cell {
       background: #111827; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
-      min-height: 92px; min-width: 0; padding: 8px; display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+      min-height: 92px; min-width: 0; padding: 8px; display: flex; flex-direction: column; gap: 4px; cursor: default;
     }
-    .cal-cell:hover { border-color: rgba(88,101,242,0.4); }
+    .cal-cell.can-add { cursor: pointer; }
+    .cal-cell.can-add:hover { border-color: rgba(88,101,242,0.4); }
     .cal-cell.today { border-color: #5865f2; box-shadow: inset 0 0 0 1px #5865f2; }
     .cal-cell.other-month { opacity: 0.55; }
     .cal-date { font-size: 12px; font-weight: 700; color: #a8b4d0; }
@@ -315,7 +314,9 @@ function renderCalendar() {
         const label = (r.startTime ? fmtTime(r.startTime) + ' ' : '') + esc(r.name);
         return `<div class="${chipCls.join(' ')}" onclick="event.stopPropagation(); openRaid(${r.id})">${label}</div>`;
       }).join('');
-      return `<div class="${cls.join(' ')}" onclick="openNewRaid('${date}')">
+      if (CAN_MANAGE) cls.push('can-add');
+      const cellClick = CAN_MANAGE ? ` onclick="openNewRaid('${date}')"` : '';
+      return `<div class="${cls.join(' ')}"${cellClick}>
         <div class="cal-date">${dnum}</div>
         ${chips}
       </div>`;
@@ -356,8 +357,6 @@ function applyTemplate(id) {
   const t = templates.find(x => String(x.id) === String(id));
   if (!t) return;
   document.getElementById('raidName').value = t.name;
-  document.getElementById('raidTime').value = (t.defaultStartTime || '').slice(0, 5);
-  document.getElementById('raidDuration').value = t.defaultDurationMinutes || '';
   document.getElementById('raidDesc').value = t.description || '';
 }
 

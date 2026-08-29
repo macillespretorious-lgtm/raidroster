@@ -15,16 +15,14 @@ $role = require_role($tenant, 'admin');
 $user = auth_user();
 $pdo  = db_connect();
 
-$stmt = $pdo->prepare('SELECT id, name, description, default_start_time, default_duration_minutes, size FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, size FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $raidTemplates = array_map(function ($t) {
     return [
-        'id'                     => (int)$t['id'],
-        'name'                   => $t['name'],
-        'description'            => $t['description'],
-        'defaultStartTime'       => $t['default_start_time'],
-        'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
-        'size'                   => $t['size'],
+        'id'          => (int)$t['id'],
+        'name'        => $t['name'],
+        'description' => $t['description'],
+        'size'        => $t['size'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
@@ -111,7 +109,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
   <?php render_nav_shell($tenant, $user, $role, 'design'); ?>
   <div class="wrap">
     <h1>Design</h1>
-    <p class="sub">Build and edit raid templates &mdash; their roster/assignment grid layout lives here. Scheduling which day runs which template is in Admin.</p>
+    <p class="sub">Build and edit raid templates &mdash; their roster/assignment grid layout lives here. Start time, duration, and day are decided when a raid is created on the calendar.</p>
 
     <div class="section" id="starterSection">
       <h2>Start from</h2>
@@ -133,16 +131,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
               <option value="40">40-man</option>
               <option value="20">20-man</option>
             </select>
-          </div>
-          <div class="form-group">
-            <label for="tplDuration">Default duration (min)</label>
-            <input type="number" id="tplDuration" min="0" step="15" placeholder="e.g. 180">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="tplStart">Default start time</label>
-            <input type="time" id="tplStart">
           </div>
           <div class="form-group">
             <label for="tplDesc">Description</label>
@@ -196,8 +184,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       if (!templates.length) { el.innerHTML = '<p class="empty">No templates yet — add one below.</p>'; return; }
       el.innerHTML = templates.map(t => {
         const meta = [t.size + '-man'];
-        if (t.defaultStartTime) meta.push(t.defaultStartTime.slice(0,5));
-        if (t.defaultDurationMinutes) meta.push(t.defaultDurationMinutes + ' min');
         return `<div class="card row tpl-item">
           <div class="name" onclick="editTemplate(${t.id})">${escH(t.name)}${meta.length ? ' <span class="tpl-meta">(' + meta.join(', ') + ')</span>' : ''}</div>
           <div class="tpl-actions">
@@ -215,8 +201,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       editingTplId = id;
       document.getElementById('tplName').value = t.name;
       document.getElementById('tplSize').value = t.size;
-      document.getElementById('tplStart').value = (t.defaultStartTime || '').slice(0, 5);
-      document.getElementById('tplDuration').value = t.defaultDurationMinutes || '';
       document.getElementById('tplDesc').value = t.description || '';
       document.getElementById('tplCancelEditBtn').classList.remove('hidden');
       const structBtn = document.getElementById('tplEditStructureBtn');
@@ -228,8 +212,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       editingTplId = null;
       document.getElementById('tplName').value = '';
       document.getElementById('tplSize').value = '40';
-      document.getElementById('tplStart').value = '';
-      document.getElementById('tplDuration').value = '';
       document.getElementById('tplDesc').value = '';
       document.getElementById('tplCancelEditBtn').classList.add('hidden');
       document.getElementById('tplEditStructureBtn').classList.add('hidden');
@@ -244,8 +226,6 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         id: editingTplId,
         name,
         size: document.getElementById('tplSize').value,
-        defaultStartTime: document.getElementById('tplStart').value || null,
-        defaultDurationMinutes: document.getElementById('tplDuration').value ? parseInt(document.getElementById('tplDuration').value, 10) : null,
         description: document.getElementById('tplDesc').value.trim() || null,
       };
       fetch(TPL_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })

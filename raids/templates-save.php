@@ -34,12 +34,10 @@ require_once __DIR__ . '/../includes/template_clone.php';
 
 function template_to_json($t) {
     return [
-        'id'                     => (int)$t['id'],
-        'name'                   => $t['name'],
-        'description'            => $t['description'],
-        'defaultStartTime'       => $t['default_start_time'],
-        'defaultDurationMinutes' => $t['default_duration_minutes'] !== null ? (int)$t['default_duration_minutes'] : null,
-        'size'                   => $t['size'],
+        'id'          => (int)$t['id'],
+        'name'        => $t['name'],
+        'description' => $t['description'],
+        'size'        => $t['size'],
     ];
 }
 
@@ -47,12 +45,9 @@ if ($action === 'save') {
     $id     = isset($body['id']) && $body['id'] ? (int)$body['id'] : null;
     $name   = substr(trim($body['name'] ?? ''), 0, 100);
     $desc   = isset($body['description']) ? substr(trim($body['description']), 0, 65000) : null;
-    $start  = $body['defaultStartTime'] ?? null;
-    $dur    = isset($body['defaultDurationMinutes']) && $body['defaultDurationMinutes'] !== null ? (int)$body['defaultDurationMinutes'] : null;
     $size   = ($body['size'] ?? '40') === '20' ? '20' : '40';
 
     if ($desc === '') $desc = null;
-    if ($start !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) $start = null;
 
     if (!$name) {
         http_response_code(400);
@@ -68,11 +63,11 @@ if ($action === 'save') {
             echo json_encode(['error' => 'Template not found']);
             exit;
         }
-        $stmt = $pdo->prepare('UPDATE raid_templates SET name = ?, description = ?, default_start_time = ?, default_duration_minutes = ?, size = ? WHERE id = ? AND guild_id = ?');
-        $stmt->execute([$name, $desc, $start, $dur, $size, $id, $tenant['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_templates SET name = ?, description = ?, size = ? WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$name, $desc, $size, $id, $tenant['id']]);
     } else {
-        $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, default_start_time, default_duration_minutes, size) VALUES (?, ?, ?, ?, ?, ?)');
-        $stmt->execute([$tenant['id'], $name, $desc, $start, $dur, $size]);
+        $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, size) VALUES (?, ?, ?, ?)');
+        $stmt->execute([$tenant['id'], $name, $desc, $size]);
         $id = (int)$pdo->lastInsertId();
     }
 
