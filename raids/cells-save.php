@@ -281,6 +281,17 @@ function raid_id_for_table($pdo, $tableId) {
     return (int)$stmt->fetchColumn();
 }
 
+// Counter tables compute their counts live from another table's cells at read time, so a
+// single-cell response (the common case for assign/move/setRole) leaves the client's
+// in-memory Counter numbers stale until a full reload. Whenever the edited cell's table
+// feeds a Counter table, force the fuller 'sections' response instead so the client re-renders
+// with fresh counts, same as the existing benched-growth ($grew) escape hatch does.
+function table_feeds_counter($pdo, $tableId) {
+    $stmt = $pdo->prepare("SELECT 1 FROM raid_tables WHERE kind = 'counter' AND count_source_table_id = ? LIMIT 1");
+    $stmt->execute([$tableId]);
+    return (bool)$stmt->fetchColumn();
+}
+
 if ($action === 'bench_import') {
     $raidId = isset($body['raidId']) ? (int)$body['raidId'] : 0;
     $stmt = $pdo->prepare('SELECT id FROM raids WHERE id = ? AND guild_id = ?');
@@ -373,7 +384,9 @@ if ($action === 'move') {
     $grew = ensure_benched_capacity($pdo, $toCell['table_id']) || $grew;
 
     $response = ['success' => true, 'from' => fetch_cell_out($pdo, $fromCellId), 'to' => fetch_cell_out($pdo, $toCellId)];
-    if ($grew) $response['sections'] = fetch_raid_structure($pdo, raid_id_for_table($pdo, $fromCell['table_id']));
+    if ($grew || table_feeds_counter($pdo, $fromCell['table_id']) || table_feeds_counter($pdo, $toCell['table_id'])) {
+        $response['sections'] = fetch_raid_structure($pdo, raid_id_for_table($pdo, $fromCell['table_id']));
+    }
     echo json_encode($response);
     exit;
 }
@@ -462,7 +475,10 @@ if ($action === 'setRole') {
     $next = $class ? cycle_role_for_class($class, $current) : null;
     $stmt = $pdo->prepare('UPDATE raid_cells SET role = ? WHERE id = ?');
     $stmt->execute([$next, $cellId]);
-    echo json_encode(['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)]);
+    $response = ['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)];
+    $tableId = fetch_cell_owned($pdo, $cellId, $tenant['id'])['table_id'];
+    if (table_feeds_counter($pdo, $tableId)) $response['sections'] = fetch_raid_structure($pdo, raid_id_for_table($pdo, $tableId));
+    echo json_encode($response);
     exit;
 }
 
@@ -558,5 +574,7 @@ $stmt->execute([$resolved['toon_id'], $resolved['toon_kind'], $resolved['pug_nam
 $grew = ensure_benched_capacity($pdo, $cell['table_id']);
 
 $response = ['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)];
-if ($grew) $response['sections'] = fetch_raid_structure($pdo, raid_id_for_table($pdo, $cell['table_id']));
+if ($grew || table_feeds_counter($pdo, $cell['table_id'])) {
+    $response['sections'] = fetch_raid_structure($pdo, raid_id_for_table($pdo, $cell['table_id']));
+}
 echo json_encode($response);
