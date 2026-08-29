@@ -1247,10 +1247,17 @@ function closeCopyTablePopup() {
 }
 
 // Every Roster-tab standard table is a valid destination except the one the button lives on.
+// Keeps each table paired with its own section's title, since a raid can have several Roster-
+// kind sections (e.g. separate Group blocks) whose tables might otherwise share a plain name.
 function rosterCopyTargets(fromTableId) {
   return sections.filter(s => s.kind === 'roster')
-    .flatMap(s => s.tables)
-    .filter(tb => tb.kind === 'standard' && tb.id !== fromTableId);
+    .flatMap(s => s.tables.map(tb => ({ tb, sectionTitle: s.title })))
+    .filter(({ tb }) => tb.kind === 'standard' && tb.id !== fromTableId);
+}
+
+function copyTargetLabel({ tb, sectionTitle }) {
+  const tableName = tb.title || 'Untitled table';
+  return sectionTitle ? `${sectionTitle} — ${tableName}` : tableName;
 }
 
 function showCopyTablePopup(btn) {
@@ -1265,7 +1272,7 @@ function showCopyTablePopup(btn) {
   popup.innerHTML = targets.length ? `
     <label>Copy assignments to</label>
     <select class="copy-table-select">
-      ${targets.map(tb => `<option value="${tb.id}">${esc(tb.title || 'Untitled table')}</option>`).join('')}
+      ${targets.map(t => `<option value="${t.tb.id}">${esc(copyTargetLabel(t))}</option>`).join('')}
     </select>
     <div class="copy-table-actions">
       <button type="button" class="copy-table-cancel">Cancel</button>
@@ -1284,9 +1291,9 @@ function showCopyTablePopup(btn) {
   const goBtn = popup.querySelector('.copy-table-go');
   if (goBtn) goBtn.addEventListener('click', () => {
     const toTableId = parseInt(popup.querySelector('.copy-table-select').value, 10);
-    const toTitle = targets.find(tb => tb.id === toTableId);
+    const target = targets.find(t => t.tb.id === toTableId);
     closeCopyTablePopup();
-    if (!confirm(`Overwrite all assignments in "${(toTitle && toTitle.title) || 'that table'}" with a copy of this table? This cannot be undone.`)) return;
+    if (!confirm(`Overwrite all assignments in "${target ? copyTargetLabel(target) : 'that table'}" with a copy of this table? This cannot be undone.`)) return;
     clearCall({ action: 'copy_table', fromTableId, toTableId }).then(d => {
       if (d && d.skipped) alert(`Copied, but ${d.skipped} cell${d.skipped === 1 ? '' : 's'} were skipped because of a class/limit rule on the destination table.`);
     });
