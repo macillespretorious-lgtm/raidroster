@@ -28,7 +28,7 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
     $swapRows = compute_swap_rows($pdo, $guildId, (int)$tb['id'], $beforeFull, $afterFull);
 
     $mkCol = fn($id, $label) => ['id' => $id, 'label' => $label, 'kind' => 'text', 'width' => null, 'headerColor' => null, 'bgColor' => null, 'groupId' => null, 'headerColspan' => 1];
-    $columns = [$mkCol(-1, 'Player'), $mkCol(-2, 'From'), $mkCol(-3, 'To'), $mkCol(-4, 'When'), $mkCol(-5, 'Boss')];
+    $columns = [$mkCol(-2, 'From'), $mkCol(-3, 'To'), $mkCol(-4, 'When'), $mkCol(-5, 'Boss')];
 
     $mkCell = fn($text) => [
         'id' => 0, 'toonKind' => null, 'toonId' => null, 'pugName' => null, 'pugClass' => null,
@@ -51,7 +51,6 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
     $rowId = -1;
     foreach ($swapRows as $sr) {
         $rows[] = ['id' => $rowId, 'label' => '', 'kind' => 'text', 'height' => null, 'bgColor' => null, 'playerMainToonId' => $sr['playerMainToonId']];
-        $cells[$rowId . '_-1'] = $mkCell($sr['playerName']);
         $cells[$rowId . '_-2'] = $mkToonCell($sr['before']);
         $cells[$rowId . '_-3'] = $mkToonCell($sr['after']);
         $cells[$rowId . '_-4'] = $mkCell($sr['note']);
