@@ -67,8 +67,59 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
     ];
 }
 
+// Synthesizes a Counter table's read shape -- 2 fixed text-kind columns (Tanks/Healers,
+// negative ids, never persisted) and one computed row of live counts -- same technique as
+// fetch_swaps_table() above, so the existing DOM renderer and Discord-canvas export draw it
+// with no new code. Counts use the effective role (raw raid_cells.role, falling back to
+// default_role_for_class()) already resolved by fetch_table_full() below, so a Counter always
+// matches whatever role icon is actually shown for each occupant.
+function fetch_counter_table($pdo, $tb, $guildId) {
+    $sourceTb = null;
+    if ($tb['count_source_table_id']) {
+        $stmt = $pdo->prepare('SELECT * FROM raid_tables WHERE id = ?');
+        $stmt->execute([$tb['count_source_table_id']]);
+        $sourceTb = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+    $sourceFull = $sourceTb ? fetch_table_full($pdo, $sourceTb, $guildId) : ['cells' => []];
+
+    $tankCount = 0;
+    $healerCount = 0;
+    foreach ($sourceFull['cells'] as $cell) {
+        if (!$cell['name']) continue;
+        if ($cell['role'] === 'Tank') $tankCount++;
+        elseif ($cell['role'] === 'Healer') $healerCount++;
+    }
+
+    $mkCol = fn($id, $label) => ['id' => $id, 'label' => $label, 'kind' => 'text', 'width' => null, 'headerColor' => null, 'bgColor' => null, 'groupId' => null, 'headerColspan' => 1];
+    $columns = [$mkCol(-1, 'Tanks'), $mkCol(-2, 'Healers')];
+
+    $mkCell = fn($text) => [
+        'id' => 0, 'toonKind' => null, 'toonId' => null, 'pugName' => null, 'pugClass' => null,
+        'name' => null, 'class' => null, 'role' => null, 'roleConfirmed' => false, 'server' => null,
+        'marked' => false, 'textContent' => $text, 'bgColor' => null, 'textColor' => null,
+        'bold' => true, 'font' => null, 'icon' => null, 'kindOverride' => null,
+    ];
+
+    $rows = [['id' => -1, 'label' => '', 'kind' => 'text', 'height' => null, 'bgColor' => null]];
+    $cells = [
+        '-1_-1' => $mkCell((string)$tankCount),
+        '-1_-2' => $mkCell((string)$healerCount),
+    ];
+
+    return [
+        'id' => (int)$tb['id'], 'title' => $tb['title'],
+        'headerColor' => $tb['header_color'], 'bgColor' => $tb['bg_color'],
+        'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
+        'kind' => 'counter',
+        'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
+        'columns' => $columns, 'rows' => $rows, 'columnGroups' => [], 'cells' => $cells,
+        'cellMerges' => [], 'rules' => [],
+    ];
+}
+
 function fetch_table_full($pdo, $tb, $guildId = null) {
     if ($tb['kind'] === 'swaps') return fetch_swaps_table($pdo, $tb, $guildId);
+    if ($tb['kind'] === 'counter') return fetch_counter_table($pdo, $tb, $guildId);
 
     $stmtC = $pdo->prepare('SELECT id, label, kind, width, header_color, bg_color, group_id, header_colspan FROM raid_columns WHERE table_id = ? ORDER BY sort_order, id');
     $stmtC->execute([$tb['id']]);

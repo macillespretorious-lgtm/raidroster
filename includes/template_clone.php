@@ -20,6 +20,7 @@ function clone_template_to_guild($pdo, $sourceTemplateId, $targetGuildId, $newNa
     // links in one final pass, same rationale as backfill_swap_links() in raid_structure.php.
     $tableIdMap = [];
     $swapLinks  = [];
+    $countLinks = [];
 
     $stmtSec = $pdo->prepare('SELECT * FROM raid_template_sections WHERE template_id = ? ORDER BY sort_order, id');
     $stmtSec->execute([$sourceTemplateId]);
@@ -34,7 +35,7 @@ function clone_template_to_guild($pdo, $sourceTemplateId, $targetGuildId, $newNa
         $stmtT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
         $stmtT->execute([$sec['id']]);
         foreach ($stmtT->fetchAll(PDO::FETCH_ASSOC) as $tb) {
-            clone_template_table_recursive($pdo, $tb, $newSectionId, null, $tableIdMap, $swapLinks);
+            clone_template_table_recursive($pdo, $tb, $newSectionId, null, $tableIdMap, $swapLinks, $countLinks);
         }
     }
 
@@ -44,6 +45,12 @@ function clone_template_to_guild($pdo, $sourceTemplateId, $targetGuildId, $newNa
         $afterId  = $afterSrcId  !== null ? ($tableIdMap[$afterSrcId]  ?? null) : null;
         $pdo->prepare('UPDATE raid_template_tables SET swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?')
             ->execute([$beforeId, $afterId, $newTableId]);
+    }
+
+    foreach ($countLinks as $newTableId => $srcId) {
+        $countSourceId = $srcId !== null ? ($tableIdMap[$srcId] ?? null) : null;
+        $pdo->prepare('UPDATE raid_template_tables SET count_source_table_id = ? WHERE id = ?')
+            ->execute([$countSourceId, $newTableId]);
     }
 
     // Tab-export config is template-scoped and never referenced elsewhere by id, so a wholesale
@@ -70,7 +77,7 @@ function clone_template_to_guild($pdo, $sourceTemplateId, $targetGuildId, $newNa
 // groups) into a new raid_template_tables row under a different template. Exactly one of
 // $newSectionId/$newParentGroupId is non-null, matching the section_id/parent_group_id
 // invariant enforced elsewhere (see copy_table_recursive() in raid_structure.php).
-function clone_template_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId, &$tableIdMap, &$swapLinks) {
+function clone_template_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId, &$tableIdMap, &$swapLinks, &$countLinks) {
     $insT = $pdo->prepare(
         'INSERT INTO raid_template_tables (section_id, parent_group_id, title, header_color, default_column_width, row_label_width, sort_order, bg_color, kind)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -80,6 +87,9 @@ function clone_template_table_recursive($pdo, $tb, $newSectionId, $newParentGrou
     $tableIdMap[$tb['id']] = $newTableId;
     if ($tb['kind'] === 'swaps') {
         $swapLinks[$newTableId] = [$tb['swap_before_table_id'], $tb['swap_after_table_id']];
+    }
+    if ($tb['kind'] === 'counter') {
+        $countLinks[$newTableId] = $tb['count_source_table_id'];
     }
 
     $stmtG = $pdo->prepare('SELECT * FROM raid_template_column_groups WHERE table_id = ? ORDER BY sort_order, id');
@@ -153,7 +163,7 @@ function clone_template_table_recursive($pdo, $tb, $newSectionId, $newParentGrou
         $stmtGT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE parent_group_id = ? ORDER BY sort_order, id');
         $stmtGT->execute([$grp['id']]);
         foreach ($stmtGT->fetchAll(PDO::FETCH_ASSOC) as $childTb) {
-            clone_template_table_recursive($pdo, $childTb, null, $groupIdMap[$grp['id']], $tableIdMap, $swapLinks);
+            clone_template_table_recursive($pdo, $childTb, null, $groupIdMap[$grp['id']], $tableIdMap, $swapLinks, $countLinks);
         }
     }
 }

@@ -616,6 +616,21 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     </div>
   </div>
 
+  <div class="modal-backdrop" id="counterModalBackdrop">
+    <div class="modal cell-edit-modal">
+      <div class="preview-head">
+        <h2 id="counterModalTitle">New Counter table</h2>
+        <button class="icon-btn" id="counterModalClose" type="button" title="Close">&times;</button>
+      </div>
+      <p class="preview-note">Pick the Standard roster table to count &mdash; the Counter shows a live Tanks/Healers count for whoever is assigned there.</p>
+      <label style="display:block; margin-bottom:8px;">Roster table<br><select id="counterSourceSelect" style="width:100%;"></select></label>
+      <div class="modal-actions">
+        <button class="btn btn-cancel-tpl" type="button" id="counterModalCancel">Cancel</button>
+        <button class="btn" type="button" id="counterModalCreate">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="cellEditBackdrop">
     <div class="modal cell-edit-modal">
       <div class="preview-head">
@@ -1339,6 +1354,7 @@ function render() {
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
       if (act === 'add-table-kind') { openKindPicker = null; call({ action: 'add_table', sectionId: id, kind: node.dataset.kind }); }
       if (act === 'open-swaps-modal') { openKindPicker = null; render(); openSwapsModal(id, null); }
+      if (act === 'open-counter-modal') { openKindPicker = null; render(); openCounterModal(id, null); }
       if (act === 'add-roster-table') {
         const size = prompt('Raid size for this roster table — 20 or 40:', '40');
         if (size === null) return;
@@ -1361,6 +1377,7 @@ function render() {
       }
       if (act === 'rename-table') call({ action: 'update_table', id, title: node.value.trim() });
       if (act === 'edit-swaps-links') openSwapsEditModal(id);
+      if (act === 'edit-counter-link') openCounterEditModal(id);
       if (act === 'delete-table') { if (confirm('Delete this table?')) call({ action: 'delete_table', id }); }
       if (act === 'delete-col') call({ action: 'delete_column', id });
       if (act === 'rename-row') call({ action: 'update_row', id, label: node.value.trim() });
@@ -1806,7 +1823,10 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
     : tb.kind === 'swaps'
       ? `<div class="tbl-kind-note">Swaps table &mdash; Before: <strong>${esc(swapTableLabel(tb.swapBeforeTableId))}</strong>, After: <strong>${esc(swapTableLabel(tb.swapAfterTableId))}</strong>
           <button type="button" class="btn-link" data-action="edit-swaps-links" data-id="${tb.id}">change&hellip;</button></div>`
-      : '';
+      : tb.kind === 'counter'
+        ? `<div class="tbl-kind-note">Counter table &mdash; counts Tanks/Healers from: <strong>${esc(swapTableLabel(tb.countSourceTableId))}</strong>
+            <button type="button" class="btn-link" data-action="edit-counter-link" data-id="${tb.id}">change&hellip;</button></div>`
+        : '';
 
   const headerBg = tb.headerColor || '';
   const headerStyle = headerBg ? `background:${headerBg};` : '';
@@ -1892,6 +1912,7 @@ function renderSection(sec) {
           <button data-action="add-table-kind" data-kind="standard" data-id="${sec.id}">Standard</button>
           <button data-action="add-table-kind" data-kind="benched" data-id="${sec.id}" title="Auto-fills from Raid-Helper Bench signups and grows automatically">Benched</button>
           <button data-action="open-swaps-modal" data-id="${sec.id}" title="Auto-diffs two Standard tables">Swaps&hellip;</button>
+          <button data-action="open-counter-modal" data-id="${sec.id}" title="Shows a live Tank/Healer count for a Standard table">Counter&hellip;</button>
         </div>
       </div>
       ${sec.kind === 'roster' ? `<button class="btn" data-action="add-roster-table" data-id="${sec.id}" title="Auto-build a roster table sized to your raid (5 rows &times; 4 or 8 groups)">+ Roster table</button>` : ''}
@@ -2883,6 +2904,52 @@ document.getElementById('swapsModalCreate').addEventListener('click', () => {
     ? { action: 'update_table', id: swapsModalTableId, title: findTable(swapsModalTableId).title, beforeTableId, afterTableId }
     : { action: 'add_table', kind: 'swaps', beforeTableId, afterTableId, ...(swapsModalGroupId ? { groupId: swapsModalGroupId } : { sectionId: swapsModalSectionId }) };
   call(payload).then(d => { if (d) closeSwapsModal(); });
+});
+
+// Counter-table creation/edit modal: single-table picker over every Standard table in the
+// template, same rationale as collectStandardTables() above.
+let counterModalSectionId = null;
+let counterModalGroupId = null;
+let counterModalTableId = null;
+
+function openCounterModal(sectionId, groupId) {
+  const opts = collectStandardTables();
+  if (opts.length < 1) { alert('Need at least one Standard table in this template before creating a Counter table.'); return; }
+  counterModalSectionId = sectionId;
+  counterModalGroupId = groupId || null;
+  counterModalTableId = null;
+  document.getElementById('counterModalTitle').textContent = 'New Counter table';
+  document.getElementById('counterSourceSelect').innerHTML = opts.map(o => `<option value="${o.id}">${esc(o.label)}</option>`).join('');
+  document.getElementById('counterModalBackdrop').classList.add('open');
+}
+function openCounterEditModal(tableId) {
+  const tb = findTable(tableId);
+  const opts = collectStandardTables();
+  counterModalSectionId = null;
+  counterModalGroupId = null;
+  counterModalTableId = tableId;
+  document.getElementById('counterModalTitle').textContent = 'Edit Counter source';
+  document.getElementById('counterSourceSelect').innerHTML = opts.map(o => `<option value="${o.id}">${esc(o.label)}</option>`).join('');
+  document.getElementById('counterSourceSelect').value = tb.countSourceTableId;
+  document.getElementById('counterModalBackdrop').classList.add('open');
+}
+function closeCounterModal() {
+  document.getElementById('counterModalBackdrop').classList.remove('open');
+  counterModalSectionId = null;
+  counterModalGroupId = null;
+  counterModalTableId = null;
+}
+document.getElementById('counterModalClose').addEventListener('click', closeCounterModal);
+document.getElementById('counterModalCancel').addEventListener('click', closeCounterModal);
+document.getElementById('counterModalBackdrop').addEventListener('click', e => {
+  if (e.target.id === 'counterModalBackdrop') closeCounterModal();
+});
+document.getElementById('counterModalCreate').addEventListener('click', () => {
+  const countSourceTableId = parseInt(document.getElementById('counterSourceSelect').value, 10);
+  const payload = counterModalTableId
+    ? { action: 'update_table', id: counterModalTableId, title: findTable(counterModalTableId).title, countSourceTableId }
+    : { action: 'add_table', kind: 'counter', countSourceTableId, ...(counterModalGroupId ? { groupId: counterModalGroupId } : { sectionId: counterModalSectionId }) };
+  call(payload).then(d => { if (d) closeCounterModal(); });
 });
 
 // Text-cell WYSIWYG popup: opened by clicking a Text-kind cell (see bodyCellsForRow's

@@ -58,6 +58,21 @@ function backfill_swap_links($pdo, $raidId) {
         $afterId  = $sw['swap_after_table_id']  !== null ? ($bySource[(int)$sw['swap_after_table_id']]  ?? null) : null;
         $upd->execute([$beforeId, $afterId, $sw['id']]);
     }
+
+    // Counter tables carry count_source_table_id pointing at a *template* table id, same
+    // remap rationale as the Swaps links above.
+    $stmtCounters = $pdo->prepare(
+        "SELECT rt.id, tt.count_source_table_id
+         FROM raid_tables rt
+         JOIN raid_template_tables tt ON tt.id = rt.source_table_id
+         WHERE rt.kind = 'counter' AND rt.id IN ($placeholders)"
+    );
+    $stmtCounters->execute($allIds);
+    $updC = $pdo->prepare('UPDATE raid_tables SET count_source_table_id = ? WHERE id = ?');
+    foreach ($stmtCounters->fetchAll(PDO::FETCH_ASSOC) as $c) {
+        $srcId = $c['count_source_table_id'] !== null ? ($bySource[(int)$c['count_source_table_id']] ?? null) : null;
+        $updC->execute([$srcId, $c['id']]);
+    }
 }
 
 // Copies one template table (and, recursively, any nested boss-tables living inside its

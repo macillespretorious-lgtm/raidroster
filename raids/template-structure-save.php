@@ -327,6 +327,7 @@ function fetch_table_full($pdo, $tb) {
         'kind' => $tb['kind'],
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
+        'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
         'columns' => $columns,
         'rows' => $rows,
         'columnGroups' => $columnGroups,
@@ -664,9 +665,21 @@ function resolve_swap_tables($pdo, $guildId, $templateId, $body) {
     return [$beforeId, $afterId];
 }
 
+// Validates a Counter table's single source-table pick: must exist, belong to the same
+// template, and be 'standard' -- a Counter can only ever count real assignments, never
+// another computed table (never trust the client's kind label for another table).
+function resolve_count_source_table($pdo, $guildId, $templateId, $body) {
+    $sourceId = (int)($body['countSourceTableId'] ?? 0);
+    if (!$sourceId) fail(400, 'Pick a roster table to count');
+    $t = fetch_table_owned($pdo, $guildId, $sourceId);
+    if (!$t || $t['template_id'] !== $templateId) fail(404, 'Roster table not found');
+    if ($t['kind'] !== 'standard') fail(400, 'Roster table must be a Standard table');
+    return $sourceId;
+}
+
 if ($action === 'add_table') {
     $groupId = (int)($body['groupId'] ?? 0);
-    $kind = in_array($body['kind'] ?? 'standard', ['standard', 'benched', 'swaps'], true) ? $body['kind'] : 'standard';
+    $kind = in_array($body['kind'] ?? 'standard', ['standard', 'benched', 'swaps', 'counter'], true) ? $body['kind'] : 'standard';
 
     if ($groupId) {
         $grp = fetch_group_owned($pdo, $tenant['id'], $groupId);
@@ -675,8 +688,9 @@ if ($action === 'add_table') {
         if (!$title) fail(400, 'Title is required');
         $order = next_sort_order($pdo, 'raid_template_tables', 'parent_group_id', $grp['id']);
         [$beforeId, $afterId] = $kind === 'swaps' ? resolve_swap_tables($pdo, $tenant['id'], $grp['template_id'], $body) : [null, null];
-        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id) VALUES (?, ?, ?, ?, ?, ?)');
-        $stmt->execute([$grp['id'], $title, $order, $kind, $beforeId, $afterId]);
+        $countSourceId = $kind === 'counter' ? resolve_count_source_table($pdo, $tenant['id'], $grp['template_id'], $body) : null;
+        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id, count_source_table_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$grp['id'], $title, $order, $kind, $beforeId, $afterId, $countSourceId]);
         if ($kind === 'benched') seed_benched_table($pdo, (int)$pdo->lastInsertId());
         respond_structure($pdo, $grp['template_id']);
     }
@@ -687,8 +701,9 @@ if ($action === 'add_table') {
     $title = substr(trim($body['title'] ?? ''), 0, 100);
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
     [$beforeId, $afterId] = $kind === 'swaps' ? resolve_swap_tables($pdo, $tenant['id'], $sec['template_id'], $body) : [null, null];
-    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id) VALUES (?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$sec['id'], $title, $order, $kind, $beforeId, $afterId]);
+    $countSourceId = $kind === 'counter' ? resolve_count_source_table($pdo, $tenant['id'], $sec['template_id'], $body) : null;
+    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id, count_source_table_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$sec['id'], $title, $order, $kind, $beforeId, $afterId, $countSourceId]);
     if ($kind === 'benched') seed_benched_table($pdo, (int)$pdo->lastInsertId());
     respond_structure($pdo, $sec['template_id']);
 }
@@ -730,6 +745,10 @@ if ($action === 'update_table') {
         [$beforeId, $afterId] = resolve_swap_tables($pdo, $tenant['id'], $tb['template_id'], $mergedBody);
         $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
         $stmt->execute([$title, $headerColor, $colWidth, $beforeId, $afterId, $tb['id']]);
+    } elseif ($tb['kind'] === 'counter' && array_key_exists('countSourceTableId', $body)) {
+        $countSourceId = resolve_count_source_table($pdo, $tenant['id'], $tb['template_id'], $body);
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, count_source_table_id = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $countSourceId, $tb['id']]);
     } else {
         $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ? WHERE id = ?');
         $stmt->execute([$title, $headerColor, $colWidth, $tb['id']]);
@@ -745,6 +764,11 @@ if ($action === 'delete_table') {
     $stmt->execute([$tb['id'], $tb['id']]);
     if ($blocker = $stmt->fetch(PDO::FETCH_ASSOC)) {
         fail(400, 'Used as a Swaps source by "' . ($blocker['title'] ?: 'a Swaps table') . '" — remove that link first');
+    }
+    $stmt = $pdo->prepare('SELECT id, title FROM raid_template_tables WHERE count_source_table_id = ?');
+    $stmt->execute([$tb['id']]);
+    if ($blocker = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        fail(400, 'Used as a Counter source by "' . ($blocker['title'] ?: 'a Counter table') . '" — remove that link first');
     }
     $stmt = $pdo->prepare('DELETE FROM raid_template_tables WHERE id = ?');
     $stmt->execute([$tb['id']]);
