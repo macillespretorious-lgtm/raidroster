@@ -547,6 +547,93 @@ if ($action === 'set_swap_note') {
     exit;
 }
 
+// Copies toon assignments from one Roster-tab table onto another, matched by ordinal
+// (row,column) position rather than row/column id (the two tables are separate rows with their
+// own ids even when structurally identical) -- capped to min(rowCount)/min(colCount) so a
+// 20-man/40-man size mismatch degrades gracefully instead of erroring. Destructive: every
+// matched destination cell is overwritten, including with an empty source cell (which clears
+// it), mirroring the source table exactly wherever the two overlap.
+if ($action === 'copy_table') {
+    $fromTableId = isset($body['fromTableId']) ? (int)$body['fromTableId'] : 0;
+    $toTableId   = isset($body['toTableId']) ? (int)$body['toTableId'] : 0;
+
+    $stmtTb = $pdo->prepare(
+        "SELECT tb.id, s.kind AS section_kind, s.raid_id
+         FROM raid_tables tb JOIN raid_sections s ON s.id = tb.section_id
+         JOIN raids r ON r.id = s.raid_id
+         WHERE tb.id = ? AND r.guild_id = ?"
+    );
+    $stmtTb->execute([$fromTableId, $tenant['id']]);
+    $fromTb = $stmtTb->fetch(PDO::FETCH_ASSOC);
+    $stmtTb->execute([$toTableId, $tenant['id']]);
+    $toTb = $stmtTb->fetch(PDO::FETCH_ASSOC);
+
+    if (!$fromTb || !$toTb) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Table not found']);
+        exit;
+    }
+    if ($fromTableId === $toTableId) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Pick a different table to copy into']);
+        exit;
+    }
+    if ($fromTb['raid_id'] !== $toTb['raid_id']) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Tables must be in the same raid']);
+        exit;
+    }
+    if ($fromTb['section_kind'] !== 'roster' || $toTb['section_kind'] !== 'roster') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Copy is only available between Roster tab tables']);
+        exit;
+    }
+
+    $stmtCols = $pdo->prepare("SELECT id FROM raid_columns WHERE table_id = ? AND kind = 'general' ORDER BY sort_order, id");
+    $stmtCols->execute([$fromTableId]);
+    $fromCols = array_map('intval', $stmtCols->fetchAll(PDO::FETCH_COLUMN));
+    $stmtCols->execute([$toTableId]);
+    $toCols = array_map('intval', $stmtCols->fetchAll(PDO::FETCH_COLUMN));
+
+    $stmtRows = $pdo->prepare("SELECT id FROM raid_rows WHERE table_id = ? AND kind = 'general' ORDER BY sort_order, id");
+    $stmtRows->execute([$fromTableId]);
+    $fromRows = array_map('intval', $stmtRows->fetchAll(PDO::FETCH_COLUMN));
+    $stmtRows->execute([$toTableId]);
+    $toRows = array_map('intval', $stmtRows->fetchAll(PDO::FETCH_COLUMN));
+
+    $numCols = min(count($fromCols), count($toCols));
+    $numRows = min(count($fromRows), count($toRows));
+
+    $stmtSrcCell  = $pdo->prepare('SELECT toon_id, toon_kind, pug_name, pug_class, role FROM raid_cells WHERE table_id = ? AND row_id = ? AND column_id = ?');
+    $stmtDestCell = $pdo->prepare('SELECT id FROM raid_cells WHERE table_id = ? AND row_id = ? AND column_id = ?');
+    $upd = $pdo->prepare('UPDATE raid_cells SET toon_id = ?, toon_kind = ?, pug_name = ?, pug_class = ?, role = ? WHERE id = ?');
+
+    $skipped = 0;
+    for ($r = 0; $r < $numRows; $r++) {
+        for ($c = 0; $c < $numCols; $c++) {
+            $stmtSrcCell->execute([$fromTableId, $fromRows[$r], $fromCols[$c]]);
+            $src = $stmtSrcCell->fetch(PDO::FETCH_ASSOC);
+            if (!$src) continue;
+
+            $stmtDestCell->execute([$toTableId, $toRows[$r], $toCols[$c]]);
+            $destCellId = $stmtDestCell->fetchColumn();
+            if (!$destCellId) continue;
+            $destCellId = (int)$destCellId;
+
+            $srcClass = toon_class_for($pdo, $tenant['id'], $src['toon_kind'], $src['toon_id'], $src['pug_class']);
+            $violation = rule_violation($pdo, $toTableId, $toRows[$r], $toCols[$c], $src['toon_kind'], $src['toon_id'], $srcClass, [$destCellId], $src['pug_name']);
+            if ($violation) { $skipped++; continue; }
+
+            $upd->execute([$src['toon_id'], $src['toon_kind'], $src['pug_name'], $src['pug_class'], $src['role'], $destCellId]);
+        }
+    }
+
+    ensure_benched_capacity($pdo, $toTableId);
+
+    echo json_encode(['success' => true, 'sections' => fetch_raid_structure($pdo, $fromTb['raid_id']), 'skipped' => $skipped]);
+    exit;
+}
+
 // default: assign
 $cellId = isset($body['cellId']) ? (int)$body['cellId'] : 0;
 $cell = fetch_cell_owned($pdo, $cellId, $tenant['id']);

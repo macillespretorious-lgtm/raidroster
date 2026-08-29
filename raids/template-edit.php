@@ -1098,6 +1098,7 @@ const UNDO_ACTION_LABELS = {
   add_section: 'Added tab section', delete_tab: 'Deleted tab', update_section: 'Edited section',
   set_section_mrt_export: 'Toggled MRT export', paint_section: 'Painted section', paint_table: 'Painted table',
   add_table: 'Added table', add_roster_table: 'Added roster table', update_table: 'Renamed table', delete_table: 'Deleted table',
+  duplicate_table: 'Duplicated table', duplicate_section: 'Duplicated section',
   add_column: 'Added column', add_row: 'Added row', update_column: 'Edited column', update_row: 'Edited row',
   delete_column: 'Deleted column', delete_row: 'Deleted row', update_cell: 'Edited cell',
   set_cell_kind_override: 'Set cell override', add_rule: 'Added rule', update_rule: 'Edited rule',
@@ -1351,6 +1352,7 @@ function render() {
       if (act === 'toggle-section-note') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteEnabled: node.checked }); }
       if (act === 'section-note-text') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteText: node.value }); }
       if (act === 'preview-section') openPreview(id);
+      if (act === 'duplicate-section') { call({ action: 'duplicate_section', id }); }
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
@@ -1380,6 +1382,7 @@ function render() {
       if (act === 'rename-table') call({ action: 'update_table', id, title: node.value.trim() });
       if (act === 'edit-swaps-links') openSwapsEditModal(id);
       if (act === 'edit-counter-link') openCounterEditModal(id);
+      if (act === 'duplicate-table') { call({ action: 'duplicate_table', id }); }
       if (act === 'delete-table') { if (confirm('Delete this table?')) call({ action: 'delete_table', id }); }
       if (act === 'delete-col') call({ action: 'delete_column', id });
       if (act === 'rename-row') call({ action: 'update_row', id, label: node.value.trim() });
@@ -1847,6 +1850,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
       <div class="tbl-sizing">Col w<input type="number" class="width-input" draggable="false" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
+      <button class="icon-btn" data-action="duplicate-table" data-id="${tb.id}" title="Duplicate table">&#10697;</button>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
     ${groupsEnabled && isStandard ? groupStrip(tb) : ''}
@@ -1897,6 +1901,7 @@ function renderSection(sec) {
       <button class="icon-btn" data-action="preview-section" data-id="${sec.id}" title="Preview as it will look on a raid page">&#128065;</button>
       <button class="icon-btn" data-action="move-section-up" data-id="${sec.id}" title="Move up">&uarr;</button>
       <button class="icon-btn" data-action="move-section-down" data-id="${sec.id}" title="Move down">&darr;</button>
+      <button class="icon-btn" data-action="duplicate-section" data-id="${sec.id}" title="Duplicate section">&#10697;</button>
       <button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>
     </div>
     <div class="section-note-bar">

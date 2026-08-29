@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/roles.php';
 require_once __DIR__ . '/../includes/edit_lock.php';
 require_once __DIR__ . '/../includes/raid_icons.php';
 require_once __DIR__ . '/../includes/class_roles.php';
+require_once __DIR__ . '/../includes/template_clone.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -796,6 +797,64 @@ if ($action === 'delete_table') {
     $stmt = $pdo->prepare('DELETE FROM raid_template_tables WHERE id = ?');
     $stmt->execute([$tb['id']]);
     respond_structure($pdo, $templateId);
+}
+
+// Resolves swap_before_table_id/swap_after_table_id/count_source_table_id on a set of freshly
+// duplicated tables. Any source table that was itself duplicated in the same operation
+// (present in $tableIdMap) is repointed at its duplicate, same rationale as
+// clone_template_to_guild()'s backfill pass in template_clone.php; a source table that lives
+// outside the duplicated set (not in the map) keeps pointing at the original -- duplicating a
+// Counter table, for instance, shouldn't also fork the roster table it counts.
+function backfill_duplicate_links($pdo, array $tableIdMap, array $swapLinks, array $countLinks) {
+    foreach ($swapLinks as $newTableId => $link) {
+        [$beforeSrcId, $afterSrcId] = $link;
+        $beforeId = $beforeSrcId !== null ? ($tableIdMap[$beforeSrcId] ?? $beforeSrcId) : null;
+        $afterId  = $afterSrcId  !== null ? ($tableIdMap[$afterSrcId]  ?? $afterSrcId)  : null;
+        $pdo->prepare('UPDATE raid_template_tables SET swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?')
+            ->execute([$beforeId, $afterId, $newTableId]);
+    }
+    foreach ($countLinks as $newTableId => $srcId) {
+        $countSourceId = $srcId !== null ? ($tableIdMap[$srcId] ?? $srcId) : null;
+        $pdo->prepare('UPDATE raid_template_tables SET count_source_table_id = ? WHERE id = ?')
+            ->execute([$countSourceId, $newTableId]);
+    }
+}
+
+if ($action === 'duplicate_table') {
+    $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
+    if (!$tb) fail(404, 'Table not found');
+
+    $tableIdMap = []; $swapLinks = []; $countLinks = [];
+    clone_template_table_recursive($pdo, $tb, $tb['section_id'], $tb['parent_group_id'], $tableIdMap, $swapLinks, $countLinks);
+    backfill_duplicate_links($pdo, $tableIdMap, $swapLinks, $countLinks);
+
+    if ($tb['title']) {
+        $pdo->prepare('UPDATE raid_template_tables SET title = ? WHERE id = ?')
+            ->execute([substr($tb['title'] . ' (copy)', 0, 100), $tableIdMap[$tb['id']]]);
+    }
+    respond_structure($pdo, $tb['template_id']);
+}
+
+if ($action === 'duplicate_section') {
+    $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
+    if (!$sec) fail(404, 'Section not found');
+
+    $insSec = $pdo->prepare(
+        'INSERT INTO raid_template_sections (template_id, kind, title, sort_order, note_enabled, note_text, mrt_export_enabled, color, bg_color)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $insSec->execute([$sec['template_id'], $sec['kind'], $sec['title'] ? substr($sec['title'] . ' (copy)', 0, 100) : $sec['title'], $sec['sort_order'], $sec['note_enabled'], $sec['note_text'], $sec['mrt_export_enabled'], $sec['color'], $sec['bg_color']]);
+    $newSectionId = (int)$pdo->lastInsertId();
+
+    $tableIdMap = []; $swapLinks = []; $countLinks = [];
+    $stmtT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
+    $stmtT->execute([$sec['id']]);
+    foreach ($stmtT->fetchAll(PDO::FETCH_ASSOC) as $childTb) {
+        clone_template_table_recursive($pdo, $childTb, $newSectionId, null, $tableIdMap, $swapLinks, $countLinks);
+    }
+    backfill_duplicate_links($pdo, $tableIdMap, $swapLinks, $countLinks);
+
+    respond_structure($pdo, $sec['template_id']);
 }
 
 if ($action === 'add_column' || $action === 'add_row') {

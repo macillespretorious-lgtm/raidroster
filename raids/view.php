@@ -333,6 +333,29 @@ function fmtTime($t) {
     }
     .swap-note-popup .swap-note-save { background: #5865f2; color: #fff; }
     .swap-note-popup .swap-note-cancel { background: rgba(255,255,255,0.08); color: #c7cef2; }
+    .copy-table-btn {
+      font-size: 10px; font-weight: 600; letter-spacing: normal; text-transform: none;
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #c7cef2;
+      padding: 3px 9px; border-radius: 999px; cursor: pointer; margin: 4px 0 0 6px;
+    }
+    .copy-table-btn:hover { background: rgba(255,255,255,0.16); color: #e8ecff; }
+    .copy-table-popup {
+      position: absolute; z-index: 500; width: 240px;
+      background: #0a0f1e; border: 1px solid rgba(255,255,255,0.15); border-radius: 7px;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.4); padding: 10px;
+    }
+    .copy-table-popup label { display: block; font-size: 11px; color: #7f8bad; margin: 0 0 3px; }
+    .copy-table-popup select {
+      width: 100%; padding: 6px 8px; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+      background: #131a30; color: #e8ecff; font-size: 12.5px; font: inherit; box-sizing: border-box;
+    }
+    .copy-table-popup .copy-table-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+    .copy-table-popup button {
+      padding: 5px 12px; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; font: inherit;
+    }
+    .copy-table-popup .copy-table-go { background: #5865f2; color: #fff; }
+    .copy-table-popup .copy-table-cancel { background: rgba(255,255,255,0.08); color: #c7cef2; }
+    .copy-table-popup .copy-table-empty { color: #7f8bad; font-size: 12px; font-style: italic; }
     .pool-add-pug { display: flex; gap: 6px; }
     #pugNameInput { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12.5px; font: inherit; }
     #pugClassInput { padding: 8px 6px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; background: #0a0f1e; color: #e8ecff; font-size: 12px; font: inherit; }
@@ -957,6 +980,9 @@ function render() {
         clearCall({ action: 'clear_section', sectionId: parseInt(btn.dataset.sectionId, 10) });
       });
     });
+    el.querySelectorAll('[data-action="copy-table-open"]').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); showCopyTablePopup(btn); });
+    });
     updateStampVisuals();
   }
 }
@@ -964,10 +990,11 @@ function render() {
 function clearCall(body) {
   return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raidId: RAID_ID, ...body }) })
     .then(r => r.json()).then(d => {
-      if (!d.success) { alert(d.error || 'Clear failed'); return; }
+      if (!d.success) { alert(d.error || 'Clear failed'); return d; }
       sections = groupSectionsByKind(d.sections);
       render();
       if (d.pool) { pool = d.pool; renderPool(); }
+      return d;
     });
 }
 
@@ -1213,7 +1240,62 @@ function showSwapNotePopup(td) {
   activeSwapPopup = popup;
 }
 
-document.addEventListener('click', () => { closeAltPopup(); closeSwapNotePopup(); });
+let activeCopyPopup = null; // currently-open "Copy to" table-picker popup, if any
+
+function closeCopyTablePopup() {
+  if (activeCopyPopup) { activeCopyPopup.remove(); activeCopyPopup = null; }
+}
+
+// Every Roster-tab standard table is a valid destination except the one the button lives on.
+function rosterCopyTargets(fromTableId) {
+  return sections.filter(s => s.kind === 'roster')
+    .flatMap(s => s.tables)
+    .filter(tb => tb.kind === 'standard' && tb.id !== fromTableId);
+}
+
+function showCopyTablePopup(btn) {
+  closeCopyTablePopup();
+  closeAltPopup();
+  closeSwapNotePopup();
+  const fromTableId = parseInt(btn.dataset.tableId, 10);
+  const targets = rosterCopyTargets(fromTableId);
+
+  const popup = document.createElement('div');
+  popup.className = 'copy-table-popup';
+  popup.innerHTML = targets.length ? `
+    <label>Copy assignments to</label>
+    <select class="copy-table-select">
+      ${targets.map(tb => `<option value="${tb.id}">${esc(tb.title || 'Untitled table')}</option>`).join('')}
+    </select>
+    <div class="copy-table-actions">
+      <button type="button" class="copy-table-cancel">Cancel</button>
+      <button type="button" class="copy-table-go">Copy</button>
+    </div>` : `<p class="copy-table-empty">No other tables on this tab yet.</p>`;
+  document.body.appendChild(popup);
+
+  const rect = btn.getBoundingClientRect();
+  const left = Math.min(rect.left + window.scrollX, window.innerWidth + window.scrollX - popup.offsetWidth - 8);
+  popup.style.left = `${Math.max(8, left)}px`;
+  popup.style.top = `${rect.bottom + window.scrollY + 4}px`;
+
+  popup.addEventListener('click', e => e.stopPropagation());
+  const cancelBtn = popup.querySelector('.copy-table-cancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeCopyTablePopup);
+  const goBtn = popup.querySelector('.copy-table-go');
+  if (goBtn) goBtn.addEventListener('click', () => {
+    const toTableId = parseInt(popup.querySelector('.copy-table-select').value, 10);
+    const toTitle = targets.find(tb => tb.id === toTableId);
+    closeCopyTablePopup();
+    if (!confirm(`Overwrite all assignments in "${(toTitle && toTitle.title) || 'that table'}" with a copy of this table? This cannot be undone.`)) return;
+    clearCall({ action: 'copy_table', fromTableId, toTableId }).then(d => {
+      if (d && d.skipped) alert(`Copied, but ${d.skipped} cell${d.skipped === 1 ? '' : 's'} were skipped because of a class/limit rule on the destination table.`);
+    });
+  });
+
+  activeCopyPopup = popup;
+}
+
+document.addEventListener('click', () => { closeAltPopup(); closeSwapNotePopup(); closeCopyTablePopup(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeAltPopup(); closeSwapNotePopup(); }
 });
@@ -1481,7 +1563,7 @@ function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
     </div>`;
 }
 
-function renderTable(tb, noteEnabled, sectionBg) {
+function renderTable(tb, noteEnabled, sectionBg, sectionKind) {
   const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
   const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg)).join('');
@@ -1489,10 +1571,16 @@ function renderTable(tb, noteEnabled, sectionBg) {
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables">
-      ${g.tables.map(ctb => renderTable(ctb, noteEnabled, sectionBg)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb, noteEnabled, sectionBg, sectionKind)).join('')}
     </div>`).join('');
 
-  const headBar = tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : '';
+  // Copying assignments between tables only makes sense on the Roster tab, and only for
+  // ordinary (kind='standard') grids -- a Swaps/Counter/Benched table's cells aren't a plain
+  // toon-per-cell grid the same way, so they're excluded as both source and destination.
+  const copyBtn = (CAN_MANAGE && sectionKind === 'roster' && tb.kind === 'standard' && !isContainerOnly)
+    ? `<button type="button" class="copy-table-btn" data-action="copy-table-open" data-table-id="${tb.id}">Copy to&hellip;</button>` : '';
+
+  const headBar = (tb.title || copyBtn) ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}${copyBtn}</div>` : '';
   const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
 
   return `<div class="tbl-wrap"${wrapStyle}>
@@ -1517,7 +1605,7 @@ function renderSection(sec) {
     <div class="section-head" style="background:${headColor};"><span>${meta.icon} ${esc(sec.title)}</span><div class="section-head-actions">${mrtBar}${clearBtn}</div></div>
     ${noteBar}
     <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
-      ${sec.tables.map(tb => renderTable(tb, noteEnabled, sectionBg)).join('') || '<p class="empty">No tables in this section.</p>'}
+      ${sec.tables.map(tb => renderTable(tb, noteEnabled, sectionBg, sec.kind)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }
