@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
 require_once __DIR__ . '/../includes/edit_lock.php';
 require_once __DIR__ . '/../includes/raid_icons.php';
+require_once __DIR__ . '/../includes/class_roles.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -328,6 +329,7 @@ function fetch_table_full($pdo, $tb) {
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
+        'countCategories' => !empty($tb['count_categories']) ? explode(',', $tb['count_categories']) : ['Tank', 'Healer'],
         'columns' => $columns,
         'rows' => $rows,
         'columnGroups' => $columnGroups,
@@ -677,6 +679,22 @@ function resolve_count_source_table($pdo, $guildId, $templateId, $body) {
     return $sourceId;
 }
 
+// Validates a Counter table's chosen count columns: any of the role categories or a
+// CLASS_ROLES class name, deduped, order preserved (order picks the column order too).
+// Returns null when the request didn't touch countCategories at all, so callers can tell
+// "not sent" (keep existing value) apart from "sent but resolved to the fallback".
+function resolve_count_categories($body) {
+    if (!array_key_exists('countCategories', $body)) return null;
+    $valid = array_merge(['Tank', 'Healer', 'DPS'], array_keys(CLASS_ROLES));
+    $picked = [];
+    foreach ((array)$body['countCategories'] as $c) {
+        $c = trim((string)$c);
+        if (in_array($c, $valid, true) && !in_array($c, $picked, true)) $picked[] = $c;
+    }
+    if (!$picked) $picked = ['Tank', 'Healer'];
+    return implode(',', $picked);
+}
+
 if ($action === 'add_table') {
     $groupId = (int)($body['groupId'] ?? 0);
     $kind = in_array($body['kind'] ?? 'standard', ['standard', 'benched', 'swaps', 'counter'], true) ? $body['kind'] : 'standard';
@@ -689,8 +707,9 @@ if ($action === 'add_table') {
         $order = next_sort_order($pdo, 'raid_template_tables', 'parent_group_id', $grp['id']);
         [$beforeId, $afterId] = $kind === 'swaps' ? resolve_swap_tables($pdo, $tenant['id'], $grp['template_id'], $body) : [null, null];
         $countSourceId = $kind === 'counter' ? resolve_count_source_table($pdo, $tenant['id'], $grp['template_id'], $body) : null;
-        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id, count_source_table_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([$grp['id'], $title, $order, $kind, $beforeId, $afterId, $countSourceId]);
+        $countCategories = $kind === 'counter' ? (resolve_count_categories($body) ?? 'Tank,Healer') : null;
+        $stmt = $pdo->prepare('INSERT INTO raid_template_tables (parent_group_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id, count_source_table_id, count_categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$grp['id'], $title, $order, $kind, $beforeId, $afterId, $countSourceId, $countCategories]);
         if ($kind === 'benched') seed_benched_table($pdo, (int)$pdo->lastInsertId());
         respond_structure($pdo, $grp['template_id']);
     }
@@ -702,8 +721,9 @@ if ($action === 'add_table') {
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
     [$beforeId, $afterId] = $kind === 'swaps' ? resolve_swap_tables($pdo, $tenant['id'], $sec['template_id'], $body) : [null, null];
     $countSourceId = $kind === 'counter' ? resolve_count_source_table($pdo, $tenant['id'], $sec['template_id'], $body) : null;
-    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id, count_source_table_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$sec['id'], $title, $order, $kind, $beforeId, $afterId, $countSourceId]);
+    $countCategories = $kind === 'counter' ? (resolve_count_categories($body) ?? 'Tank,Healer') : null;
+    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id, count_source_table_id, count_categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$sec['id'], $title, $order, $kind, $beforeId, $afterId, $countSourceId, $countCategories]);
     if ($kind === 'benched') seed_benched_table($pdo, (int)$pdo->lastInsertId());
     respond_structure($pdo, $sec['template_id']);
 }
@@ -745,10 +765,13 @@ if ($action === 'update_table') {
         [$beforeId, $afterId] = resolve_swap_tables($pdo, $tenant['id'], $tb['template_id'], $mergedBody);
         $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
         $stmt->execute([$title, $headerColor, $colWidth, $beforeId, $afterId, $tb['id']]);
-    } elseif ($tb['kind'] === 'counter' && array_key_exists('countSourceTableId', $body)) {
-        $countSourceId = resolve_count_source_table($pdo, $tenant['id'], $tb['template_id'], $body);
-        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, count_source_table_id = ? WHERE id = ?');
-        $stmt->execute([$title, $headerColor, $colWidth, $countSourceId, $tb['id']]);
+    } elseif ($tb['kind'] === 'counter' && (array_key_exists('countSourceTableId', $body) || array_key_exists('countCategories', $body))) {
+        $countSourceId = array_key_exists('countSourceTableId', $body)
+            ? resolve_count_source_table($pdo, $tenant['id'], $tb['template_id'], $body)
+            : $tb['count_source_table_id'];
+        $countCategories = resolve_count_categories($body) ?? $tb['count_categories'];
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, count_source_table_id = ?, count_categories = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $countSourceId, $countCategories, $tb['id']]);
     } else {
         $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ? WHERE id = ?');
         $stmt->execute([$title, $headerColor, $colWidth, $tb['id']]);

@@ -70,12 +70,15 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
     ];
 }
 
-// Synthesizes a Counter table's read shape -- 2 fixed text-kind columns (Tanks/Healers,
-// negative ids, never persisted) and one computed row of live counts -- same technique as
+// Synthesizes a Counter table's read shape -- one fixed text-kind column per chosen category
+// (negative ids, never persisted) and one computed row of live counts -- same technique as
 // fetch_swaps_table() above, so the existing DOM renderer and Discord-canvas export draw it
-// with no new code. Counts use the effective role (raw raid_cells.role, falling back to
-// default_role_for_class()) already resolved by fetch_table_full() below, so a Counter always
-// matches whatever role icon is actually shown for each occupant.
+// with no new code. A role category (Tank/Healer/DPS) counts by the effective role (raw
+// raid_cells.role, falling back to default_role_for_class()) already resolved by
+// fetch_table_full() below; a class category counts by exact class match. count_categories
+// is a comma-separated list chosen in the template editor; null/empty falls back to the
+// original fixed Tanks/Healers pair so counter tables created before this field existed
+// keep behaving exactly as before.
 function fetch_counter_table($pdo, $tb, $guildId) {
     $sourceTb = null;
     if ($tb['count_source_table_id']) {
@@ -85,17 +88,22 @@ function fetch_counter_table($pdo, $tb, $guildId) {
     }
     $sourceFull = $sourceTb ? fetch_table_full($pdo, $sourceTb, $guildId) : ['cells' => []];
 
-    $tankCount = 0;
-    $healerCount = 0;
+    $categories = !empty($tb['count_categories']) ? explode(',', $tb['count_categories']) : ['Tank', 'Healer'];
+    $roleCategories = ['Tank', 'Healer', 'DPS'];
+
+    $counts = array_fill_keys($categories, 0);
     foreach ($sourceFull['cells'] as $cell) {
         if (!$cell['name']) continue;
-        if ($cell['role'] === 'Tank') $tankCount++;
-        elseif ($cell['role'] === 'Healer') $healerCount++;
+        foreach ($categories as $cat) {
+            if (in_array($cat, $roleCategories, true)) {
+                if ($cell['role'] === $cat) $counts[$cat]++;
+            } elseif ($cell['class'] === $cat) {
+                $counts[$cat]++;
+            }
+        }
     }
 
     $mkCol = fn($id, $label) => ['id' => $id, 'label' => $label, 'kind' => 'text', 'width' => null, 'headerColor' => null, 'bgColor' => null, 'groupId' => null, 'headerColspan' => 1];
-    $columns = [$mkCol(-1, 'Tanks'), $mkCol(-2, 'Healers')];
-
     $mkCell = fn($text) => [
         'id' => 0, 'toonKind' => null, 'toonId' => null, 'pugName' => null, 'pugClass' => null,
         'name' => null, 'class' => null, 'role' => null, 'roleConfirmed' => false, 'server' => null,
@@ -103,11 +111,16 @@ function fetch_counter_table($pdo, $tb, $guildId) {
         'bold' => true, 'font' => null, 'icon' => null, 'kindOverride' => null,
     ];
 
+    $columns = [];
+    $cells = [];
+    $colId = -1;
+    foreach ($categories as $cat) {
+        $columns[] = $mkCol($colId, $cat);
+        $cells['-1_' . $colId] = $mkCell((string)$counts[$cat]);
+        $colId--;
+    }
+
     $rows = [['id' => -1, 'label' => '', 'kind' => 'text', 'height' => null, 'bgColor' => null]];
-    $cells = [
-        '-1_-1' => $mkCell((string)$tankCount),
-        '-1_-2' => $mkCell((string)$healerCount),
-    ];
 
     return [
         'id' => (int)$tb['id'], 'title' => $tb['title'],
@@ -115,6 +128,7 @@ function fetch_counter_table($pdo, $tb, $guildId) {
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'kind' => 'counter',
         'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
+        'countCategories' => $categories,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => [], 'cells' => $cells,
         'cellMerges' => [], 'rules' => [],
     ];

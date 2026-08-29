@@ -622,8 +622,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         <h2 id="counterModalTitle">New Counter table</h2>
         <button class="icon-btn" id="counterModalClose" type="button" title="Close">&times;</button>
       </div>
-      <p class="preview-note">Pick the Standard roster table to count &mdash; the Counter shows a live Tanks/Healers count for whoever is assigned there.</p>
+      <p class="preview-note">Pick the Standard roster table to count &mdash; the Counter shows a live count for whoever is assigned there, one column per category picked below.</p>
       <label style="display:block; margin-bottom:8px;">Roster table<br><select id="counterSourceSelect" style="width:100%;"></select></label>
+      <label style="display:block; margin-bottom:4px;">Count columns</label>
+      <div class="logic-class-grid" id="counterCategoriesGrid"></div>
       <div class="modal-actions">
         <button class="btn btn-cancel-tpl" type="button" id="counterModalCancel">Cancel</button>
         <button class="btn" type="button" id="counterModalCreate">Save</button>
@@ -1824,7 +1826,7 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
       ? `<div class="tbl-kind-note">Swaps table &mdash; Before: <strong>${esc(swapTableLabel(tb.swapBeforeTableId))}</strong>, After: <strong>${esc(swapTableLabel(tb.swapAfterTableId))}</strong>
           <button type="button" class="btn-link" data-action="edit-swaps-links" data-id="${tb.id}">change&hellip;</button></div>`
       : tb.kind === 'counter'
-        ? `<div class="tbl-kind-note">Counter table &mdash; counts Tanks/Healers from: <strong>${esc(swapTableLabel(tb.countSourceTableId))}</strong>
+        ? `<div class="tbl-kind-note">Counter table &mdash; counts ${esc((tb.countCategories && tb.countCategories.length ? tb.countCategories : ['Tank', 'Healer']).join('/'))} from: <strong>${esc(swapTableLabel(tb.countSourceTableId))}</strong>
             <button type="button" class="btn-link" data-action="edit-counter-link" data-id="${tb.id}">change&hellip;</button></div>`
         : '';
 
@@ -2908,9 +2910,24 @@ document.getElementById('swapsModalCreate').addEventListener('click', () => {
 
 // Counter-table creation/edit modal: single-table picker over every Standard table in the
 // template, same rationale as collectStandardTables() above.
+const COUNT_CATEGORIES = ['Tank', 'Healer', 'DPS', ...RULE_CLASSES];
 let counterModalSectionId = null;
 let counterModalGroupId = null;
 let counterModalTableId = null;
+let counterModalCategories = new Set(['Tank', 'Healer']);
+
+function renderCounterCategoriesGrid() {
+  const grid = document.getElementById('counterCategoriesGrid');
+  grid.innerHTML = COUNT_CATEGORIES.map(c => `
+    <label class="logic-class-check">
+      <input type="checkbox" data-action="counter-toggle-category" value="${escAttr(c)}" ${counterModalCategories.has(c) ? 'checked' : ''}>
+      ${esc(c)}
+    </label>`).join('');
+  grid.querySelectorAll('[data-action="counter-toggle-category"]').forEach(cb => cb.addEventListener('change', () => {
+    if (cb.checked) counterModalCategories.add(cb.value);
+    else counterModalCategories.delete(cb.value);
+  }));
+}
 
 function openCounterModal(sectionId, groupId) {
   const opts = collectStandardTables();
@@ -2918,8 +2935,10 @@ function openCounterModal(sectionId, groupId) {
   counterModalSectionId = sectionId;
   counterModalGroupId = groupId || null;
   counterModalTableId = null;
+  counterModalCategories = new Set(['Tank', 'Healer']);
   document.getElementById('counterModalTitle').textContent = 'New Counter table';
   document.getElementById('counterSourceSelect').innerHTML = opts.map(o => `<option value="${o.id}">${esc(o.label)}</option>`).join('');
+  renderCounterCategoriesGrid();
   document.getElementById('counterModalBackdrop').classList.add('open');
 }
 function openCounterEditModal(tableId) {
@@ -2928,9 +2947,11 @@ function openCounterEditModal(tableId) {
   counterModalSectionId = null;
   counterModalGroupId = null;
   counterModalTableId = tableId;
+  counterModalCategories = new Set(tb.countCategories && tb.countCategories.length ? tb.countCategories : ['Tank', 'Healer']);
   document.getElementById('counterModalTitle').textContent = 'Edit Counter source';
   document.getElementById('counterSourceSelect').innerHTML = opts.map(o => `<option value="${o.id}">${esc(o.label)}</option>`).join('');
   document.getElementById('counterSourceSelect').value = tb.countSourceTableId;
+  renderCounterCategoriesGrid();
   document.getElementById('counterModalBackdrop').classList.add('open');
 }
 function closeCounterModal() {
@@ -2946,9 +2967,11 @@ document.getElementById('counterModalBackdrop').addEventListener('click', e => {
 });
 document.getElementById('counterModalCreate').addEventListener('click', () => {
   const countSourceTableId = parseInt(document.getElementById('counterSourceSelect').value, 10);
+  const countCategories = [...counterModalCategories];
+  if (!countCategories.length) { alert('Pick at least one count column.'); return; }
   const payload = counterModalTableId
-    ? { action: 'update_table', id: counterModalTableId, title: findTable(counterModalTableId).title, countSourceTableId }
-    : { action: 'add_table', kind: 'counter', countSourceTableId, ...(counterModalGroupId ? { groupId: counterModalGroupId } : { sectionId: counterModalSectionId }) };
+    ? { action: 'update_table', id: counterModalTableId, title: findTable(counterModalTableId).title, countSourceTableId, countCategories }
+    : { action: 'add_table', kind: 'counter', countSourceTableId, countCategories, ...(counterModalGroupId ? { groupId: counterModalGroupId } : { sectionId: counterModalSectionId }) };
   call(payload).then(d => { if (d) closeCounterModal(); });
 });
 

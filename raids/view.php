@@ -1444,11 +1444,11 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
   return out.join('');
 }
 
-// Swaps tables have no admin-authored header row (their rows are all computed), so their
-// column labels (Player/From/To/When/Boss) are synthesized here -- styled like an ordinary
-// roster table's group-th bar so they read consistently with the rest of the raid page.
+// Swaps and Counter tables have no admin-authored header row (their columns are all computed),
+// so their column labels are synthesized here -- styled like an ordinary roster table's
+// group-th bar so they read consistently with the rest of the raid page.
 function swapsHeaderRow(chunkCols, tb) {
-  if (tb.kind !== 'swaps') return '';
+  if (tb.kind !== 'swaps' && tb.kind !== 'counter') return '';
   const bg = tb.headerColor || '#2d3348';
   const color = contrastText(bg);
   return `<tr>${chunkCols.map(c => `<th class="group-th" style="background:${bg};color:${color};">${esc(c.label)}</th>`).join('')}</tr>`;
