@@ -28,7 +28,7 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
     $swapRows = compute_swap_rows($pdo, $guildId, (int)$tb['id'], $beforeFull, $afterFull);
 
     $mkCol = fn($id, $label) => ['id' => $id, 'label' => $label, 'kind' => 'text', 'width' => null, 'headerColor' => null, 'bgColor' => null, 'groupId' => null, 'headerColspan' => 1];
-    $columns = [$mkCol(-1, 'Player'), $mkCol(-2, 'Before'), $mkCol(-3, 'After'), $mkCol(-4, 'Note'), $mkCol(-5, 'Boss')];
+    $columns = [$mkCol(-1, 'Player'), $mkCol(-2, 'From'), $mkCol(-3, 'To'), $mkCol(-4, 'When'), $mkCol(-5, 'Boss')];
 
     $mkCell = fn($text) => [
         'id' => 0, 'toonKind' => null, 'toonId' => null, 'pugName' => null, 'pugClass' => null,
@@ -36,22 +36,26 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
         'marked' => false, 'textContent' => $text, 'bgColor' => null, 'textColor' => null,
         'bold' => false, 'font' => null, 'icon' => null, 'kindOverride' => null,
     ];
+    // From/To cells carry the occupant's name/class/role (not just flattened text) so the
+    // DOM renderer draws them as filled class-colored chips, matching a normal roster slot.
+    $mkToonCell = fn($occ) => [
+        'id' => 0, 'toonKind' => null, 'toonId' => null, 'pugName' => null, 'pugClass' => null,
+        'name' => $occ['name'] ?: null, 'class' => $occ['class'] ?: null, 'role' => $occ['role'] ?: null,
+        'roleConfirmed' => true, 'server' => null,
+        'marked' => false, 'textContent' => trim(($occ['name'] ?: '') . ($occ['class'] ? ' (' . $occ['class'] . ')' : '')),
+        'bgColor' => null, 'textColor' => null, 'bold' => false, 'font' => null, 'icon' => null, 'kindOverride' => null,
+    ];
 
     $rows = [];
     $cells = [];
     $rowId = -1;
     foreach ($swapRows as $sr) {
         $rows[] = ['id' => $rowId, 'label' => '', 'kind' => 'text', 'height' => null, 'bgColor' => null, 'playerMainToonId' => $sr['playerMainToonId']];
-        $vals = [
-            -1 => $sr['playerName'],
-            -2 => trim($sr['before']['name'] . ($sr['before']['class'] ? ' (' . $sr['before']['class'] . ')' : '')),
-            -3 => trim($sr['after']['name'] . ($sr['after']['class'] ? ' (' . $sr['after']['class'] . ')' : '')),
-            -4 => $sr['note'],
-            -5 => $sr['bossLabel'],
-        ];
-        foreach ($vals as $colId => $text) {
-            $cells[$rowId . '_' . $colId] = $mkCell($text);
-        }
+        $cells[$rowId . '_-1'] = $mkCell($sr['playerName']);
+        $cells[$rowId . '_-2'] = $mkToonCell($sr['before']);
+        $cells[$rowId . '_-3'] = $mkToonCell($sr['after']);
+        $cells[$rowId . '_-4'] = $mkCell($sr['note']);
+        $cells[$rowId . '_-5'] = $mkCell($sr['bossLabel']);
         $rowId--;
     }
 

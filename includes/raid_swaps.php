@@ -41,8 +41,8 @@ function compute_swap_rows($pdo, $guildId, $swapsTableId, $beforeTableFull, $aft
         $rows[] = [
             'playerMainToonId' => (string)$mainId,
             'playerName' => main_player_name($mainId, $groups) ?? $beforeCell['name'],
-            'before' => ['name' => $beforeCell['name'], 'class' => $beforeCell['class']],
-            'after'  => ['name' => $afterCell['name'], 'class' => $afterCell['class']],
+            'before' => ['name' => $beforeCell['name'], 'class' => $beforeCell['class'], 'role' => $beforeCell['role']],
+            'after'  => ['name' => $afterCell['name'], 'class' => $afterCell['class'], 'role' => $afterCell['role']],
             'note' => $note['note'] ?? null,
             'bossLabel' => $note['boss_label'] ?? null,
         ];

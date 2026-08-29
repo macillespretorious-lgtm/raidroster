@@ -323,7 +323,7 @@ function fmtTime($t) {
     }
     .swap-note-popup label { display: block; font-size: 11px; color: #7f8bad; margin: 8px 0 3px; }
     .swap-note-popup label:first-child { margin-top: 0; }
-    .swap-note-popup input {
+    .swap-note-popup input, .swap-note-popup select {
       width: 100%; padding: 6px 8px; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
       background: #131a30; color: #e8ecff; font-size: 12.5px; font: inherit; box-sizing: border-box;
     }
@@ -808,6 +808,16 @@ function chipHtml(cell, noteEnabled) {
   return html;
 }
 
+// Read-only chip for a Swaps table's From/To cells -- same filled class-colour look as an
+// ordinary roster slot (chipHtml), but with no drag/clear affordances since there's no real
+// cell behind it to reassign or clear.
+function swapChipHtml(cell) {
+  if (!cell || !cell.name) return '<span class="empty-slot">&mdash;</span>';
+  const color = classColor(cell.class);
+  const roleIcon = cell.role ? `<span class="role-icon-sm ${roleKey(cell.role)}" title="${esc(cell.role)}"></span>` : '';
+  return `<span class="toon-chip" style="background:${color};color:${contrastText(color)};">${roleIcon}<span class="chip-name">${esc(cell.name)}</span></span>`;
+}
+
 // Every table anywhere in the tree (top-level or nested inside a group), flattened for lookup.
 function allTables() {
   const out = [];
@@ -1166,11 +1176,17 @@ function showSwapNotePopup(td) {
   const noteCell = tb.cells[row.id + '_-4'];
   const bossCell = tb.cells[row.id + '_-5'];
 
+  const currentWhen = noteCell ? (noteCell.textContent || '') : '';
+
   const popup = document.createElement('div');
   popup.className = 'swap-note-popup';
   popup.innerHTML = `
-    <label>Note</label>
-    <input type="text" class="swap-note-input" maxlength="255" value="${esc(noteCell ? (noteCell.textContent || '') : '')}">
+    <label>When</label>
+    <select class="swap-note-input">
+      <option value=""${currentWhen === '' ? ' selected' : ''}>&mdash;</option>
+      <option value="Before"${currentWhen === 'Before' ? ' selected' : ''}>Before</option>
+      <option value="After"${currentWhen === 'After' ? ' selected' : ''}>After</option>
+    </select>
     <label>Boss</label>
     <input type="text" class="swap-boss-input" maxlength="60" value="${esc(bossCell ? (bossCell.textContent || '') : '')}">
     <div class="swap-note-actions">
@@ -1405,7 +1421,9 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
       out.push(`<td${colspanAttr}${rowspanAttr} class="spacer-cell" style="${minWidthStyle}background:${spacerColor};"></td>`);
       i += colspan; continue;
     }
-    if (eff === 'text') {
+    if (eff === 'text' && tb.kind === 'swaps' && (c.id === -2 || c.id === -3)) {
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell" style="${minWidthStyle}">${swapChipHtml(cell)}</td>`);
+    } else if (eff === 'text') {
       const style = `${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
       const isSwapNote = tb.kind === 'swaps' && CAN_MANAGE && (c.id === -4 || c.id === -5);
       const swapAttrs = isSwapNote ? ` data-action="edit-swap-note" data-table-id="${tb.id}" data-player-id="${esc(r.playerMainToonId || '')}" data-field="${c.id === -4 ? 'note' : 'boss'}"` : '';
@@ -1426,6 +1444,16 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
   return out.join('');
 }
 
+// Swaps tables have no admin-authored header row (their rows are all computed), so their
+// column labels (Player/From/To/When/Boss) are synthesized here -- styled like an ordinary
+// roster table's group-th bar so they read consistently with the rest of the raid page.
+function swapsHeaderRow(chunkCols, tb) {
+  if (tb.kind !== 'swaps') return '';
+  const bg = tb.headerColor || '#2d3348';
+  const color = contrastText(bg);
+  return `<tr>${chunkCols.map(c => `<th class="group-th" style="background:${bg};color:${color};">${esc(c.label)}</th>`).join('')}</tr>`;
+}
+
 function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
   const coverage = computeMergeCoverage(tb);
   const colgroup = `<colgroup>` +
@@ -1442,7 +1470,7 @@ function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
     return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg)}</tr>`;
   }).join('');
 
-  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb);
+  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb) || swapsHeaderRow(chunkCols, tb);
 
   return `<div class="grid-scroll">
       <table class="grid">

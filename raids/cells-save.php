@@ -507,9 +507,14 @@ if ($action === 'set_swap_note') {
         echo json_encode(['error' => 'Missing player']);
         exit;
     }
-    $note = isset($body['note']) ? substr(trim((string)$body['note']), 0, 255) : null;
-    $bossLabel = isset($body['bossLabel']) ? substr(trim((string)$body['bossLabel']), 0, 60) : null;
+    $note = isset($body['note']) ? trim((string)$body['note']) : null;
     if ($note === '') $note = null;
+    if ($note !== null && !in_array($note, ['Before', 'After'], true)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'When must be Before or After']);
+        exit;
+    }
+    $bossLabel = isset($body['bossLabel']) ? substr(trim((string)$body['bossLabel']), 0, 60) : null;
     if ($bossLabel === '') $bossLabel = null;
 
     if ($note === null && $bossLabel === null) {
