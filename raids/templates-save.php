@@ -31,6 +31,7 @@ $body   = json_decode(file_get_contents('php://input'), true);
 $action = is_array($body) ? ($body['action'] ?? '') : '';
 $pdo    = db_connect();
 require_once __DIR__ . '/../includes/template_clone.php';
+require_once __DIR__ . '/../includes/raid_structure.php';
 
 function template_to_json($t) {
     return [
@@ -69,6 +70,7 @@ if ($action === 'save') {
         $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, size) VALUES (?, ?, ?, ?)');
         $stmt->execute([$tenant['id'], $name, $desc, $size]);
         $id = (int)$pdo->lastInsertId();
+        seed_starting_template_roster($pdo, $id, $size);
     }
 
     $stmt = $pdo->prepare('SELECT * FROM raid_templates WHERE id = ?');

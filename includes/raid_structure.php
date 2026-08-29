@@ -251,6 +251,76 @@ function build_roster_table($pdo, $sectionId, $numCols) {
         ->execute([$tableId, 'max_count', 'table', 1, 'A player can only be assigned once']);
 }
 
+// Template-side counterpart of ensure_starting_roster(): run once when a brand-new template is
+// created (templates-save.php's 'save' action, insert branch) so an admin lands on a template
+// that already has a 'roster' tab with a roster + benched table to edit, instead of an empty
+// "no tabs yet" editor with no discoverable way to add the first table.
+function seed_starting_template_roster($pdo, $templateId, $size) {
+    $numCols = $size === '20' ? 4 : 8;
+
+    $pdo->prepare('INSERT INTO raid_template_sections (template_id, kind, title, sort_order) VALUES (?, ?, ?, 0)')
+        ->execute([$templateId, 'roster', 'Roster']);
+    $sectionId = (int)$pdo->lastInsertId();
+
+    build_template_roster_table($pdo, $sectionId, $numCols);
+    build_template_benched_table($pdo, $sectionId);
+}
+
+// Template-side counterpart of build_roster_table() above, writing into raid_template_* tables.
+function build_template_roster_table($pdo, $sectionId, $numCols) {
+    $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, default_column_width, kind) VALUES (?, ?, 0, 120, ?)')
+        ->execute([$sectionId, '', 'standard']);
+    $tableId = (int)$pdo->lastInsertId();
+
+    $colStmt = $pdo->prepare('INSERT INTO raid_template_columns (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
+    $colIds = [];
+    for ($i = 0; $i < $numCols; $i++) {
+        $colStmt->execute([$tableId, 'Group ' . ($i + 1), $i, 'general']);
+        $colIds[] = (int)$pdo->lastInsertId();
+    }
+
+    $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, '', 'text']);
+    $headerRowId = (int)$pdo->lastInsertId();
+    $headerCellStmt = $pdo->prepare('INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bold, bg_color) VALUES (?, ?, ?, ?, 0, ?)');
+    foreach ($colIds as $i => $colId) {
+        $headerCellStmt->execute([$tableId, $headerRowId, $colId, 'Grp ' . ($i + 1), '#1c234b']);
+    }
+
+    $rowStmt = $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, ?, ?)');
+    for ($r = 1; $r <= 5; $r++) {
+        $rowStmt->execute([$tableId, '', $r, 'general']);
+    }
+
+    $pdo->prepare('INSERT INTO raid_template_rules (table_id, rule_type, scope, max_count, label, sort_order) VALUES (?, ?, ?, ?, ?, 0)')
+        ->execute([$tableId, 'max_count', 'table', 1, 'A player can only be assigned once']);
+}
+
+// Template-side counterpart of build_benched_table() above / template-structure-save.php's
+// seed_benched_table(), writing into raid_template_* tables for a section instead of an
+// already-inserted table row.
+function build_template_benched_table($pdo, $sectionId) {
+    $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, kind) VALUES (?, ?, ?, ?)')
+        ->execute([$sectionId, '', 1, 'benched']);
+    $tableId = (int)$pdo->lastInsertId();
+
+    $pdo->prepare('INSERT INTO raid_template_columns (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, 'Bench', 'general']);
+    $colId = (int)$pdo->lastInsertId();
+
+    $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, 0, ?)')
+        ->execute([$tableId, '', 'text']);
+    $headerRowId = (int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bold, bg_color) VALUES (?, ?, ?, ?, 0, ?)')
+        ->execute([$tableId, $headerRowId, $colId, 'BENCHED', '#1c234b']);
+
+    $pdo->prepare('INSERT INTO raid_template_rows (table_id, label, sort_order, kind) VALUES (?, ?, 1, ?)')
+        ->execute([$tableId, '', 'general']);
+
+    $pdo->prepare('INSERT INTO raid_template_rules (table_id, rule_type, scope, max_count, label, sort_order) VALUES (?, ?, ?, ?, ?, 0)')
+        ->execute([$tableId, 'max_count', 'table', 1, 'A player can only be assigned once']);
+}
+
 // Live-raid counterpart of template-structure-save.php's seed_benched_table(): one 'general'
 // Bench column, a 'BENCHED' 'text' header row tinted to match the roster table, one starting
 // 'general' data row (cells-save.php's grow-on-full logic adds more as it fills), and the same

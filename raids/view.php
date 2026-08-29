@@ -140,6 +140,11 @@ function fmtTime($t) {
     .status-cancelled { color: #e88585; font-weight: 700; }
     .readonly-note { color: #7f8bad; font-size: 12px; margin: 6px 0 20px; }
 
+    .tabs-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 10px 0 4px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .tab-btn { background: none; border: none; font: inherit; cursor: pointer; color: #7f8bad; font-size: 13px; font-weight: 600; padding: 7px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn:hover { color: #c7cef2; }
+    .tab-btn.active { color: #e8ecff; border-bottom-color: #5865f2; }
+
     .section-card { border-radius: 12px; overflow: hidden; margin: 22px 0; border: 1px solid rgba(255,255,255,0.08); }
     .section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
     .section-clear-btn { font-size: 10px; font-weight: 700; letter-spacing: normal; text-transform: none; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 5px 10px; border-radius: 999px; cursor: pointer; }
@@ -444,6 +449,7 @@ function fmtTime($t) {
       <p class="readonly-note">You need raid management permission to edit assignments.</p>
     <?php endif; ?>
 
+    <div class="tabs-row" id="tabsRowEl" hidden></div>
     <div id="sectionsEl"></div>
   </div>
 
@@ -760,6 +766,7 @@ function groupSectionsByKind(secs) {
 }
 
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s) { return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function classColor(cls) { return CLASS_COLORS[(cls || '').toLowerCase()] || '#8892b0'; }
 
 function roleKey(role) { return role ? 'role-' + role.toLowerCase() : 'role-dps'; }
@@ -811,9 +818,39 @@ function allTables() {
 
 function findTable(id) { return allTables().find(t => t.id === id) || null; }
 
+// Same tab concept as template-edit.php's currentTabs(): one tab per distinct section `kind`,
+// in first-appearance order (sections here are already pre-grouped by kind, see the
+// groupSectionsByKind() call that builds `sections` on load).
+let activeTab = null;
+function currentTabs() {
+  const seen = [];
+  for (const s of sections) if (!seen.includes(s.kind)) seen.push(s.kind);
+  return seen;
+}
+function tabLabel(k) { return (KIND_META[k] && KIND_META[k].label) || k; }
+
+function renderTabs() {
+  const TABS = currentTabs();
+  const tabsRowEl = document.getElementById('tabsRowEl');
+  if (TABS.length < 2) {
+    tabsRowEl.hidden = true;
+    activeTab = TABS[0] || null;
+    return TABS;
+  }
+  if (!activeTab || !TABS.includes(activeTab)) activeTab = TABS[0];
+  tabsRowEl.hidden = false;
+  tabsRowEl.innerHTML = TABS.map(k => `<button type="button" class="tab-btn ${k === activeTab ? 'active' : ''}" data-tab="${escAttr(k)}">${esc(tabLabel(k))}</button>`).join('');
+  tabsRowEl.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => { activeTab = btn.dataset.tab; render(); });
+  });
+  return TABS;
+}
+
 function render() {
+  renderTabs();
+  const visibleSections = activeTab ? sections.filter(s => s.kind === activeTab) : sections;
   const el = document.getElementById('sectionsEl');
-  el.innerHTML = sections.map(renderSection).join('');
+  el.innerHTML = visibleSections.map(renderSection).join('');
 
   el.querySelectorAll('[data-mrt-server]').forEach(btn => {
     btn.addEventListener('click', () => doMrtExport(btn));
