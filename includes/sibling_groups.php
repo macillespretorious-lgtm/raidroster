@@ -9,22 +9,22 @@ function fetch_sibling_groups($pdo, $guildId) {
     $stmt->execute([$guildId]);
     $mainNames = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
-        $mainNames[(int)$t['id']] = $t['main_name'];
+        $mainNames[$t['id']] = $t['main_name'];
     }
 
     $stmt = $pdo->prepare('SELECT id, main_id FROM toon_alts WHERE guild_id = ?');
     $stmt->execute([$guildId]);
     $altIndex = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $a) {
-        $altIndex[(int)$a['id']] = (int)$a['main_id'];
+        $altIndex[$a['id']] = $a['main_id'];
     }
 
     return ['mainNames' => $mainNames, 'altIndex' => $altIndex];
 }
 
 function resolve_to_main_id($toonKind, $toonId, $groups) {
-    if ($toonKind === 'main') return $toonId !== null ? (int)$toonId : null;
-    if ($toonKind === 'alt' && $toonId !== null) return $groups['altIndex'][(int)$toonId] ?? null;
+    if ($toonKind === 'main') return $toonId !== null ? (string)$toonId : null;
+    if ($toonKind === 'alt' && $toonId !== null) return $groups['altIndex'][(string)$toonId] ?? null;
     return null;
 }
 
