@@ -1422,7 +1422,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
       i += colspan; continue;
     }
     if (eff === 'text' && tb.kind === 'swaps' && (c.id === -2 || c.id === -3)) {
-      out.push(`<td${colspanAttr}${rowspanAttr} class="cell" style="${minWidthStyle}">${swapChipHtml(cell)}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell slot" style="${minWidthStyle}">${swapChipHtml(cell)}</td>`);
     } else if (eff === 'text') {
       const style = `${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
       const isSwapNote = tb.kind === 'swaps' && CAN_MANAGE && (c.id === -4 || c.id === -5);
