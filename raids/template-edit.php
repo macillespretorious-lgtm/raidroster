@@ -1452,6 +1452,7 @@ function render() {
       if (act === 'row-height-dec') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: Math.max(20, (r.height || 20) - 20) }); }
       if (act === 'row-height-inc') { const r = findRow(id); call({ action: 'update_row', id, label: r.label, height: (r.height || 20) + 20 }); }
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
+      if (act === 'table-mark-style') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, markStyle: node.value }); }
       if (act === 'open-cell-editor') { openKindPicker = null; openCellEditor(parseInt(node.dataset.rowId, 10), parseInt(node.dataset.colId, 10)); return; }
       if (act === 'open-cell-icon-menu') {
         const key = `cell-icon-${node.dataset.rowId}_${node.dataset.colId}`;
@@ -1816,7 +1817,7 @@ function swapTableLabel(tableId) {
   return tb ? (tb.title || `Table #${tb.id}`) : `#${tableId}`;
 }
 
-function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
+function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg, sectionNoteEnabled) {
   const isStandard = tb.kind === 'standard';
   const groupsWithTables = (groupsEnabled && isStandard) ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
@@ -1842,14 +1843,24 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables" data-drop-kind="table-container" data-drop-parent="${g.id}" data-drop-parent-kind="group">
-      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, groupsEnabled, sectionBg)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, groupsEnabled, sectionBg, sectionNoteEnabled)).join('')}
     </div>`).join('');
+
+  const markStyleHtml = (sectionNoteEnabled && (tb.kind === 'standard' || tb.kind === 'benched'))
+    ? `<div class="tbl-sizing">Mark
+        <select class="width-input" draggable="false" data-action="table-mark-style" data-id="${tb.id}" title="How the cell marker (*) is shown and stored on this table">
+          <option value="star" ${tb.markStyle !== 'number' ? 'selected' : ''}>Star</option>
+          <option value="number" ${tb.markStyle === 'number' ? 'selected' : ''}>Numbers</option>
+        </select>
+      </div>`
+    : '';
 
   return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}" data-flip-id="table:${tb.id}"${cardStyle}>
     <div class="tbl-head" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="${headerStyle}">
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
       <div class="tbl-sizing">Col w<input type="number" class="width-input" draggable="false" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
+      ${markStyleHtml}
       <button class="icon-btn" data-action="duplicate-table" data-id="${tb.id}" title="Duplicate table">&#10697;</button>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
@@ -1912,7 +1923,7 @@ function renderSection(sec) {
       ${sec.noteEnabled ? `<input type="text" class="note-text-input" data-action="section-note-text" data-id="${sec.id}" placeholder="Note shown under the section header" value="${escAttr(sec.noteText || '')}" maxlength="255">` : ''}
     </div>
     <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section"${bodyStyle}>
-      ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables yet.</p>'}
+      ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg, sec.noteEnabled)).join('') || '<p class="empty">No tables yet.</p>'}
       <div class="kind-picker-wrap">
         <button class="btn" data-action="open-kind-picker" data-kind="table" data-id="${sec.id}">+ Table</button>
         <div class="kind-picker" ${openKindPicker === `table-${sec.id}` ? '' : 'hidden'}>

@@ -327,6 +327,7 @@ function fetch_table_full($pdo, $tb) {
         'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'kind' => $tb['kind'],
+        'markStyle' => $tb['mark_style'],
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
@@ -760,22 +761,23 @@ if ($action === 'update_table') {
     if ($isNested && !$title) fail(400, 'Title is required');
     $headerColor = array_key_exists('headerColor', $body) ? ($body['headerColor'] ?: null) : $tb['header_color'];
     $colWidth    = array_key_exists('defaultColumnWidth', $body) ? ($body['defaultColumnWidth'] !== null && $body['defaultColumnWidth'] !== '' ? (int)$body['defaultColumnWidth'] : null) : $tb['default_column_width'];
+    $markStyle   = (array_key_exists('markStyle', $body) && in_array($body['markStyle'], ['star', 'number'], true)) ? $body['markStyle'] : $tb['mark_style'];
 
     if ($tb['kind'] === 'swaps' && (array_key_exists('beforeTableId', $body) || array_key_exists('afterTableId', $body))) {
         $mergedBody = ['beforeTableId' => $body['beforeTableId'] ?? $tb['swap_before_table_id'], 'afterTableId' => $body['afterTableId'] ?? $tb['swap_after_table_id']];
         [$beforeId, $afterId] = resolve_swap_tables($pdo, $tenant['id'], $tb['template_id'], $mergedBody);
-        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
-        $stmt->execute([$title, $headerColor, $colWidth, $beforeId, $afterId, $tb['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $beforeId, $afterId, $tb['id']]);
     } elseif ($tb['kind'] === 'counter' && (array_key_exists('countSourceTableId', $body) || array_key_exists('countCategories', $body))) {
         $countSourceId = array_key_exists('countSourceTableId', $body)
             ? resolve_count_source_table($pdo, $tenant['id'], $tb['template_id'], $body)
             : $tb['count_source_table_id'];
         $countCategories = resolve_count_categories($body) ?? $tb['count_categories'];
-        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, count_source_table_id = ?, count_categories = ? WHERE id = ?');
-        $stmt->execute([$title, $headerColor, $colWidth, $countSourceId, $countCategories, $tb['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, count_source_table_id = ?, count_categories = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $countSourceId, $countCategories, $tb['id']]);
     } else {
-        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ? WHERE id = ?');
-        $stmt->execute([$title, $headerColor, $colWidth, $tb['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $tb['id']]);
     }
     respond_structure($pdo, $tb['template_id']);
 }
