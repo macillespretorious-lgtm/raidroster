@@ -101,8 +101,11 @@ function fetch_table_full($pdo, $tb) {
         'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'kind' => $tb['kind'],
+        'markStyle' => $tb['mark_style'],
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
+        'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
+        'countCategories' => !empty($tb['count_categories']) ? explode(',', $tb['count_categories']) : ['Tank', 'Healer'],
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups,
         'cellMerges' => $cellMerges, 'cells' => $cells, 'rules' => $rules,
     ];
