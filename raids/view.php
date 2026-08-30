@@ -285,6 +285,10 @@ function fmtTime($t) {
       color: #2a1c00; background: #ffd76e;
       box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 6px 1px rgba(255,215,110,0.9);
     }
+    /* The dropdown popup is browser-drawn with a light/white background regardless of the
+       closed select's own styling above, and options otherwise inherit that select's
+       (light) text color -- so without this, the open list is unreadable pale-on-white. */
+    .chip-mark-select option { color: #111827; background: #fff; }
 
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
