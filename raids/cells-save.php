@@ -191,6 +191,7 @@ function fetch_cell_out($pdo, $cellId) {
         'role'          => $class ? ($c['role'] ?: default_role_for_class($class, $spec)) : null,
         'roleConfirmed' => $c['role'] !== null,
         'marked'        => (bool)$c['marked'],
+        'markValue'     => (int)$c['marked'],
     ];
 }
 
@@ -452,7 +453,10 @@ if ($action === 'mark') {
         echo json_encode(['error' => 'Cell not found']);
         exit;
     }
-    $marked = !empty($body['marked']) ? 1 : 0;
+    // 0 = unmarked/-- ; 1 = boolean "starred" for star-style tables; 1-8 = Phase-2 stack
+    // group for number-style tables (e.g. Kel'Thuzad roster) -- same column, interpreted
+    // per-table by mark_style so this one action serves both UIs.
+    $marked = max(0, min(8, (int)($body['marked'] ?? 0)));
     $stmt = $pdo->prepare('UPDATE raid_cells SET marked = ? WHERE id = ?');
     $stmt->execute([$marked, $cellId]);
     echo json_encode(['success' => true, 'cell' => fetch_cell_out($pdo, $cellId)]);

@@ -199,6 +199,7 @@ function fetch_table_full($pdo, $tb, $guildId = null) {
             'roleConfirmed' => $cell['role'] !== null,
             'server'      => $isPug ? null : $cell['toon_server'],
             'marked'      => (bool)$cell['marked'],
+            'markValue'   => (int)$cell['marked'],
             'textContent' => $cell['text_content'],
             'bgColor'     => $cell['bg_color'],
             'textColor'   => $cell['text_color'],
@@ -244,6 +245,7 @@ function fetch_table_full($pdo, $tb, $guildId = null) {
         'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'kind' => $tb['kind'],
+        'markStyle' => $tb['mark_style'],
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
         'cellMerges' => $cellMerges, 'rules' => $rules,
     ];

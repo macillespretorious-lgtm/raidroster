@@ -229,8 +229,14 @@ function fmtTime($t) {
       margin-left: 2px; border-radius: 50%; background: rgba(0,0,0,0.25); color: inherit; font-size: 11px;
       line-height: 1; cursor: pointer; flex-shrink: 0;
     }
-    td.cell.slot .toon-chip .chip-clear { margin-left: auto; }
     .chip-clear:hover { background: rgba(0,0,0,0.45); }
+    /* Groups the marker/stack-select with the clear (x) button so they sit pinned together
+       at the chip's trailing edge -- previously chip-clear alone had margin-left:auto,
+       which pushed just the x to the far right while the marker stayed stranded right next
+       to the name with only a 4px gap, reading as if it belonged to the name instead of the
+       remove action. */
+    .chip-actions { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
+    td.cell.slot .toon-chip .chip-actions { margin-left: auto; }
     td.cell.slot .empty-slot {
       display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
       box-sizing: border-box; padding: 8px; color: #4a5578; font-size: 13px;
@@ -252,9 +258,33 @@ function fmtTime($t) {
       line-height: 14px; flex-shrink: 0;
     }
     .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
-    .chip-marker { display: inline-block; margin-left: 4px; font-weight: 800; font-size: 11px; line-height: 1; color: rgba(255,255,255,0.35); }
+    /* Star marker: a hollow, barely-there ring until set, then a solid gold badge with a
+       glow ring so an active mark reads at a glance instead of blending into the chip. */
+    .chip-marker {
+      display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+      border-radius: 50%; font-weight: 800; font-size: 10px; line-height: 1; flex-shrink: 0;
+      color: rgba(255,255,255,0.35); background: transparent;
+    }
     .chip-marker.clickable { cursor: pointer; }
-    .chip-marker.active { color: #ffd76e; }
+    .chip-marker.clickable:hover { background: rgba(255,255,255,0.18); }
+    .chip-marker.active {
+      color: #2a1c00; background: #ffd76e;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 6px 1px rgba(255,215,110,0.9);
+    }
+    /* Kel'Thuzad-style numeric stack-group picker -- same badge treatment as .chip-marker
+       (hollow/dim at 0, solid gold + glow once a group is set) so both marker styles read
+       consistently obvious when active. */
+    .chip-mark-select {
+      appearance: none; -webkit-appearance: none; -moz-appearance: none; border: none; border-radius: 50%;
+      width: 18px; height: 18px; padding: 0; margin: 0; text-align: center; text-align-last: center;
+      font-weight: 800; font-size: 11px; line-height: 18px; cursor: pointer; flex-shrink: 0;
+      background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.55);
+    }
+    .chip-mark-select:hover { filter: brightness(1.15); }
+    .chip-mark-select.active {
+      color: #2a1c00; background: #ffd76e;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 6px 1px rgba(255,215,110,0.9);
+    }
 
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
@@ -810,7 +840,7 @@ function contrastText(hex) {
   return lum > 0.6 ? '#111827' : '#ffffff';
 }
 
-function chipHtml(cell, noteEnabled) {
+function chipHtml(cell, noteEnabled, markStyle) {
   if (!cell || !cell.name) return '<span class="empty-slot">+</span>';
   const color = classColor(cell.class);
   const dragAttrs = CAN_MANAGE
@@ -821,12 +851,26 @@ function chipHtml(cell, noteEnabled) {
     ? `<span class="role-icon-sm${CAN_MANAGE ? ' role-clickable' : ''} ${roleKey(cell.role)}" title="${esc(roleTitle)}"${CAN_MANAGE ? ` data-action="cycle-cell-role" data-cell-id="${cell.id}"` : ''}></span>`
     : '';
   let html = `<span class="toon-chip"${dragAttrs} style="background:${color};color:${contrastText(color)};">${roleIcon}<span class="chip-name">${esc(cell.name)}</span>`;
-  if (noteEnabled && (cell.marked || CAN_MANAGE)) {
+  // .chip-actions groups the marker/select with the remove (x) button so both sit pinned
+  // together at the chip's trailing edge -- see the .chip-actions CSS for why this can't
+  // just be margin-left:auto on each element individually.
+  let actionsHtml = '';
+  if (noteEnabled && markStyle === 'number') {
+    const val = cell.markValue || 0;
+    if (CAN_MANAGE) {
+      const opts = ['<option value="0">—</option>'].concat([1, 2, 3, 4, 5, 6, 7, 8].map(n =>
+        `<option value="${n}"${val === n ? ' selected' : ''}>${n}</option>`)).join('');
+      actionsHtml += `<select class="chip-mark-select${val ? ' active' : ''}" data-action="set-mark-value" data-cell-id="${cell.id}" title="Phase 2 stack group" onclick="event.stopPropagation()">${opts}</select>`;
+    } else if (val) {
+      actionsHtml += `<span class="chip-mark-select active" title="Stack group ${val}">${val}</span>`;
+    }
+  } else if (noteEnabled && (cell.marked || CAN_MANAGE)) {
     const cls = 'chip-marker' + (cell.marked ? ' active' : '') + (CAN_MANAGE ? ' clickable' : '');
     const actionAttrs = CAN_MANAGE ? ` data-action="toggle-marker" data-cell-id="${cell.id}"` : '';
-    html += `<span class="${cls}"${actionAttrs} title="${cell.marked ? 'Marked' : 'Mark this slot'}">*</span>`;
+    actionsHtml += `<span class="${cls}"${actionAttrs} title="${cell.marked ? 'Marked' : 'Mark this slot'}">★</span>`;
   }
-  if (CAN_MANAGE) html += `<span class="chip-clear" data-action="clear" data-cell-id="${cell.id}">&times;</span>`;
+  if (CAN_MANAGE) actionsHtml += `<span class="chip-clear" data-action="clear" data-cell-id="${cell.id}">&times;</span>`;
+  if (actionsHtml) html += `<span class="chip-actions">${actionsHtml}</span>`;
   html += `</span>`;
   return html;
 }
@@ -971,6 +1015,12 @@ function render() {
         toggleMarker(parseInt(btn.dataset.cellId, 10));
       });
     });
+    el.querySelectorAll('[data-action="set-mark-value"]').forEach(sel => {
+      sel.addEventListener('change', e => {
+        e.stopPropagation();
+        setMarkValue(parseInt(sel.dataset.cellId, 10), parseInt(sel.value, 10) || 0);
+      });
+    });
     el.querySelectorAll('[data-action="edit-swap-note"]').forEach(td => {
       td.addEventListener('click', e => { e.stopPropagation(); showSwapNotePopup(td); });
     });
@@ -1041,8 +1091,11 @@ function cycleCellRole(cellId) {
 
 function toggleMarker(cellId) {
   const cur = findCellById(cellId);
-  const marked = !(cur && cur.marked);
-  return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark', cellId, marked }) })
+  return setMarkValue(cellId, (cur && cur.marked) ? 0 : 1);
+}
+
+function setMarkValue(cellId, value) {
+  return fetch(CELLS_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark', cellId, marked: value }) })
     .then(r => r.json()).then(d => {
       if (!d.success) { alert(d.error || 'Save failed'); return; }
       updateCellInPlace(d.cell);
@@ -1526,7 +1579,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
       const bgStyle = (minWidthStyle || (cell && cell.bgColor)) ? ` style="${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}"` : '';
-      out.push(`<td${colspanAttr}${rowspanAttr} class="cell slot${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled)}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell slot${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled, tb.markStyle)}</td>`);
     }
     i += colspan;
   }
@@ -2157,7 +2210,8 @@ function drawBlock(ctx, block, m, x0, y0) {
         ctx.fillRect(box.x + pad, y + pad, box.w - pad * 2, rowH - pad * 2);
         ctx.fillStyle = contrastText(color);
         ctx.font = 'bold 11px Segoe UI, Arial, sans-serif';
-        ctx.fillText(cell.name.toUpperCase(), box.x + pad + 5, y + rowH / 2, box.w - pad * 2 - 10);
+        const stackSuffix = (tb.markStyle === 'number' && cell.markValue) ? ` [${cell.markValue}]` : '';
+        ctx.fillText(cell.name.toUpperCase() + stackSuffix, box.x + pad + 5, y + rowH / 2, box.w - pad * 2 - 10);
       }
     });
     y += rowH;
