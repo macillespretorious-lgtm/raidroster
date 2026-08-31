@@ -1605,7 +1605,7 @@ function computeMergeCoverage(tb) {
 
 // Same walk-and-consume pattern for body cells: tb.cellMerges is a (rowId, columnId) ->
 // colspan/rowspan lookup, independent of header merges. Covered positions get no <td> at all.
-function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
+function bodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
   const out = [];
   let i = 0;
   while (i < chunkCols.length) {
@@ -1653,7 +1653,7 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
       const cellIdAttr = cell ? cell.id : '';
       const editableCls = CAN_MANAGE ? ' editable' : '';
       const bgStyle = (minWidthStyle || (cell && cell.bgColor)) ? ` style="${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}"` : '';
-      out.push(`<td${colspanAttr}${rowspanAttr} class="cell slot${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, noteEnabled, tb.markStyle)}</td>`);
+      out.push(`<td${colspanAttr}${rowspanAttr} class="cell slot${editableCls}" data-cell-id="${cellIdAttr}" data-table-id="${tb.id}" data-row-id="${r.id}" data-col-id="${c.id}"${bgStyle}>${chipHtml(cell, tb.markEnabled, tb.markStyle)}</td>`);
     }
     i += colspan;
   }
@@ -1670,7 +1670,7 @@ function swapsHeaderRow(chunkCols, tb) {
   return `<tr>${chunkCols.map(c => `<th class="group-th" style="background:${bg};color:${color};">${esc(c.label)}</th>`).join('')}</tr>`;
 }
 
-function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
+function renderColumnBlock(chunkCols, tb, sectionBg) {
   const coverage = computeMergeCoverage(tb);
   const colWidths = chunkCols.map(c => colWidthPx(c, tb));
   const colgroup = `<colgroup>` +
@@ -1681,7 +1681,7 @@ function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
       return `<tr style="height:${r.height || 20}px;"><td class="spacer-cell" colspan="${chunkCols.length}" style="background:${r.bgColor || sectionBg};"></td></tr>`;
     }
     const heightAttr = r.height ? ` style="height:${r.height}px;"` : '';
-    return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg)}</tr>`;
+    return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, coverage, sectionBg)}</tr>`;
   }).join('');
 
   // Column-groups editing is benched (template-edit.php forces groupsEnabled = false
@@ -1704,15 +1704,15 @@ function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
     </div>`;
 }
 
-function renderTable(tb, noteEnabled, sectionBg, sectionKind) {
+function renderTable(tb, sectionBg, sectionKind) {
   const groupsWithTables = tb.columnGroups.filter(g => g.tables.length > 0);
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
-  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg)).join('');
+  const blocks = isContainerOnly ? '' : chunkColumns(tb.columns).map(chunkCols => renderColumnBlock(chunkCols, tb, sectionBg)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables">
-      ${g.tables.map(ctb => renderTable(ctb, noteEnabled, sectionBg, sectionKind)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb, sectionBg, sectionKind)).join('')}
     </div>`).join('');
 
   // Copying assignments between tables only makes sense on the Roster tab, and only for
@@ -1739,14 +1739,13 @@ function renderSection(sec) {
       ${MRT_SERVERS.map(s => `<button type="button" class="btn-mrt-export" data-mrt-server="${s.key}" data-section-id="${sec.id}">${s.label}</button>`).join('')}
       <span class="mrt-info" data-tip="${MRT_TIP}">i</span>
     </div>` : '';
-  const noteEnabled = !!sec.noteEnabled;
-  const noteBar = (noteEnabled && sec.noteText) ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
+  const noteBar = (sec.noteEnabled && sec.noteText) ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   const sectionBg = sec.bgColor || '#111827';
   return `<div class="section-card">
     <div class="section-head" style="background:${headColor};"><span>${meta.icon} ${esc(sec.title)}</span><div class="section-head-actions">${mrtBar}${clearBtn}</div></div>
     ${noteBar}
     <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
-      ${sec.tables.map(tb => renderTable(tb, noteEnabled, sectionBg, sec.kind)).join('') || '<p class="empty">No tables in this section.</p>'}
+      ${sec.tables.map(tb => renderTable(tb, sectionBg, sec.kind)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
   </div>`;
 }

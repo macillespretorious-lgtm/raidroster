@@ -247,6 +247,7 @@ function fetch_table_full($pdo, $tb, $guildId = null) {
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'kind' => $tb['kind'],
         'isPrimary' => (bool)($tb['is_primary'] ?? 0),
+        'markEnabled' => (bool)($tb['mark_enabled'] ?? 0),
         'markStyle' => $tb['mark_style'],
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
         'cellMerges' => $cellMerges, 'rules' => $rules,

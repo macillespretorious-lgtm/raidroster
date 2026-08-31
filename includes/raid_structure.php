@@ -80,10 +80,10 @@ function backfill_swap_links($pdo, $raidId) {
 // $newParentGroupId is non-null, matching the section_id/parent_group_id invariant.
 function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $insT = $pdo->prepare(
-        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, bg_color, default_column_width, source_table_id, kind, count_categories, mark_style, is_primary)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, bg_color, default_column_width, source_table_id, kind, count_categories, mark_style, mark_enabled, is_primary)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['bg_color'], $tb['default_column_width'], $tb['id'], $tb['kind'] ?? 'standard', $tb['count_categories'] ?? null, $tb['mark_style'] ?? 'star', $tb['is_primary'] ?? 0]);
+    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['bg_color'], $tb['default_column_width'], $tb['id'], $tb['kind'] ?? 'standard', $tb['count_categories'] ?? null, $tb['mark_style'] ?? 'star', $tb['mark_enabled'] ?? 0, $tb['is_primary'] ?? 0]);
     $newTableId = (int)$pdo->lastInsertId();
 
     // Column groups first (columns FK into them), preserving parent_group_id links via an old->new id map.
