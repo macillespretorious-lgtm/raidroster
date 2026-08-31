@@ -1570,7 +1570,12 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
     if (eff === 'text' && tb.kind === 'swaps' && (c.id === -2 || c.id === -3)) {
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell slot" style="${minWidthStyle}">${swapChipHtml(cell)}</td>`);
     } else if (eff === 'text') {
-      const style = `${minWidthStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
+      // Text cells default to left-aligned (better for longer note/paragraph content), but a
+      // merged text cell is almost always acting as a banner/header label (e.g. a boss name
+      // spanning its sub-columns), where left-aligned text reads as off-center against the
+      // merged width -- center those specifically.
+      const headerAlignStyle = colspan > 1 ? 'text-align:center;' : '';
+      const style = `${minWidthStyle}${headerAlignStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
       const isSwapNote = tb.kind === 'swaps' && CAN_MANAGE && (c.id === -4 || c.id === -5);
       const swapAttrs = isSwapNote ? ` data-action="edit-swap-note" data-table-id="${tb.id}" data-player-id="${esc(r.playerMainToonId || '')}" data-field="${c.id === -4 ? 'note' : 'boss'}"` : '';
       const textHtml = renderCellTextHtml(cell ? cell.textContent : '');

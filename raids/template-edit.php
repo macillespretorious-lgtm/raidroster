@@ -1749,7 +1749,10 @@ function bodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
       const display = cell.textContent
         ? renderCellTextHtml(cell.textContent)
         : '<span class="cell-text-placeholder">Click to edit&hellip;</span>';
-      const tdStyle = cell.bgColor ? ` style="background:${cell.bgColor};"` : '';
+      // A merged text cell reads as a banner/header label (e.g. a boss name spanning its
+      // sub-columns) -- left-aligned looks off-center against the merged width there, so
+      // center it, matching the same rule the raid page applies.
+      const tdStyle = ` style="${colspan > 1 ? 'text-align:center;' : ''}${cell.bgColor ? `background:${cell.bgColor};` : ''}"`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}"${tdStyle}>
         ${overrideTag}
         <div class="cell-text-display" data-action="open-cell-editor" data-row-id="${r.id}" data-col-id="${c.id}" title="Click to edit text" style="${cellTextStyle(cell)}color:${cell.textColor || '#e8ecff'};">${display}</div>
@@ -1981,7 +1984,8 @@ function previewBodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
       i += colspan; continue;
     }
     if (eff === 'text') {
-      const style = `${minWidthStyle}${cell.bgColor ? `background:${cell.bgColor};` : ''}color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
+      const headerAlignStyle = colspan > 1 ? 'text-align:center;' : '';
+      const style = `${minWidthStyle}${headerAlignStyle}${cell.bgColor ? `background:${cell.bgColor};` : ''}color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-td" style="${style}">${renderCellTextHtml(cell.textContent)}</td>`);
     } else if (eff === 'icon') {
       const style = minWidthStyle + (cell.bgColor ? `background:${cell.bgColor};` : '');
