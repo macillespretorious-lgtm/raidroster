@@ -78,15 +78,31 @@ function raid_sync_blocked_reason($pdo, $templateId, $raidId) {
     $tableIds = all_raid_table_ids($pdo, $raidId);
     if ($tableIds) {
         $placeholders = implode(',', array_fill(0, count($tableIds), '?'));
-        foreach ([
-            ['raid_tables', 'id', 'source_table_id'],
-            ['raid_column_groups', 'table_id', 'source_group_id'],
-            ['raid_columns', 'table_id', 'source_column_id'],
-            ['raid_rows', 'table_id', 'source_row_id'],
-        ] as [$table, $col, $srcCol]) {
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM $table WHERE $col IN ($placeholders) AND $srcCol IS NULL");
-            $stmt->execute($tableIds);
-            if ((int)$stmt->fetchColumn() > 0) return 'This raid predates template-sync tracking and cannot be auto-synced.';
+
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM raid_tables WHERE id IN ($placeholders) AND source_table_id IS NULL");
+        $stmt->execute($tableIds);
+        if ((int)$stmt->fetchColumn() > 0) return 'This raid predates template-sync tracking and cannot be auto-synced.';
+
+        // Benched/Swaps/Counter tables intentionally have rows (and no columns/groups) that
+        // aren't copied from the template -- sync_table() already skips diffing their
+        // structure entirely (see the kind check near its top), so a bare/live-grown row
+        // with no source_row_id there is expected, not a sign the raid predates tracking.
+        // Excluding them here matches that same exemption.
+        $stmt = $pdo->prepare("SELECT id FROM raid_tables WHERE id IN ($placeholders) AND kind = 'standard'");
+        $stmt->execute($tableIds);
+        $standardTableIds = array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
+
+        if ($standardTableIds) {
+            $stdPlaceholders = implode(',', array_fill(0, count($standardTableIds), '?'));
+            foreach ([
+                ['raid_column_groups', 'table_id', 'source_group_id'],
+                ['raid_columns', 'table_id', 'source_column_id'],
+                ['raid_rows', 'table_id', 'source_row_id'],
+            ] as [$table, $col, $srcCol]) {
+                $stmt = $pdo->prepare("SELECT COUNT(*) FROM $table WHERE $col IN ($stdPlaceholders) AND $srcCol IS NULL");
+                $stmt->execute($standardTableIds);
+                if ((int)$stmt->fetchColumn() > 0) return 'This raid predates template-sync tracking and cannot be auto-synced.';
+            }
         }
     }
     return null;
