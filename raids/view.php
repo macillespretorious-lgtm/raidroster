@@ -1185,16 +1185,38 @@ function toonClassForPayload(payload) {
 // Client-side mirror of cells-save.php's rule_violation() -- instant drag-over/drop
 // feedback only, not authoritative. The server re-checks on every assign/move and is
 // the real gate; this just avoids a round-trip and matches IO's instant-feedback feel.
+// Resolves a main/alt toonKind+toonId to the real player's main id, mirroring
+// cells-save.php's resolve_player_id(). Pugs have no cross-raid identity -> null.
+function resolvePlayerId(toonKind, toonId) {
+  if (toonKind === 'main' && toonId != null) return String(toonId);
+  if (toonKind === 'alt' && toonId != null) {
+    for (const m of roster) {
+      if (m.alts.some(a => String(a.id) === String(toonId))) return String(m.id);
+    }
+  }
+  return null;
+}
+
 function clientRuleViolation(td, payload) {
   const tb = findTable(parseInt(td.dataset.tableId, 10));
-  if (!tb || !tb.rules || !tb.rules.length) return null;
-  const rowId = parseInt(td.dataset.rowId, 10);
-  const columnId = parseInt(td.dataset.colId, 10);
+  if (!tb) return null;
   const toonKind = payload.toonKind;
   const toonId = payload.toonId;
-  const toonClass = toonClassForPayload(payload);
   const toCellId = parseInt(td.dataset.cellId, 10) || 0;
   const excludeCellIds = payload.source === 'cell' ? [payload.cellId, toCellId] : [toCellId];
+
+  // Hard invariant, not an admin-configured rule -- one real player can't occupy two
+  // cells of the same table (e.g. a main and one of their alts both in Starting Roster).
+  const playerId = resolvePlayerId(toonKind, toonId);
+  if (playerId !== null) {
+    const dup = Object.values(tb.cells).some(c => c && !excludeCellIds.includes(c.id) && resolvePlayerId(c.toonKind, c.toonId) === playerId);
+    if (dup) return 'This player already has a toon assigned in this table';
+  }
+
+  if (!tb.rules || !tb.rules.length) return null;
+  const rowId = parseInt(td.dataset.rowId, 10);
+  const columnId = parseInt(td.dataset.colId, 10);
+  const toonClass = toonClassForPayload(payload);
 
   for (const rule of tb.rules) {
     const inScope = rule.scope === 'table' || rule.cellRefs.some(cr => cr.rowId === rowId && cr.columnId === columnId);

@@ -82,11 +82,49 @@ function toon_spec_for($pdo, $guildId, $toonKind, $toonId) {
     return null;
 }
 
+// A main and its alts are the same real player -- resolves either into the owning
+// toons.id so occupancy can be compared by person, not by which of their toons is in play.
+// Pugs have no cross-raid identity, so they resolve to null (never deduped against anything).
+function resolve_player_id($pdo, $toonKind, $toonId) {
+    if ($toonKind === 'main' && $toonId) return $toonId;
+    if ($toonKind === 'alt' && $toonId) {
+        $stmt = $pdo->prepare('SELECT main_id FROM toon_alts WHERE id = ?');
+        $stmt->execute([$toonId]);
+        $v = $stmt->fetchColumn();
+        return $v !== false ? $v : null;
+    }
+    return null;
+}
+
+// One real player can never occupy two cells of the same table at once -- checked
+// unconditionally (unlike class_restrict/max_count below, this isn't an admin-configured
+// raid_rules row, it's a hard invariant) so e.g. a main and one of their alts can't both
+// land in Starting Roster. $excludeCellIds keeps the toon's own current cell(s) out of the
+// comparison, same as the max_count check below.
+function duplicate_player_violation($pdo, $tableId, $toonKind, $toonId, array $excludeCellIds) {
+    $playerId = resolve_player_id($pdo, $toonKind, $toonId);
+    if ($playerId === null) return null;
+    $excludePlaceholders = implode(',', array_fill(0, count($excludeCellIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT c.id FROM raid_cells c
+         LEFT JOIN toon_alts ta ON c.toon_kind = 'alt' AND ta.id = c.toon_id
+         WHERE c.table_id = ?
+           AND ((c.toon_kind = 'main' AND c.toon_id = ?) OR (c.toon_kind = 'alt' AND ta.main_id = ?))
+           AND c.id NOT IN ($excludePlaceholders)
+         LIMIT 1"
+    );
+    $stmt->execute(array_merge([$tableId, $playerId, $playerId], $excludeCellIds));
+    return $stmt->fetch() ? 'This player already has a toon assigned in this table' : null;
+}
+
 // Checks class_restrict/max_count raid_rules scoped to (tableId, rowId, columnId) against the
 // toon about to occupy that cell. $excludeCellIds keeps a toon's own current cell(s) -- the one
 // being reassigned, or both sides of a move -- out of its own max_count tally.
 function rule_violation($pdo, $tableId, $rowId, $columnId, $toonKind, $toonId, $toonClass, array $excludeCellIds, $pugName = null) {
     if (!$toonKind || (!$toonId && $toonKind !== 'pug')) return null; // clearing a cell never violates a rule
+
+    $dup = duplicate_player_violation($pdo, $tableId, $toonKind, $toonId, $excludeCellIds);
+    if ($dup) return $dup;
 
     $stmt = $pdo->prepare(
         "SELECT r.* FROM raid_rules r
