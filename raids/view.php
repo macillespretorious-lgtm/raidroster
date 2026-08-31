@@ -903,19 +903,28 @@ function allTables() {
 function findTable(id) { return allTables().find(t => t.id === id) || null; }
 
 // The one table (set at raid/template creation, never re-picked afterward -- see
-// includes/raid_structure.php's is_primary) that decides who's actually coming: placing a
-// toon there hides them from Available Toons, clearing them there brings them back.
+// includes/raid_structure.php's is_primary) that decides who's actually coming.
 function primaryTable() { return allTables().find(tb => tb.isPrimary) || null; }
 
-function primaryTableOccupants() {
-  const tb = primaryTable();
-  const occupied = new Set();
-  if (!tb) return occupied;
-  for (const key in tb.cells) {
-    const c = tb.cells[key];
-    if (c && c.toonKind && c.toonKind !== 'pug' && c.toonId) occupied.add(c.toonKind + ':' + c.toonId);
+// A player (main or alt, resolved to one identity) counts as already accounted for once any
+// of their toons occupies the Starting Roster or a Benched table -- placing one there hides
+// every toon belonging to that same real player from Available Toons, clearing it brings them
+// all back. Without resolving to player identity, a main placed in the roster wouldn't hide
+// that player's still-unassigned alts from the pool. Mirrors the same primary+bench grouping
+// used by the duplicate-toon guard in clientRuleViolation/cells-save.php's rostered_table_ids().
+function rosterOccupantPlayerIds() {
+  const ids = new Set();
+  for (const tb of allTables()) {
+    if (!(tb.isPrimary || tb.kind === 'benched')) continue;
+    for (const key in tb.cells) {
+      const c = tb.cells[key];
+      if (c && c.toonKind && c.toonKind !== 'pug' && c.toonId) {
+        const pid = resolvePlayerId(c.toonKind, c.toonId);
+        if (pid !== null) ids.add(pid);
+      }
+    }
   }
-  return occupied;
+  return ids;
 }
 
 // Same tab concept as template-edit.php's currentTabs(): one tab per distinct section `kind`,
@@ -1782,11 +1791,14 @@ function renderPool() {
   const validMainIds = new Set(roster.map(m => m.id));
   const validAltIds = new Set();
   roster.forEach(m => m.alts.forEach(a => validAltIds.add(a.id)));
-  const primaryOccupants = primaryTableOccupants();
+  const rosterOccupants = rosterOccupantPlayerIds();
   const entries = pool.filter(p => {
     if (p.toonKind === 'main' && !validMainIds.has(p.toonId)) return false;
     if (p.toonKind === 'alt' && !validAltIds.has(p.toonId)) return false;
-    if (p.toonKind !== 'pug' && primaryOccupants.has(p.toonKind + ':' + p.toonId)) return false;
+    if (p.toonKind !== 'pug') {
+      const pid = resolvePlayerId(p.toonKind, p.toonId);
+      if (pid !== null && rosterOccupants.has(pid)) return false;
+    }
     return true;
   });
 
