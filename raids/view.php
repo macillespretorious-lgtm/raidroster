@@ -1208,10 +1208,13 @@ function clientRuleViolation(td, payload) {
 
   // Hard invariant, not an admin-configured rule -- one real player can't occupy two
   // cells of the same table (e.g. a main and one of their alts both in Starting Roster).
+  // Starting Roster and any Benched table share one pool for this check -- being benched
+  // means you're on the roster but not playing, so you can't also be in the lineup.
+  const rosterTables = (tb.isPrimary || tb.kind === 'benched') ? allTables().filter(t => t.isPrimary || t.kind === 'benched') : [tb];
   const playerId = resolvePlayerId(toonKind, toonId);
   if (playerId !== null) {
-    const dup = Object.values(tb.cells).some(c => c && !excludeCellIds.includes(c.id) && resolvePlayerId(c.toonKind, c.toonId) === playerId);
-    if (dup) return 'This player already has a toon assigned in this table';
+    const dup = rosterTables.some(t => Object.values(t.cells).some(c => c && !excludeCellIds.includes(c.id) && resolvePlayerId(c.toonKind, c.toonId) === playerId));
+    if (dup) return rosterTables.length > 1 ? 'This player already has a toon assigned in the Starting Roster or Bench' : 'This player already has a toon assigned in this table';
   }
 
   if (!tb.rules || !tb.rules.length) return null;

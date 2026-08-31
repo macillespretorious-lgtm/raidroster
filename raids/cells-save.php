@@ -96,6 +96,29 @@ function resolve_player_id($pdo, $toonKind, $toonId) {
     return null;
 }
 
+// The Starting Roster (is_primary=1) and any Benched table are one player pool -- being
+// benched means you're on the roster but not playing, so a toon can't sit in both at once.
+// Every other table kind keeps the narrower same-table-only check. Returns [$tableId] when
+// $tableId isn't part of that pool (or doesn't resolve), so the caller's query degenerates
+// back to the old same-table comparison.
+function rostered_table_ids($pdo, $tableId) {
+    $stmt = $pdo->prepare(
+        "SELECT tb.is_primary, tb.kind, s.raid_id FROM raid_tables tb
+         JOIN raid_sections s ON s.id = tb.section_id
+         WHERE tb.id = ?"
+    );
+    $stmt->execute([$tableId]);
+    $tb = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$tb || (!$tb['is_primary'] && $tb['kind'] !== 'benched')) return [$tableId];
+    $stmt = $pdo->prepare(
+        "SELECT tb2.id FROM raid_tables tb2
+         JOIN raid_sections s2 ON s2.id = tb2.section_id
+         WHERE s2.raid_id = ? AND (tb2.is_primary = 1 OR tb2.kind = 'benched')"
+    );
+    $stmt->execute([$tb['raid_id']]);
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
 // One real player can never occupy two cells of the same table at once -- checked
 // unconditionally (unlike class_restrict/max_count below, this isn't an admin-configured
 // raid_rules row, it's a hard invariant) so e.g. a main and one of their alts can't both
@@ -104,17 +127,22 @@ function resolve_player_id($pdo, $toonKind, $toonId) {
 function duplicate_player_violation($pdo, $tableId, $toonKind, $toonId, array $excludeCellIds) {
     $playerId = resolve_player_id($pdo, $toonKind, $toonId);
     if ($playerId === null) return null;
+    $tableIds = rostered_table_ids($pdo, $tableId);
+    $tablePlaceholders = implode(',', array_fill(0, count($tableIds), '?'));
     $excludePlaceholders = implode(',', array_fill(0, count($excludeCellIds), '?'));
     $stmt = $pdo->prepare(
         "SELECT c.id FROM raid_cells c
          LEFT JOIN toon_alts ta ON c.toon_kind = 'alt' AND ta.id = c.toon_id
-         WHERE c.table_id = ?
+         WHERE c.table_id IN ($tablePlaceholders)
            AND ((c.toon_kind = 'main' AND c.toon_id = ?) OR (c.toon_kind = 'alt' AND ta.main_id = ?))
            AND c.id NOT IN ($excludePlaceholders)
          LIMIT 1"
     );
-    $stmt->execute(array_merge([$tableId, $playerId, $playerId], $excludeCellIds));
-    return $stmt->fetch() ? 'This player already has a toon assigned in this table' : null;
+    $stmt->execute(array_merge($tableIds, [$playerId, $playerId], $excludeCellIds));
+    if (!$stmt->fetch()) return null;
+    return count($tableIds) > 1
+        ? 'This player already has a toon assigned in the Starting Roster or Bench'
+        : 'This player already has a toon assigned in this table';
 }
 
 // Checks class_restrict/max_count raid_rules scoped to (tableId, rowId, columnId) against the
