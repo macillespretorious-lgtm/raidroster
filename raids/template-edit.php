@@ -279,6 +279,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     td.text-td { text-align: left; }
     .cell-bold-btn { width: 20px; height: 18px; padding: 0; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); background: #0a0f1e; color: #a8b4d0; font-weight: 800; font-size: 11px; line-height: 1; cursor: pointer; }
     .cell-bold-btn.active { background: #5865f2; border-color: #5865f2; color: #fff; }
+    .cell-align-group { display: flex; gap: 2px; }
+    .cell-align-btn { width: 20px; height: 18px; padding: 0; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); background: #0a0f1e; color: #a8b4d0; font-weight: 700; font-size: 10px; line-height: 1; cursor: pointer; }
+    .cell-align-btn.active { background: #5865f2; border-color: #5865f2; color: #fff; }
     .cell-font-select { flex: 1; min-width: 0; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.12); color: #e8ecff; font-size: 10.5px; border-radius: 4px; padding: 2px 2px; }
 
     .cell-text-display { min-height: 20px; cursor: pointer; border-radius: 4px; padding: 3px 5px; margin: -3px -5px; }
@@ -336,6 +339,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .cell-edit-format-row { display: flex; align-items: center; gap: 8px; }
     .cell-edit-format-row .cell-font-select { flex: 1; padding: 6px; font-size: 12px; }
     .cell-edit-format-row .cell-bold-btn { width: 28px; height: 28px; font-size: 13px; }
+    .cell-edit-format-row .cell-align-btn { width: 28px; height: 28px; font-size: 13px; }
     .export-modal .preview-note code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
     .export-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
     .export-tokens span { background: rgba(76,175,106,0.15); border: 1px solid rgba(76,175,106,0.35); color: #8fe0a8; font-size: 11px; padding: 3px 8px; border-radius: 999px; font-family: 'Courier New', monospace; }
@@ -525,7 +529,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     body.stamp-mode-active .data-td:hover, body.stamp-mode-active .spacer-cell:hover, body.stamp-mode-active .text-td:hover {
       outline: 2px solid #f0c04a; outline-offset: -2px;
     }
-    body.stamp-mode-active .cell-text-display, body.stamp-mode-active .icon-pick-btn, body.stamp-mode-active .swatch, body.stamp-mode-active .cell-bold-btn, body.stamp-mode-active .cell-font-select { pointer-events: none; }
+    body.stamp-mode-active .cell-text-display, body.stamp-mode-active .icon-pick-btn, body.stamp-mode-active .swatch, body.stamp-mode-active .cell-bold-btn, body.stamp-mode-active .cell-align-btn, body.stamp-mode-active .cell-font-select { pointer-events: none; }
     body.stamp-mode-active .kind-override-tag { pointer-events: none; }
     .cell-override-wrap { position: absolute; top: 1px; left: 2px; z-index: 3; }
     .kind-override-tag { background: none; border: none; padding: 0; font: inherit; font-size: 8.5px; font-weight: 800; letter-spacing: .03em; color: #f0c04a; text-transform: uppercase; cursor: pointer; }
@@ -648,6 +652,11 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       <div class="cell-edit-icon-palette" id="cellEditIconPalette"></div>
       <div class="cell-edit-format-row">
         <button type="button" class="cell-bold-btn" id="cellEditBold" title="Bold">B</button>
+        <div class="cell-align-group">
+          <button type="button" class="cell-align-btn" id="cellEditAlignLeft" data-align="left" title="Align left">L</button>
+          <button type="button" class="cell-align-btn" id="cellEditAlignCenter" data-align="center" title="Align center">C</button>
+          <button type="button" class="cell-align-btn" id="cellEditAlignRight" data-align="right" title="Align right">R</button>
+        </div>
         <select class="cell-font-select" id="cellEditFont" title="Font"></select>
         <input type="color" class="swatch" id="cellEditColor" title="Text color">
       </div>
@@ -924,7 +933,7 @@ function measureTextPx(text, font) {
 }
 
 function cellFor(tb, rowId, colId) {
-  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null, bold: false, font: null, icon: null, kindOverride: null };
+  return (tb && tb.cells.find(c => c.rowId === rowId && c.columnId === colId)) || { textContent: '', bgColor: null, textColor: null, bold: false, font: null, icon: null, kindOverride: null, textAlign: null };
 }
 function tableForCell(rowId, colId) {
   return allTables().find(tb => tb.rows.some(r => r.id === rowId) && tb.columns.some(c => c.id === colId)) || null;
@@ -1751,8 +1760,10 @@ function bodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
         : '<span class="cell-text-placeholder">Click to edit&hellip;</span>';
       // A merged text cell reads as a banner/header label (e.g. a boss name spanning its
       // sub-columns) -- left-aligned looks off-center against the merged width there, so
-      // center it, matching the same rule the raid page applies.
-      const tdStyle = ` style="${colspan > 1 ? 'text-align:center;' : ''}${cell.bgColor ? `background:${cell.bgColor};` : ''}"`;
+      // center it by default, matching the same rule the raid page applies. An explicit
+      // per-cell alignment (set via the "Edit text" modal) always overrides this default.
+      const cellAlignStyle = cell.textAlign ? `text-align:${cell.textAlign};` : (colspan > 1 ? 'text-align:center;' : '');
+      const tdStyle = ` style="${cellAlignStyle}${cell.bgColor ? `background:${cell.bgColor};` : ''}"`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="data-td text-td" data-row-id="${r.id}" data-col-id="${c.id}"${tdStyle}>
         ${overrideTag}
         <div class="cell-text-display" data-action="open-cell-editor" data-row-id="${r.id}" data-col-id="${c.id}" title="Click to edit text" style="${cellTextStyle(cell)}color:${cell.textColor || '#e8ecff'};">${display}</div>
@@ -1984,7 +1995,7 @@ function previewBodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
       i += colspan; continue;
     }
     if (eff === 'text') {
-      const headerAlignStyle = colspan > 1 ? 'text-align:center;' : '';
+      const headerAlignStyle = cell.textAlign ? `text-align:${cell.textAlign};` : (colspan > 1 ? 'text-align:center;' : '');
       const style = `${minWidthStyle}${headerAlignStyle}${cell.bgColor ? `background:${cell.bgColor};` : ''}color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`;
       out.push(`<td${colspanAttr}${rowspanAttr} class="cell text-td" style="${style}">${renderCellTextHtml(cell.textContent)}</td>`);
     } else if (eff === 'icon') {
@@ -2237,8 +2248,9 @@ function colourBodyCellsForRow(r, chunkCols, tb, coverage, sectionBg) {
     // off c.kind too, so an icon column stays shrinkable to its lower floor even where a cell's
     // own kind_override makes it render as text/general, matching the column's actual width.
     const minWidthStyle = (c.kind === 'icon' || c.kind === 'text' || c.kind === 'general') ? `min-width:${NARROW_MIN_COL_PX}px;` : '';
+    const alignStyle = cell.textAlign ? `text-align:${cell.textAlign};` : (colspan > 1 ? 'text-align:center;' : '');
     const style = minWidthStyle + (eff === 'text'
-      ? `${bg ? `background:${bg};` : ''}color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
+      ? `${alignStyle}${bg ? `background:${bg};` : ''}color:${cell.textColor || 'inherit'};${cellTextStyle(cell)}`
       : (bg ? `background:${bg};` : ''));
     const content = eff === 'text'
       ? renderCellTextHtml(cell.textContent)
@@ -3024,6 +3036,7 @@ function openCellEditor(rowId, colId) {
   cellEditColId = colId;
   document.getElementById('cellEditTextarea').value = cell.textContent || '';
   document.getElementById('cellEditBold').classList.toggle('active', !!cell.bold);
+  document.querySelectorAll('.cell-align-btn').forEach(b => b.classList.toggle('active', b.dataset.align === (cell.textAlign || '')));
   document.getElementById('cellEditFont').value = cell.font || '';
   document.getElementById('cellEditColor').value = cell.textColor || '#e8ecff';
   document.getElementById('cellEditBackdrop').classList.add('open');
@@ -3050,6 +3063,15 @@ document.getElementById('cellEditIconPalette').querySelectorAll('[data-icon]').f
 document.getElementById('cellEditBold').addEventListener('click', () => {
   document.getElementById('cellEditBold').classList.toggle('active');
 });
+document.querySelectorAll('.cell-align-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    // Clicking the already-active alignment clears it, falling back to the automatic
+    // left-aligned/centered-when-merged default instead of forcing an explicit value.
+    const wasActive = btn.classList.contains('active');
+    document.querySelectorAll('.cell-align-btn').forEach(b => b.classList.remove('active'));
+    if (!wasActive) btn.classList.add('active');
+  });
+});
 document.getElementById('cellEditClose').addEventListener('click', closeCellEditor);
 document.getElementById('cellEditCancel').addEventListener('click', closeCellEditor);
 document.getElementById('cellEditBackdrop').addEventListener('click', e => {
@@ -3069,6 +3091,7 @@ document.getElementById('cellEditSave').addEventListener('click', () => {
     bold: document.getElementById('cellEditBold').classList.contains('active'),
     font: document.getElementById('cellEditFont').value || null,
     icon: cell.icon,
+    textAlign: document.querySelector('.cell-align-btn.active')?.dataset.align || null,
   }).then(() => closeCellEditor());
 });
 

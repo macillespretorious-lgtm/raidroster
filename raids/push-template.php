@@ -333,6 +333,49 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
         }
     }
 
+    // --- Cell content/colors (text, background, formatting) ---
+    // Diffed here (in addition to the wholesale apply-time overwrite further down) so a
+    // color/text-only edit shows up in the preview instead of silently riding along with an
+    // unrelated structural change -- previously this was applied but never diffed. Only
+    // matched (pre-existing) row/column pairs are checked: a cell belonging to a brand-new
+    // row or column has no raid_cells row yet to diff against (it gets created below), and
+    // its addition is already covered by the row/column "added" entries above.
+    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override, text_align FROM raid_template_cells WHERE table_id = ?');
+    $stmt->execute([$tplTableId]);
+    $tplCellsByKey = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $tc) $tplCellsByKey[$tc['row_id'] . '_' . $tc['column_id']] = $tc;
+
+    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override, text_align FROM raid_cells WHERE table_id = ?');
+    $stmt->execute([$raidTableId]);
+    $raidCellsByKey = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $rc) $raidCellsByKey[$rc['row_id'] . '_' . $rc['column_id']] = $rc;
+
+    $rowLabelById = [];
+    foreach ($raidRows as $r) $rowLabelById[(int)$r['id']] = $r['label'];
+    $colLabelById = [];
+    foreach ($raidCols as $c) $colLabelById[(int)$c['id']] = $c['label'];
+
+    $cellFieldDefaults = ['text_content' => null, 'bg_color' => null, 'text_color' => null, 'bold' => 0, 'font' => null, 'icon' => null, 'kind_override' => null, 'text_align' => null];
+
+    foreach ($rowIdMap as $tplRowId => $raidRowId) {
+        foreach ($columnIdMap as $tplColId => $raidColId) {
+            $raidCell = $raidCellsByKey[$raidRowId . '_' . $raidColId] ?? null;
+            if ($raidCell === null) continue;
+            $tplCell = $tplCellsByKey[$tplRowId . '_' . $tplColId] ?? null;
+            $changedFields = [];
+            foreach ($cellFieldDefaults as $f => $default) {
+                $rv = $raidCell[$f];
+                $tv = $tplCell[$f] ?? $default;
+                if ($f === 'bold') { $rv = (int)$rv; $tv = (int)$tv; }
+                if ((string)$rv !== (string)$tv) $changedFields[] = $f;
+            }
+            if ($changedFields) {
+                $label = ($rowLabelById[$raidRowId] ?: '(row)') . ' / ' . ($colLabelById[$raidColId] ?: '(column)');
+                $diff['cells']['changed'][] = ['id' => $raidRowId . '_' . $raidColId, 'label' => $label, 'changes' => $changedFields];
+            }
+        }
+    }
+
     // --- Assignment rules ---
     $stmt = $pdo->prepare('SELECT * FROM raid_rules WHERE table_id = ? ORDER BY sort_order, id');
     $stmt->execute([$raidTableId]);
@@ -424,14 +467,14 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
 
         // Sync template-authored cell text/colors down onto their matched raid cells, using
         // the row/column id maps built above (covers matched and newly-added rows/columns).
-        $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ?');
+        $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override, text_align FROM raid_template_cells WHERE table_id = ?');
         $stmt->execute([$tplTableId]);
-        $updCell = $pdo->prepare('UPDATE raid_cells SET text_content = ?, bg_color = ?, text_color = ?, bold = ?, font = ?, icon = ?, kind_override = ? WHERE table_id = ? AND row_id = ? AND column_id = ?');
+        $updCell = $pdo->prepare('UPDATE raid_cells SET text_content = ?, bg_color = ?, text_color = ?, bold = ?, font = ?, icon = ?, kind_override = ?, text_align = ? WHERE table_id = ? AND row_id = ? AND column_id = ?');
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $tc) {
             $rId = $rowIdMap[(int)$tc['row_id']] ?? null;
             $cId = $columnIdMap[(int)$tc['column_id']] ?? null;
             if ($rId === null || $cId === null) continue;
-            $updCell->execute([$tc['text_content'], $tc['bg_color'], $tc['text_color'], $tc['bold'], $tc['font'], $tc['icon'], $tc['kind_override'], $raidTableId, $rId, $cId]);
+            $updCell->execute([$tc['text_content'], $tc['bg_color'], $tc['text_color'], $tc['bold'], $tc['font'], $tc['icon'], $tc['kind_override'], $tc['text_align'], $raidTableId, $rId, $cId]);
         }
 
         // Cell merges carry no assignment data, so just wholesale-resync them from the
@@ -496,6 +539,7 @@ function sync_raid_from_template($pdo, $raid, $template, $apply, $confirmRemoval
         'columns'  => ['added' => [], 'removed' => [], 'changed' => []],
         'rows'     => ['added' => [], 'removed' => [], 'changed' => []],
         'rules'    => ['added' => [], 'removed' => [], 'changed' => []],
+        'cells'    => ['added' => [], 'removed' => [], 'changed' => []],
     ];
 
     $stmt = $pdo->prepare('SELECT * FROM raid_sections WHERE raid_id = ? ORDER BY sort_order, id');

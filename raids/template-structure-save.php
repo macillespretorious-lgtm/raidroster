@@ -283,7 +283,7 @@ function fetch_table_full($pdo, $tb) {
         'rowspan' => (int)$m['rowspan'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
-    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ?');
+    $stmt = $pdo->prepare('SELECT row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override, text_align FROM raid_template_cells WHERE table_id = ?');
     $stmt->execute([$tb['id']]);
     $cells = array_map(fn($c) => [
         'rowId' => (int)$c['row_id'],
@@ -295,6 +295,7 @@ function fetch_table_full($pdo, $tb) {
         'font' => $c['font'],
         'icon' => $c['icon'],
         'kindOverride' => $c['kind_override'],
+        'textAlign' => $c['text_align'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
 
     $stmt = $pdo->prepare('SELECT id, rule_type, scope, classes, max_count, label, sort_order FROM raid_template_rules WHERE table_id = ? ORDER BY sort_order, id');
@@ -918,13 +919,14 @@ if ($action === 'update_cell') {
     $bold = !empty($body['bold']) ? 1 : 0;
     $font = in_array($body['font'] ?? null, ['serif', 'mono', 'display'], true) ? $body['font'] : null;
     $icon = in_array($body['icon'] ?? null, RAID_ICON_KEYS, true) ? $body['icon'] : null;
+    $textAlign = in_array($body['textAlign'] ?? null, ['left', 'center', 'right'], true) ? $body['textAlign'] : null;
 
     $stmt = $pdo->prepare(
-        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color), bold = VALUES(bold), font = VALUES(font), icon = VALUES(icon)'
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon, text_align)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color), bold = VALUES(bold), font = VALUES(font), icon = VALUES(icon), text_align = VALUES(text_align)'
     );
-    $stmt->execute([$col['table_id'], $row['id'], $col['id'], $textContent, $bgColor, $textColor, $bold, $font, $icon]);
+    $stmt->execute([$col['table_id'], $row['id'], $col['id'], $textContent, $bgColor, $textColor, $bold, $font, $icon, $textAlign]);
 
     respond_structure($pdo, $col['template_id']);
 }
@@ -1143,20 +1145,20 @@ if ($action === 'set_cell_merge') {
             $primaryRow = fetch_row_owned($pdo, $tenant['id'], $primaryRowId);
             $primaryCol = fetch_column_owned($pdo, $tenant['id'], $primaryColumnId);
             if ($primaryRow && $primaryCol && (int)$primaryRow['table_id'] === (int)$col['table_id'] && (int)$primaryCol['table_id'] === (int)$col['table_id']) {
-                $cellFields = ['text_content' => null, 'bg_color' => null, 'text_color' => null, 'bold' => null, 'font' => null, 'icon' => null, 'kind_override' => null];
-                $stmtCell = $pdo->prepare('SELECT text_content, bg_color, text_color, bold, font, icon, kind_override FROM raid_template_cells WHERE table_id = ? AND row_id = ? AND column_id = ?');
+                $cellFields = ['text_content' => null, 'bg_color' => null, 'text_color' => null, 'bold' => null, 'font' => null, 'icon' => null, 'kind_override' => null, 'text_align' => null];
+                $stmtCell = $pdo->prepare('SELECT text_content, bg_color, text_color, bold, font, icon, kind_override, text_align FROM raid_template_cells WHERE table_id = ? AND row_id = ? AND column_id = ?');
                 $stmtCell->execute([$col['table_id'], $row['id'], $col['id']]);
                 $anchorCell = $stmtCell->fetch(PDO::FETCH_ASSOC) ?: $cellFields;
                 $stmtCell->execute([$col['table_id'], $primaryRow['id'], $primaryCol['id']]);
                 $primaryCell = $stmtCell->fetch(PDO::FETCH_ASSOC) ?: $cellFields;
 
                 $stmtUpsert = $pdo->prepare(
-                    'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                     ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color), bold = VALUES(bold), font = VALUES(font), icon = VALUES(icon), kind_override = VALUES(kind_override)'
+                    'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override, text_align)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE text_content = VALUES(text_content), bg_color = VALUES(bg_color), text_color = VALUES(text_color), bold = VALUES(bold), font = VALUES(font), icon = VALUES(icon), kind_override = VALUES(kind_override), text_align = VALUES(text_align)'
                 );
-                $stmtUpsert->execute([$col['table_id'], $row['id'], $col['id'], $primaryCell['text_content'] ?? '', $primaryCell['bg_color'], $primaryCell['text_color'], $primaryCell['bold'] ?? 0, $primaryCell['font'], $primaryCell['icon'], $primaryCell['kind_override']]);
-                $stmtUpsert->execute([$col['table_id'], $primaryRow['id'], $primaryCol['id'], $anchorCell['text_content'] ?? '', $anchorCell['bg_color'], $anchorCell['text_color'], $anchorCell['bold'] ?? 0, $anchorCell['font'], $anchorCell['icon'], $anchorCell['kind_override']]);
+                $stmtUpsert->execute([$col['table_id'], $row['id'], $col['id'], $primaryCell['text_content'] ?? '', $primaryCell['bg_color'], $primaryCell['text_color'], $primaryCell['bold'] ?? 0, $primaryCell['font'], $primaryCell['icon'], $primaryCell['kind_override'], $primaryCell['text_align']]);
+                $stmtUpsert->execute([$col['table_id'], $primaryRow['id'], $primaryCol['id'], $anchorCell['text_content'] ?? '', $anchorCell['bg_color'], $anchorCell['text_color'], $anchorCell['bold'] ?? 0, $anchorCell['font'], $anchorCell['icon'], $anchorCell['kind_override'], $anchorCell['text_align']]);
             }
         }
 
@@ -1473,14 +1475,14 @@ function restore_table_recursive($pdo, $tableId, array $snapshotTable) {
 
     $pdo->prepare('DELETE FROM raid_template_cells WHERE table_id = ?')->execute([$tableId]);
     $insCell = $pdo->prepare(
-        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_template_cells (table_id, row_id, column_id, text_content, bg_color, text_color, bold, font, icon, kind_override, text_align)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     foreach ($snapshotTable['cells'] ?? [] as $c) {
         $insCell->execute([
             $tableId, (int)$c['rowId'], (int)$c['columnId'],
             $c['textContent'] ?? '', $c['bgColor'] ?? null, $c['textColor'] ?? null,
-            !empty($c['bold']) ? 1 : 0, $c['font'] ?? null, $c['icon'] ?? null, $c['kindOverride'] ?? null,
+            !empty($c['bold']) ? 1 : 0, $c['font'] ?? null, $c['icon'] ?? null, $c['kindOverride'] ?? null, $c['textAlign'] ?? null,
         ]);
     }
 

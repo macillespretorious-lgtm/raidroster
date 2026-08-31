@@ -709,8 +709,8 @@ function renderSyncBar() {
   if (btn && !disabled) btn.addEventListener('click', openSyncModal);
 }
 
-const DIFF_GROUP_LABELS = { sections: 'Sections', tables: 'Tables', groups: 'Column groups', columns: 'Columns', rows: 'Rows' };
-const DIFF_KEYS = ['sections', 'tables', 'groups', 'columns', 'rows'];
+const DIFF_GROUP_LABELS = { sections: 'Sections', tables: 'Tables', groups: 'Column groups', columns: 'Columns', rows: 'Rows', cells: 'Cell text & colors' };
+const DIFF_KEYS = ['sections', 'tables', 'groups', 'columns', 'rows', 'cells'];
 
 function diffHasRemovals(diff) {
   return DIFF_KEYS.some(k => diff[k].removed.length > 0);
@@ -1573,8 +1573,10 @@ function bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg) {
       // Text cells default to left-aligned (better for longer note/paragraph content), but a
       // merged text cell is almost always acting as a banner/header label (e.g. a boss name
       // spanning its sub-columns), where left-aligned text reads as off-center against the
-      // merged width -- center those specifically.
-      const headerAlignStyle = colspan > 1 ? 'text-align:center;' : '';
+      // merged width -- center those specifically. An explicit per-cell alignment choice
+      // (set via the "Edit text" modal) always overrides this automatic default.
+      const explicitAlign = cell && cell.textAlign;
+      const headerAlignStyle = explicitAlign ? `text-align:${explicitAlign};` : (colspan > 1 ? 'text-align:center;' : '');
       const style = `${minWidthStyle}${headerAlignStyle}${(cell && cell.bgColor) ? `background:${cell.bgColor};` : ''}color:${(cell && cell.textColor) || 'inherit'};${cellTextStyle(cell)}`;
       const isSwapNote = tb.kind === 'swaps' && CAN_MANAGE && (c.id === -4 || c.id === -5);
       const swapAttrs = isSwapNote ? ` data-action="edit-swap-note" data-table-id="${tb.id}" data-player-id="${esc(r.playerMainToonId || '')}" data-field="${c.id === -4 ? 'note' : 'boss'}"` : '';
@@ -2197,7 +2199,15 @@ function drawBlock(ctx, block, m, x0, y0) {
         const parts = parseCellText(cell && cell.textContent);
         const iconSize = 13;
         const maxX = box.x + box.w - 4;
-        let tx = box.x + 6;
+        const minX = box.x + 6;
+        const align = (cell && cell.textAlign) || 'left';
+        let tx = minX;
+        if (align !== 'left') {
+          let totalW = 0;
+          for (const p of parts) totalW += (p.type === 'icon') ? (iconSize + 2) : measureTextPx(p.value, ctx.font);
+          if (align === 'center') tx = Math.max(minX, box.x + (box.w - totalW) / 2);
+          else if (align === 'right') tx = Math.max(minX, maxX - totalW);
+        }
         for (const p of parts) {
           if (tx >= maxX) break;
           if (p.type === 'icon') {

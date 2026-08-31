@@ -34,7 +34,7 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
         'id' => 0, 'toonKind' => null, 'toonId' => null, 'pugName' => null, 'pugClass' => null,
         'name' => null, 'class' => null, 'role' => null, 'roleConfirmed' => false, 'server' => null,
         'marked' => false, 'textContent' => $text, 'bgColor' => null, 'textColor' => null,
-        'bold' => false, 'font' => null, 'icon' => null, 'kindOverride' => null,
+        'bold' => false, 'font' => null, 'icon' => null, 'kindOverride' => null, 'textAlign' => null,
     ];
     // From/To cells carry the occupant's name/class/role (not just flattened text) so the
     // DOM renderer draws them as filled class-colored chips, matching a normal roster slot.
@@ -43,7 +43,7 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
         'name' => $occ['name'] ?: null, 'class' => $occ['class'] ?: null, 'role' => $occ['role'] ?: null,
         'roleConfirmed' => true, 'server' => null,
         'marked' => false, 'textContent' => trim(($occ['name'] ?: '') . ($occ['class'] ? ' (' . $occ['class'] . ')' : '')),
-        'bgColor' => null, 'textColor' => null, 'bold' => false, 'font' => null, 'icon' => null, 'kindOverride' => null,
+        'bgColor' => null, 'textColor' => null, 'bold' => false, 'font' => null, 'icon' => null, 'kindOverride' => null, 'textAlign' => null,
     ];
 
     $rows = [];
@@ -108,7 +108,7 @@ function fetch_counter_table($pdo, $tb, $guildId) {
         'id' => 0, 'toonKind' => null, 'toonId' => null, 'pugName' => null, 'pugClass' => null,
         'name' => null, 'class' => null, 'role' => null, 'roleConfirmed' => false, 'server' => null,
         'marked' => false, 'textContent' => $text, 'bgColor' => null, 'textColor' => null,
-        'bold' => true, 'font' => null, 'icon' => null, 'kindOverride' => null,
+        'bold' => true, 'font' => null, 'icon' => null, 'kindOverride' => null, 'textAlign' => null,
     ];
 
     $columns = [];
@@ -171,7 +171,7 @@ function fetch_table_full($pdo, $tb, $guildId = null) {
 
     $stmtCell = $pdo->prepare(
         'SELECT c.id, c.row_id, c.column_id, c.toon_id, c.toon_kind, c.pug_name, c.pug_class, c.role, c.marked,
-                c.text_content, c.bg_color, c.text_color, c.bold, c.font, c.icon, c.kind_override,
+                c.text_content, c.bg_color, c.text_color, c.bold, c.font, c.icon, c.kind_override, c.text_align,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class,
                 COALESCE(t.main_spec, a.main_spec) AS toon_spec,
@@ -207,6 +207,7 @@ function fetch_table_full($pdo, $tb, $guildId = null) {
             'font'        => $cell['font'],
             'icon'        => $cell['icon'],
             'kindOverride' => $cell['kind_override'],
+            'textAlign'   => $cell['text_align'],
         ];
     }
 
