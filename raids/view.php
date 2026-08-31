@@ -1614,7 +1614,11 @@ function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
     return `<tr${heightAttr}>${bodyCellsForRow(r, chunkCols, tb, noteEnabled, coverage, sectionBg)}</tr>`;
   }).join('');
 
-  const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb) || swapsHeaderRow(chunkCols, tb);
+  // Column-groups editing is benched (template-edit.php forces groupsEnabled = false
+  // everywhere), but stale group_id assignments from before that change still linger on
+  // some template columns. Skip groupHeaderRow so the raid page matches what the designer
+  // shows -- otherwise leftover legacy groups render as unexpected pill headers here.
+  const groupRow = swapsHeaderRow(chunkCols, tb);
 
   // table-layout:fixed only ignores cell content when the table itself has an explicit
   // width -- left at auto, browsers still fall back to each column's content min-width
