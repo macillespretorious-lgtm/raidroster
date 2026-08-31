@@ -80,10 +80,10 @@ function backfill_swap_links($pdo, $raidId) {
 // $newParentGroupId is non-null, matching the section_id/parent_group_id invariant.
 function copy_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId) {
     $insT = $pdo->prepare(
-        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, bg_color, default_column_width, source_table_id, kind, count_categories, mark_style)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_tables (section_id, parent_group_id, title, sort_order, header_color, bg_color, default_column_width, source_table_id, kind, count_categories, mark_style, is_primary)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['bg_color'], $tb['default_column_width'], $tb['id'], $tb['kind'] ?? 'standard', $tb['count_categories'] ?? null, $tb['mark_style'] ?? 'star']);
+    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['sort_order'], $tb['header_color'], $tb['bg_color'], $tb['default_column_width'], $tb['id'], $tb['kind'] ?? 'standard', $tb['count_categories'] ?? null, $tb['mark_style'] ?? 'star', $tb['is_primary'] ?? 0]);
     $newTableId = (int)$pdo->lastInsertId();
 
     // Column groups first (columns FK into them), preserving parent_group_id links via an old->new id map.
@@ -232,7 +232,11 @@ function ensure_starting_roster($pdo, $raidId, $size) {
 // and the table-scoped max_count(1) rule every roster table in this app carries.
 function build_roster_table($pdo, $sectionId, $numCols) {
     $order = (int)$pdo->query('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM raid_tables WHERE section_id = ' . (int)$sectionId)->fetchColumn();
-    $pdo->prepare('INSERT INTO raid_tables (section_id, title, sort_order, default_column_width, kind) VALUES (?, ?, ?, 120, ?)')
+    // is_primary marks this as *the* primary roster table (there is exactly one per raid,
+    // set only here at creation time) -- raids/view.php uses it to decide who counts as
+    // "already placed" for hiding a toon from the Available Toons pool, and to decide
+    // whether a cell-to-cell drag out of it should copy instead of move.
+    $pdo->prepare('INSERT INTO raid_tables (section_id, title, sort_order, default_column_width, kind, is_primary) VALUES (?, ?, ?, 120, ?, 1)')
         ->execute([$sectionId, '', $order, 'standard']);
     $tableId = (int)$pdo->lastInsertId();
 
@@ -283,7 +287,9 @@ function seed_starting_template_roster($pdo, $templateId, $size) {
 
 // Template-side counterpart of build_roster_table() above, writing into raid_template_* tables.
 function build_template_roster_table($pdo, $sectionId, $numCols) {
-    $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, default_column_width, kind) VALUES (?, ?, 0, 120, ?)')
+    // Mirrors build_roster_table()'s is_primary -- copy_table_recursive() carries it forward
+    // onto the raid-side table when a raid is created from this template.
+    $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, default_column_width, kind, is_primary) VALUES (?, ?, 0, 120, ?, 1)')
         ->execute([$sectionId, '', 'standard']);
     $tableId = (int)$pdo->lastInsertId();
 

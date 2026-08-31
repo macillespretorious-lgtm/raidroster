@@ -399,6 +399,8 @@ function fmtTime($t) {
     .pool-chip-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
     .pool-chip { flex: 1; min-width: 0; cursor: grab; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; }
     .toon-chip.stamped { outline: 2px solid #f0c04a; outline-offset: 1px; }
+    .stamp-cursor-tile { position: fixed; display: none; pointer-events: none; z-index: 9999; opacity: 0.92; transform: scale(0.92) rotate(-2deg); filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35)); }
+    .stamp-cursor-tile .chip-clear, .stamp-cursor-tile .chip-actions, .stamp-cursor-tile .role-clickable { display: none; }
     .pool-tag { font-size: 9px; font-weight: 700; opacity: .75; margin-left: 4px; }
     .pool-tag.pug { color: #5a3d00; }
     .pool-remove { flex-shrink: 0; background: none; border: none; color: #7f8bad; font-size: 15px; cursor: pointer; line-height: 1; padding: 2px 4px; }
@@ -899,6 +901,22 @@ function allTables() {
 
 function findTable(id) { return allTables().find(t => t.id === id) || null; }
 
+// The one table (set at raid/template creation, never re-picked afterward -- see
+// includes/raid_structure.php's is_primary) that decides who's actually coming: placing a
+// toon there hides them from Available Toons, clearing them there brings them back.
+function primaryTable() { return allTables().find(tb => tb.isPrimary) || null; }
+
+function primaryTableOccupants() {
+  const tb = primaryTable();
+  const occupied = new Set();
+  if (!tb) return occupied;
+  for (const key in tb.cells) {
+    const c = tb.cells[key];
+    if (c && c.toonKind && c.toonKind !== 'pug' && c.toonId) occupied.add(c.toonKind + ':' + c.toonId);
+  }
+  return occupied;
+}
+
 // Same tab concept as template-edit.php's currentTabs(): one tab per distinct section `kind`,
 // in first-appearance order (sections here are already pre-grouped by kind, see the
 // groupSectionsByKind() call that builds `sections` on load).
@@ -964,9 +982,13 @@ function render() {
     });
     el.querySelectorAll('.toon-chip[draggable="true"]').forEach(chip => {
       chip.addEventListener('dragstart', e => {
+        // tableId lets handleDrop tell a same-table drag (still a swap/move) apart from a
+        // cross-table one (always a copy, source cell untouched -- see handleDrop).
+        const srcTd = chip.closest('td');
         const payload = {
           source: 'cell',
           cellId: parseInt(chip.dataset.cellId, 10),
+          tableId: srcTd ? parseInt(srcTd.dataset.tableId, 10) : null,
           toonKind: chip.dataset.toonKind,
           toonId: chip.dataset.toonId || null,
           pugName: chip.dataset.pugName || null,
@@ -975,7 +997,7 @@ function render() {
         };
         dragPayload = payload;
         e.dataTransfer.setData('text/plain', JSON.stringify(payload));
-        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.effectAllowed = 'copyMove';
       });
       chip.addEventListener('dragend', () => { dragPayload = null; });
       chip.addEventListener('click', e => {
@@ -993,6 +1015,7 @@ function render() {
           pugName: chip.dataset.pugName || null,
           pugClass: chip.dataset.pugClass || null,
           role: chip.dataset.role || null,
+          html: chip.outerHTML,
         };
         const same = stampToon && stampToon.toonKind === next.toonKind
           && stampToon.toonId === next.toonId && stampToon.pugName === next.pugName;
@@ -1081,6 +1104,7 @@ function saveCellPatch(cellId, patch) {
       if (!d.success) { alert(d.error || 'Save failed'); return; }
       if (d.sections) { sections = groupSectionsByKind(d.sections); } else { updateCellInPlace(d.cell); }
       render();
+      renderPool();
     });
 }
 
@@ -1113,6 +1137,7 @@ function persistMove(fromCellId, toCellId) {
       if (!d.success) { alert(d.error || 'Move failed'); return; }
       if (d.sections) { sections = groupSectionsByKind(d.sections); } else { updateCellInPlace(d.from); updateCellInPlace(d.to); }
       render();
+      renderPool();
     });
 }
 
@@ -1126,7 +1151,14 @@ function handleDrop(td, e) {
   if (violation) { alert(violation); return; }
   if (payload.source === 'cell') {
     if (payload.cellId === toCellId) return;
-    persistMove(payload.cellId, toCellId);
+    const destTableId = parseInt(td.dataset.tableId, 10);
+    if (payload.tableId != null && !isNaN(destTableId) && payload.tableId !== destTableId) {
+      // Cross-table drag: always a copy -- the source cell (and its table, e.g. the primary
+      // roster table) keeps its occupant, the destination just gets the same toon written in.
+      saveCellPatch(toCellId, { toonKind: payload.toonKind, toonId: payload.toonId, pugName: payload.pugName, pugClass: payload.pugClass, role: payload.role });
+    } else {
+      persistMove(payload.cellId, toCellId);
+    }
   } else if (payload.source === 'pool') {
     saveCellPatch(toCellId, { toonKind: payload.toonKind, toonId: payload.toonId, pugName: payload.pugName, pugClass: payload.pugClass, role: payload.role });
   }
@@ -1716,9 +1748,11 @@ function renderPool() {
   const validMainIds = new Set(roster.map(m => m.id));
   const validAltIds = new Set();
   roster.forEach(m => m.alts.forEach(a => validAltIds.add(a.id)));
+  const primaryOccupants = primaryTableOccupants();
   const entries = pool.filter(p => {
-    if (p.toonKind === 'main') return validMainIds.has(p.toonId);
-    if (p.toonKind === 'alt') return validAltIds.has(p.toonId);
+    if (p.toonKind === 'main' && !validMainIds.has(p.toonId)) return false;
+    if (p.toonKind === 'alt' && !validAltIds.has(p.toonId)) return false;
+    if (p.toonKind !== 'pug' && primaryOccupants.has(p.toonKind + ':' + p.toonId)) return false;
     return true;
   });
 
@@ -1758,6 +1792,7 @@ function renderPool() {
         pugName: chip.dataset.pugName || null,
         pugClass: chip.dataset.pugClass || null,
         role: chip.dataset.role || null,
+        html: chip.outerHTML,
       };
       const same = stampToon && stampToon.toonKind === next.toonKind
         && stampToon.toonId === next.toonId && stampToon.pugName === next.pugName;
@@ -1788,6 +1823,26 @@ function updateStampVisuals() {
       && (chip.dataset.pugName || null) === (stampToon.pugName || null);
     chip.classList.toggle('stamped', !!match);
   });
+  updateStampTile();
+}
+
+// Floating copy of the stamped chip that follows the cursor while stamp mode is active, so
+// it's obvious what's about to land on the next click -- positioned by the mousemove listener
+// wired once at the bottom of this file.
+function updateStampTile() {
+  let tile = document.getElementById('stampCursorTile');
+  if (!stampToon) {
+    if (tile) tile.style.display = 'none';
+    return;
+  }
+  if (!tile) {
+    tile = document.createElement('div');
+    tile.id = 'stampCursorTile';
+    tile.className = 'stamp-cursor-tile';
+    document.body.appendChild(tile);
+  }
+  tile.innerHTML = stampToon.html || '';
+  tile.style.display = 'block';
 }
 
 function poolCall(body) {
@@ -1868,6 +1923,13 @@ function wirePoolControls() {
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && stampToon) { stampToon = null; updateStampVisuals(); }
+  });
+  document.addEventListener('mousemove', e => {
+    const tile = document.getElementById('stampCursorTile');
+    if (tile && tile.style.display !== 'none') {
+      tile.style.left = (e.clientX + 14) + 'px';
+      tile.style.top = (e.clientY + 14) + 'px';
+    }
   });
   if (drawer) {
     drawer.addEventListener('click', e => {
