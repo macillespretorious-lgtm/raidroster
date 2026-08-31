@@ -103,10 +103,13 @@ $mains = array_map(fn($t) => [
 ], $mainsRaw);
 
 const RH_SKIP_CLASSES = ['Absence'];
-// Raid-Helper reports a benched signup's class as this literal string, same constant name IO
-// uses for the same purpose. Verify against a live event before relying on this in production
-// -- unconfirmed whether the API always reports it this way vs. preserving the real class.
-const RH_BENCH_CLS = 'Bench';
+// Raid-Helper reports a benched or tentative signup's class as one of these literal strings
+// (same idea as IO's RH_BENCH_CLS for Bench). Both route to the Benched table on import rather
+// than the pool -- a Tentative signup shouldn't sit in Available Toons implying they're a firm
+// pick, but they also shouldn't be silently dropped like Absence is. Unconfirmed whether the
+// API always reports Tentative this way vs. preserving the real class -- verify against a live
+// event with a tentative signup before relying on this in production.
+const RH_BENCH_CLASSES = ['Bench', 'Tentative'];
 const RH_CLS_MAP = [
     'Warrior' => 'Warrior', 'Paladin' => 'Paladin', 'Druid' => 'Druid', 'Priest' => 'Priest',
     'Mage' => 'Mage', 'Warlock' => 'Warlock', 'Hunter' => 'Hunter', 'Rogue' => 'Rogue',
@@ -178,14 +181,14 @@ foreach (($data['signups'] ?? []) as $su) {
     $discordName   = mb_strtolower($name);
     $suClass       = RH_CLS_MAP[$rawClass] ?? $rawClass;
 
-    $isBench = $rawClass === RH_BENCH_CLS;
+    $isBench = in_array($rawClass, RH_BENCH_CLASSES, true);
     $match = find_match($mains, $userid, $discordName);
     $row = [
         'name' => $name, 'userid' => $userid, 'rawClass' => $rawClass, 'spec' => $su['spec'] ?? '',
         'role' => rh_role_for_signup($su['spec'] ?? '', $su['role'] ?? ''),
         'matched' => false, 'toonKind' => null, 'toonId' => null, 'toonName' => null, 'toonClass' => null,
-        // No sensible class guess for an unmatched bench pug -- a matched player keeps their
-        // real class from the toons/toon_alts join below regardless of what Raid-Helper reports.
+        // No sensible class guess for an unmatched bench/tentative pug -- a matched player keeps
+        // their real class from the toons/toon_alts join below regardless of what Raid-Helper reports.
         'suggestedPugClass' => $isBench ? null : (RH_CLS_MAP[$rawClass] ?? null),
         'isBench' => $isBench,
     ];

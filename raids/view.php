@@ -2046,7 +2046,7 @@ function importRowHtml(row, idx) {
   const roleClickable = row.added ? '' : ' role-clickable';
   const roleTitle = row.added ? esc(row.role || '') : `${esc(row.role || '')} (suggested — click to change)`;
   const roleIcon = row.role ? `<span class="role-icon-sm${roleClickable} ${roleKey(row.role)}" title="${roleTitle}" ${row.added ? '' : `onclick="cycleImportRole(${idx})"`}></span>` : '';
-  const benchBadge = row.isBench ? '<span class="bench-badge" title="Benched signup — adds to the Benched table, not the pool">Bench</span>' : '';
+  const benchBadge = row.isBench ? `<span class="bench-badge" title="${esc(row.rawClass)} signup — adds to the Benched table, not the pool">${esc(row.rawClass)}</span>` : '';
   const btnLabel = row.isBench ? 'Add to Bench' : (row.matched ? 'Add' : 'Add as PUG');
   return `<div class="import-row ${state}">
     <div>${roleIcon}<span class="name">${esc(row.name)}</span> ${benchBadge}<span class="detail">${detail}</span></div>
