@@ -1247,7 +1247,10 @@ function showAltPopup(chip) {
   if (toonKind !== 'main' && toonKind !== 'alt') return; // pugs have no siblings
   const chain = siblingChain(toonKind, toonId);
   if (chain.length < 2) return;
-  const cellId = parseInt(chip.dataset.cellId, 10);
+  // Cell chips carry a cellId (reassign that cell); pool chips carry a poolId instead
+  // (switch which toon that pool row points at) -- exactly one of these is set.
+  const cellId = chip.dataset.cellId ? parseInt(chip.dataset.cellId, 10) : null;
+  const poolId = chip.dataset.poolId ? parseInt(chip.dataset.poolId, 10) : null;
 
   const popup = document.createElement('div');
   popup.className = 'alt-popup';
@@ -1267,7 +1270,13 @@ function showAltPopup(chip) {
     item.addEventListener('click', ev => {
       ev.stopPropagation();
       const next = chain.find(t => t.toonKind === item.dataset.toonKind && String(t.toonId) === item.dataset.toonId);
-      if (next) saveCellPatch(cellId, { toonKind: next.toonKind, toonId: next.toonId, pugName: null, pugClass: null, role: null });
+      if (next) {
+        if (cellId != null) {
+          saveCellPatch(cellId, { toonKind: next.toonKind, toonId: next.toonId, pugName: null, pugClass: null, role: null });
+        } else if (poolId != null) {
+          poolCall({ action: 'switchToon', poolId, toonKind: next.toonKind, toonId: next.toonId });
+        }
+      }
       closeAltPopup();
     });
   });
@@ -1783,6 +1792,11 @@ function renderPool() {
     });
     chip.addEventListener('dragend', () => { dragPayload = null; });
     chip.addEventListener('click', e => {
+      if (e.altKey) {
+        e.stopPropagation();
+        showAltPopup(chip);
+        return;
+      }
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       e.stopPropagation();

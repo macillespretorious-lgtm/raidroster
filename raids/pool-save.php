@@ -153,6 +153,44 @@ if ($action === 'add') {
     $orderedIds = array_map('intval', $body['orderedIds'] ?? []);
     $stmt = $pdo->prepare('UPDATE raid_pool SET sort_order = ? WHERE id = ? AND raid_id = ?');
     foreach ($orderedIds as $i => $id) $stmt->execute([$i, $id, $raidId]);
+} elseif ($action === 'switchToon') {
+    // Alt-click on a pool chip picks a sibling toon (same real player) -- swaps which
+    // toon this pool row points at without disturbing its sort_order or removing/re-adding it.
+    $poolId = isset($body['poolId']) ? (int)$body['poolId'] : 0;
+    $toonKind = $body['toonKind'] ?? '';
+    $toonId = $body['toonId'] ?? null;
+    if ($toonKind !== 'main' && $toonKind !== 'alt') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid toonKind']);
+        exit;
+    }
+    $table = $toonKind === 'main' ? 'toons' : 'toon_alts';
+    $stmt = $pdo->prepare("SELECT id FROM $table WHERE id = ? AND guild_id = ?");
+    $stmt->execute([$toonId, $tenant['id']]);
+    if (!$stmt->fetch()) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Toon not found']);
+        exit;
+    }
+    $stmt = $pdo->prepare('SELECT role FROM raid_pool WHERE id = ? AND raid_id = ?');
+    $stmt->execute([$poolId, $raidId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Pool item not found']);
+        exit;
+    }
+    $stmt = $pdo->prepare('SELECT id FROM raid_pool WHERE raid_id = ? AND toon_kind = ? AND toon_id = ? AND id != ?');
+    $stmt->execute([$raidId, $toonKind, $toonId, $poolId]);
+    if ($stmt->fetch()) {
+        http_response_code(400);
+        echo json_encode(['error' => 'That toon is already in the pool']);
+        exit;
+    }
+    $class = pool_item_class($pdo, $tenant, $toonKind, $toonId, null);
+    $role = valid_role_for_class($class, $row['role']) ? $row['role'] : null;
+    $stmt = $pdo->prepare('UPDATE raid_pool SET toon_kind = ?, toon_id = ?, pug_name = NULL, pug_class = NULL, role = ? WHERE id = ? AND raid_id = ?');
+    $stmt->execute([$toonKind, $toonId, $role, $poolId, $raidId]);
 } elseif ($action === 'setRole') {
     $poolId = isset($body['poolId']) ? (int)$body['poolId'] : 0;
     $stmt = $pdo->prepare('SELECT toon_kind, toon_id, pug_class, role FROM raid_pool WHERE id = ? AND raid_id = ?');
