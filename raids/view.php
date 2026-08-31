@@ -271,20 +271,24 @@ function fmtTime($t) {
       color: #2a1c00; background: #ffd76e;
       box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 6px 1px rgba(255,215,110,0.9);
     }
-    /* Kel'Thuzad-style numeric stack-group badge -- click-to-cycle (1-8, then back to blank),
-       same interaction as .chip-marker's star toggle rather than a <select> dropdown, which
-       required an extra click and popped an overlay open on top of the compact roster grid. */
+    /* Kel'Thuzad-style numeric stack-group picker -- same badge treatment as .chip-marker
+       (hollow/dim at 0, solid gold + glow once a group is set) so both marker styles read
+       consistently obvious when active. */
     .chip-mark-select {
-      display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
-      border-radius: 50%; font-weight: 800; font-size: 11px; line-height: 1; flex-shrink: 0;
+      appearance: none; -webkit-appearance: none; -moz-appearance: none; border: none; border-radius: 50%;
+      width: 18px; height: 18px; padding: 0; margin: 0; text-align: center; text-align-last: center;
+      font-weight: 800; font-size: 11px; line-height: 18px; cursor: pointer; flex-shrink: 0;
       background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.55);
     }
-    .chip-mark-select.clickable { cursor: pointer; }
-    .chip-mark-select.clickable:hover { filter: brightness(1.15); }
+    .chip-mark-select:hover { filter: brightness(1.15); }
     .chip-mark-select.active {
       color: #2a1c00; background: #ffd76e;
       box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 6px 1px rgba(255,215,110,0.9);
     }
+    /* The dropdown popup is browser-drawn with a light/white background regardless of the
+       closed select's own styling above, and options otherwise inherit that select's
+       (light) text color -- so without this, the open list is unreadable pale-on-white. */
+    .chip-mark-select option { color: #111827; background: #fff; }
 
     .empty { color: #7f8bad; font-size: 13px; padding: 8px 0; }
 
@@ -859,10 +863,12 @@ function chipHtml(cell, noteEnabled, markStyle) {
   let actionsHtml = '';
   if (noteEnabled && markStyle === 'number') {
     const val = cell.markValue || 0;
-    if (val || CAN_MANAGE) {
-      const cls = 'chip-mark-select' + (val ? ' active' : '') + (CAN_MANAGE ? ' clickable' : '');
-      const actionAttrs = CAN_MANAGE ? ` data-action="cycle-mark-value" data-cell-id="${cell.id}"` : '';
-      actionsHtml += `<span class="${cls}"${actionAttrs} title="${val ? 'Stack group ' + val + ' (click to change)' : 'Set stack group'}">${val || '—'}</span>`;
+    if (CAN_MANAGE) {
+      const opts = ['<option value="0">—</option>'].concat([1, 2, 3, 4, 5, 6, 7, 8].map(n =>
+        `<option value="${n}"${val === n ? ' selected' : ''}>${n}</option>`)).join('');
+      actionsHtml += `<select class="chip-mark-select${val ? ' active' : ''}" data-action="set-mark-value" data-cell-id="${cell.id}" title="Phase 2 stack group" onclick="event.stopPropagation()">${opts}</select>`;
+    } else if (val) {
+      actionsHtml += `<span class="chip-mark-select active" title="Stack group ${val}">${val}</span>`;
     }
   } else if (noteEnabled && (cell.marked || CAN_MANAGE)) {
     const cls = 'chip-marker' + (cell.marked ? ' active' : '') + (CAN_MANAGE ? ' clickable' : '');
@@ -1036,10 +1042,10 @@ function render() {
         toggleMarker(parseInt(btn.dataset.cellId, 10));
       });
     });
-    el.querySelectorAll('[data-action="cycle-mark-value"]').forEach(btn => {
-      btn.addEventListener('click', e => {
+    el.querySelectorAll('[data-action="set-mark-value"]').forEach(sel => {
+      sel.addEventListener('change', e => {
         e.stopPropagation();
-        cycleMarkValue(parseInt(btn.dataset.cellId, 10));
+        setMarkValue(parseInt(sel.dataset.cellId, 10), parseInt(sel.value, 10) || 0);
       });
     });
     el.querySelectorAll('[data-action="edit-swap-note"]').forEach(td => {
@@ -1114,12 +1120,6 @@ function cycleCellRole(cellId) {
 function toggleMarker(cellId) {
   const cur = findCellById(cellId);
   return setMarkValue(cellId, (cur && cur.marked) ? 0 : 1);
-}
-
-function cycleMarkValue(cellId) {
-  const cur = findCellById(cellId);
-  const current = (cur && cur.markValue) || 0;
-  return setMarkValue(cellId, current >= 8 ? 0 : current + 1);
 }
 
 function setMarkValue(cellId, value) {
