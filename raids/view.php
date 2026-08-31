@@ -1163,9 +1163,19 @@ function handleDrop(td, e) {
     if (payload.cellId === toCellId) return;
     const destTableId = parseInt(td.dataset.tableId, 10);
     if (payload.tableId != null && !isNaN(destTableId) && payload.tableId !== destTableId) {
-      // Cross-table drag: always a copy -- the source cell (and its table, e.g. the primary
-      // roster table) keeps its occupant, the destination just gets the same toon written in.
-      saveCellPatch(toCellId, { toonKind: payload.toonKind, toonId: payload.toonId, pugName: payload.pugName, pugClass: payload.pugClass, role: payload.role });
+      const srcTb = findTable(payload.tableId);
+      const destTb = findTable(destTableId);
+      const isRosterPair = srcTb && destTb && (srcTb.isPrimary || srcTb.kind === 'benched') && (destTb.isPrimary || destTb.kind === 'benched');
+      if (isRosterPair) {
+        // Starting Roster and Bench are one player pool (see rosterOccupantPlayerIds), so a
+        // plain copy here would just get rejected as a duplicate -- swap the two occupants
+        // instead, same as a same-table drag: benching a starter promotes whoever's on the bench.
+        persistMove(payload.cellId, toCellId);
+      } else {
+        // Cross-table drag: always a copy -- the source cell (and its table, e.g. the primary
+        // roster table) keeps its occupant, the destination just gets the same toon written in.
+        saveCellPatch(toCellId, { toonKind: payload.toonKind, toonId: payload.toonId, pugName: payload.pugName, pugClass: payload.pugClass, role: payload.role });
+      }
     } else {
       persistMove(payload.cellId, toCellId);
     }
