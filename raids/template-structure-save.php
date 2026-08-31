@@ -330,6 +330,8 @@ function fetch_table_full($pdo, $tb) {
         'kind' => $tb['kind'],
         'markEnabled' => (bool)($tb['mark_enabled'] ?? 0),
         'markStyle' => $tb['mark_style'],
+        'noteEnabled' => (bool)($tb['note_enabled'] ?? 0),
+        'noteText' => $tb['note_text'] ?? null,
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
@@ -765,22 +767,25 @@ if ($action === 'update_table') {
     $colWidth    = array_key_exists('defaultColumnWidth', $body) ? ($body['defaultColumnWidth'] !== null && $body['defaultColumnWidth'] !== '' ? (int)$body['defaultColumnWidth'] : null) : $tb['default_column_width'];
     $markStyle   = (array_key_exists('markStyle', $body) && in_array($body['markStyle'], ['star', 'number'], true)) ? $body['markStyle'] : $tb['mark_style'];
     $markEnabled = array_key_exists('markEnabled', $body) ? (!empty($body['markEnabled']) ? 1 : 0) : $tb['mark_enabled'];
+    $noteEnabled = array_key_exists('noteEnabled', $body) ? (!empty($body['noteEnabled']) ? 1 : 0) : $tb['note_enabled'];
+    $noteText    = array_key_exists('noteText', $body) ? ($body['noteText'] !== null ? substr(trim((string)$body['noteText']), 0, 255) : null) : $tb['note_text'];
+    if ($noteText === '') $noteText = null;
 
     if ($tb['kind'] === 'swaps' && (array_key_exists('beforeTableId', $body) || array_key_exists('afterTableId', $body))) {
         $mergedBody = ['beforeTableId' => $body['beforeTableId'] ?? $tb['swap_before_table_id'], 'afterTableId' => $body['afterTableId'] ?? $tb['swap_after_table_id']];
         [$beforeId, $afterId] = resolve_swap_tables($pdo, $tenant['id'], $tb['template_id'], $mergedBody);
-        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, mark_enabled = ?, swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
-        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $markEnabled, $beforeId, $afterId, $tb['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, mark_enabled = ?, note_enabled = ?, note_text = ?, swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $markEnabled, $noteEnabled, $noteText, $beforeId, $afterId, $tb['id']]);
     } elseif ($tb['kind'] === 'counter' && (array_key_exists('countSourceTableId', $body) || array_key_exists('countCategories', $body))) {
         $countSourceId = array_key_exists('countSourceTableId', $body)
             ? resolve_count_source_table($pdo, $tenant['id'], $tb['template_id'], $body)
             : $tb['count_source_table_id'];
         $countCategories = resolve_count_categories($body) ?? $tb['count_categories'];
-        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, mark_enabled = ?, count_source_table_id = ?, count_categories = ? WHERE id = ?');
-        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $markEnabled, $countSourceId, $countCategories, $tb['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, mark_enabled = ?, note_enabled = ?, note_text = ?, count_source_table_id = ?, count_categories = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $markEnabled, $noteEnabled, $noteText, $countSourceId, $countCategories, $tb['id']]);
     } else {
-        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, mark_enabled = ? WHERE id = ?');
-        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $markEnabled, $tb['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, mark_enabled = ?, note_enabled = ?, note_text = ? WHERE id = ?');
+        $stmt->execute([$title, $headerColor, $colWidth, $markStyle, $markEnabled, $noteEnabled, $noteText, $tb['id']]);
     }
     respond_structure($pdo, $tb['template_id']);
 }
@@ -1509,6 +1514,10 @@ function restore_table_recursive($pdo, $tableId, array $snapshotTable) {
             'header_color'          => ['headerColor', 'str'],
             'bg_color'              => ['bgColor', 'str'],
             'default_column_width'  => ['defaultColumnWidth', 'int'],
+            'mark_style'            => ['markStyle', 'str'],
+            'mark_enabled'          => ['markEnabled', 'bool'],
+            'note_enabled'          => ['noteEnabled', 'bool'],
+            'note_text'             => ['noteText', 'str'],
         ], ['section_id' => null]);
         foreach ($g['tables'] ?? [] as $childTb) {
             $childId = (int)($childTb['id'] ?? 0);
@@ -1536,6 +1545,10 @@ function restore_snapshot($pdo, $templateId, array $snapshotSections, array $sna
             'header_color'          => ['headerColor', 'str'],
             'bg_color'              => ['bgColor', 'str'],
             'default_column_width'  => ['defaultColumnWidth', 'int'],
+            'mark_style'            => ['markStyle', 'str'],
+            'mark_enabled'          => ['markEnabled', 'bool'],
+            'note_enabled'          => ['noteEnabled', 'bool'],
+            'note_text'             => ['noteText', 'str'],
         ], ['parent_group_id' => null]);
         foreach ($sec['tables'] ?? [] as $tb) {
             $tableId = (int)($tb['id'] ?? 0);

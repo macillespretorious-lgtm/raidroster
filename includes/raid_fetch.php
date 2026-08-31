@@ -249,6 +249,8 @@ function fetch_table_full($pdo, $tb, $guildId = null) {
         'isPrimary' => (bool)($tb['is_primary'] ?? 0),
         'markEnabled' => (bool)($tb['mark_enabled'] ?? 0),
         'markStyle' => $tb['mark_style'],
+        'noteEnabled' => (bool)($tb['note_enabled'] ?? 0),
+        'noteText' => $tb['note_text'] ?? null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => $columnGroups, 'cells' => $cells,
         'cellMerges' => $cellMerges, 'rules' => $rules,
     ];

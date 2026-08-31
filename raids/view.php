@@ -258,6 +258,7 @@ function fmtTime($t) {
       line-height: 14px; flex-shrink: 0;
     }
     .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .tbl-note { margin: 4px 0 0; font-size: 11.5px; font-weight: 700; color: #f0c04a; }
     /* Star marker: a hollow, barely-there ring until set, then a solid gold badge with a
        glow ring so an active mark reads at a glance instead of blending into the chip. */
     .chip-marker {
@@ -1723,9 +1724,11 @@ function renderTable(tb, sectionBg, sectionKind) {
 
   const headBar = (tb.title || copyBtn) ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}${copyBtn}</div>` : '';
   const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
+  const noteBar = (tb.noteEnabled && tb.noteText) ? `<p class="tbl-note">* ${esc(tb.noteText)}</p>` : '';
 
   return `<div class="tbl-wrap"${wrapStyle}>
     ${headBar}
+    ${noteBar}
     ${blocks}
     ${nestedGroupsHtml}
   </div>`;
@@ -1739,11 +1742,9 @@ function renderSection(sec) {
       ${MRT_SERVERS.map(s => `<button type="button" class="btn-mrt-export" data-mrt-server="${s.key}" data-section-id="${sec.id}">${s.label}</button>`).join('')}
       <span class="mrt-info" data-tip="${MRT_TIP}">i</span>
     </div>` : '';
-  const noteBar = (sec.noteEnabled && sec.noteText) ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   const sectionBg = sec.bgColor || '#111827';
   return `<div class="section-card">
     <div class="section-head" style="background:${headColor};"><span>${meta.icon} ${esc(sec.title)}</span><div class="section-head-actions">${mrtBar}${clearBtn}</div></div>
-    ${noteBar}
     <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
       ${sec.tables.map(tb => renderTable(tb, sectionBg, sec.kind)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>

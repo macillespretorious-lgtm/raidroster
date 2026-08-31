@@ -188,12 +188,12 @@ function sync_table($pdo, $raidTableId, $tplTableId, &$diff, $apply, $confirmRem
     $stmt->execute([$tplTableId]);
     $tplTb = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $changes = diff_scalar_fields($raidTb, $tplTb, ['title', 'header_color', 'bg_color', 'default_column_width', 'sort_order', 'count_categories', 'mark_style', 'mark_enabled']);
+    $changes = diff_scalar_fields($raidTb, $tplTb, ['title', 'header_color', 'bg_color', 'default_column_width', 'sort_order', 'count_categories', 'mark_style', 'mark_enabled', 'note_enabled', 'note_text']);
     if ($changes) {
         $diff['tables']['changed'][] = ['id' => $raidTableId, 'label' => $raidTb['title'] ?: '(untitled table)', 'changes' => array_keys($changes)];
         if ($apply) {
-            $pdo->prepare('UPDATE raid_tables SET title = ?, header_color = ?, bg_color = ?, default_column_width = ?, sort_order = ?, count_categories = ?, mark_style = ?, mark_enabled = ? WHERE id = ?')
-                ->execute([$tplTb['title'], $tplTb['header_color'], $tplTb['bg_color'], $tplTb['default_column_width'], $tplTb['sort_order'], $tplTb['count_categories'], $tplTb['mark_style'], $tplTb['mark_enabled'], $raidTableId]);
+            $pdo->prepare('UPDATE raid_tables SET title = ?, header_color = ?, bg_color = ?, default_column_width = ?, sort_order = ?, count_categories = ?, mark_style = ?, mark_enabled = ?, note_enabled = ?, note_text = ? WHERE id = ?')
+                ->execute([$tplTb['title'], $tplTb['header_color'], $tplTb['bg_color'], $tplTb['default_column_width'], $tplTb['sort_order'], $tplTb['count_categories'], $tplTb['mark_style'], $tplTb['mark_enabled'], $tplTb['note_enabled'], $tplTb['note_text'], $raidTableId]);
         }
     }
 

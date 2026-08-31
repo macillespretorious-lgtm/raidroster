@@ -103,6 +103,8 @@ function fetch_table_full($pdo, $tb) {
         'kind' => $tb['kind'],
         'markEnabled' => (bool)($tb['mark_enabled'] ?? 0),
         'markStyle' => $tb['mark_style'],
+        'noteEnabled' => (bool)($tb['note_enabled'] ?? 0),
+        'noteText' => $tb['note_text'] ?? null,
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
@@ -206,12 +208,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .section-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
     .section-head .title-input { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: #fff; font: inherit; font-size: 14px; font-weight: 700; padding: 5px 9px; border-radius: 6px; flex: 1; min-width: 0; }
     .section-body { background: #111827; padding: 14px 16px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 14px; }
-    .section-note-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #161f36; border-top: 1px solid rgba(255,255,255,0.06); }
     .note-toggle-label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #a8b4d0; white-space: nowrap; cursor: pointer; }
-    .mark-style-inline { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: #a8b4d0; white-space: nowrap; text-transform: uppercase; letter-spacing: .03em; }
-    .mark-style-inline select { text-transform: none; letter-spacing: normal; font-weight: 600; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.2); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 7px; border-radius: 6px; }
-    .mark-toggle-label { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; text-transform: uppercase; letter-spacing: .03em; }
-    .tbl-head select[data-action="table-mark-style"] { text-transform: none; letter-spacing: normal; font-weight: 600; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.2); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 7px; border-radius: 6px; }
+    .mark-toggle-label { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: #a8b4d0; white-space: nowrap; cursor: pointer; text-transform: uppercase; letter-spacing: .03em; }
+    .tbl-mark-note select, .tbl-mark-note input[type="text"] { text-transform: none; letter-spacing: normal; font-weight: 600; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.2); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 7px; border-radius: 6px; }
     .note-text-input { flex: 1; min-width: 0; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: #fff; font: inherit; font-size: 12.5px; padding: 5px 9px; border-radius: 6px; }
     .icon-btn { background: rgba(255,255,255,0.12); border: none; color: #fff; width: 26px; height: 26px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1; flex-shrink: 0; }
     .icon-btn:hover { background: rgba(255,255,255,0.22); }
@@ -237,7 +236,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .cell-height-spacer { height: 16px; }
     .add-row-btn { background: none; border: 1px dashed rgba(255,255,255,0.2); color: #a8b4d0; border-radius: 6px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
     .add-row-btn:hover { border-color: rgba(255,255,255,0.4); color: #e8ecff; }
-    .tbl-actions-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .tbl-actions-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .tbl-actions-left { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tbl-actions-right { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+    .tbl-mark-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
     input[type=color].swatch { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; padding: 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; background: none; cursor: pointer; flex-shrink: 0; }
     input[type=color].swatch::-webkit-color-swatch-wrapper { padding: 2px; }
@@ -351,7 +353,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .export-modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .preview-modal .section-card { border-radius: 12px; overflow: hidden; margin: 0; border: 1px solid rgba(255,255,255,0.08); }
     .preview-modal .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
-    .preview-modal .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .preview-modal .tbl-note { margin: 4px 0 0; font-size: 11.5px; font-weight: 700; color: #f0c04a; }
     .preview-modal .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
     .preview-modal .tbl-wrap { min-width: 0; max-width: 100%; }
     .preview-modal .grid-scroll + .grid-scroll { margin-top: 2px; }
@@ -372,7 +374,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
        post boundary in its own right, matching how the live raid page visually separates them. */
     .discord-mode .section-card { border-radius: 12px; overflow: hidden; margin: 0 0 18px; border: 1px solid rgba(255,255,255,0.08); }
     .discord-mode .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
-    .discord-mode .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .discord-mode .tbl-note { margin: 4px 0 0; font-size: 11.5px; font-weight: 700; color: #f0c04a; }
     .discord-mode .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; }
     .discord-post { border: 1px dashed rgba(88,101,242,0.4); border-radius: 10px; padding: 12px; }
     .discord-post-label { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #a3adfa; margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px; }
@@ -440,7 +442,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .colour-mode .section-card { border-radius: 12px; overflow: hidden; margin-bottom: 18px; border: 1px solid rgba(255,255,255,0.08); }
     .colour-mode .section-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; font-size: 15px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; }
     .colour-mode .section-head-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .colour-mode .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .colour-mode .tbl-note { margin: 4px 0 0; font-size: 11.5px; font-weight: 700; color: #f0c04a; }
     .colour-mode .section-body { background: #111827; padding: 16px 18px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
     .colour-mode .tbl-wrap { min-width: 0; max-width: 100%; }
     .colour-mode .tbl-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #a8b4d0; background: rgba(255,255,255,0.04); padding: 8px 14px; border-radius: 6px 6px 0 0; }
@@ -1366,8 +1368,6 @@ function render() {
       const act = node.dataset.action;
       const id = node.dataset.id ? parseInt(node.dataset.id, 10) : null;
       if (act === 'rename-section') call({ action: 'update_section', id, title: node.value.trim() });
-      if (act === 'toggle-section-note') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteEnabled: node.checked }); }
-      if (act === 'section-note-text') { const sec = sections.find(s => s.id === id); call({ action: 'update_section', id, title: sec.title, noteText: node.value }); }
       if (act === 'preview-section') openPreview(id);
       if (act === 'duplicate-section') { call({ action: 'duplicate_section', id }); }
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
@@ -1471,6 +1471,8 @@ function render() {
       if (act === 'table-col-width') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, defaultColumnWidth: unitsToPx(node.value) }); }
       if (act === 'toggle-table-mark') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, markEnabled: node.checked }); }
       if (act === 'table-mark-style') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, markStyle: node.value }); }
+      if (act === 'toggle-table-note') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, noteEnabled: node.checked }); }
+      if (act === 'table-note-text') { const tb = findTable(id); call({ action: 'update_table', id, title: tb.title, noteText: node.value }); }
       if (act === 'open-cell-editor') { openKindPicker = null; openCellEditor(parseInt(node.dataset.rowId, 10), parseInt(node.dataset.colId, 10)); return; }
       if (act === 'open-cell-icon-menu') {
         const key = `cell-icon-${node.dataset.rowId}_${node.dataset.colId}`;
@@ -1864,17 +1866,25 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
 
   const titleHtml = `<input class="tbl-title" draggable="false" data-action="rename-table" data-id="${tb.id}" placeholder="Table name (optional)" value="${escAttr(tb.title)}" style="color:${titleColor};">`;
 
-  // Cell markers (star/number flag on individual cells) are opt-in per table, not per
-  // section -- a section-wide toggle used to turn markers on for every table underneath it
-  // at once, which wasn't wanted (e.g. a Bench table picking up markers meant for the main
-  // roster table next to it). Only standard/benched tables have a per-cell chip to mark.
-  const markHtml = (isStandard || tb.kind === 'benched') ? `<label class="mark-toggle-label" style="color:${titleColor};" title="Lets managers flag individual cells in this table">
-      <input type="checkbox" data-action="toggle-table-mark" data-id="${tb.id}" ${tb.markEnabled ? 'checked' : ''}> Markers
-    </label>
-    ${tb.markEnabled ? `<select data-action="table-mark-style" data-id="${tb.id}" title="How the cell marker is shown and stored on this table">
-      <option value="star" ${tb.markStyle !== 'number' ? 'selected' : ''}>Star</option>
-      <option value="number" ${tb.markStyle === 'number' ? 'selected' : ''}>Numbers</option>
-    </select>` : ''}` : '';
+  // Cell markers (star/number flag on individual cells) and the footnote note are both
+  // opt-in per table, not per section -- a section-wide toggle used to turn these on for
+  // every table underneath it at once, which wasn't wanted (e.g. a Bench table picking up
+  // markers/notes meant for the main roster table next to it). Only standard/benched tables
+  // have a per-cell chip to mark; the note is grouped alongside since it's the same kind of
+  // table-scoped, opt-in annotation.
+  const markNoteHtml = (isStandard || tb.kind === 'benched') ? `<div class="tbl-mark-note">
+      <label class="mark-toggle-label" title="Lets managers flag individual cells in this table">
+        <input type="checkbox" data-action="toggle-table-mark" data-id="${tb.id}" ${tb.markEnabled ? 'checked' : ''}> Markers
+      </label>
+      ${tb.markEnabled ? `<select data-action="table-mark-style" data-id="${tb.id}" title="How the cell marker is shown and stored on this table">
+        <option value="star" ${tb.markStyle !== 'number' ? 'selected' : ''}>Star</option>
+        <option value="number" ${tb.markStyle === 'number' ? 'selected' : ''}>Numbers</option>
+      </select>` : ''}
+      <label class="note-toggle-label" title="Shows a footnote line under this table on the raid page">
+        <input type="checkbox" data-action="toggle-table-note" data-id="${tb.id}" ${tb.noteEnabled ? 'checked' : ''}> Note
+      </label>
+      ${tb.noteEnabled ? `<input type="text" class="note-text-input" data-action="table-note-text" data-id="${tb.id}" placeholder="Note shown under this table" value="${escAttr(tb.noteText || '')}" maxlength="255">` : ''}
+    </div>` : '';
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables" data-drop-kind="table-container" data-drop-parent="${g.id}" data-drop-parent-kind="group">
@@ -1886,41 +1896,43 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
       <div class="tbl-sizing">Col w<input type="number" class="width-input" draggable="false" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
-      ${markHtml}
       <button class="icon-btn" data-action="duplicate-table" data-id="${tb.id}" title="Duplicate table">&#10697;</button>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
     ${groupsEnabled && isStandard ? groupStrip(tb) : ''}
     ${blocks}
     ${kindNote}
-    ${isStandard && !isContainerOnly ? `<div class="tbl-actions-row">
-      <div class="kind-picker-wrap">
-        <button class="add-row-btn" data-action="open-kind-picker" data-kind="row" data-id="${tb.id}">+ Row</button>
-        <div class="kind-picker" ${openKindPicker === `row-${tb.id}` ? '' : 'hidden'}>
-          <button data-action="add-row" data-kind="text" data-id="${tb.id}">Text Row</button>
-          <button data-action="add-row" data-kind="general" data-id="${tb.id}">General Row</button>
-          <button data-action="add-row" data-kind="icon" data-id="${tb.id}">Icon Row</button>
-          <button data-action="add-row" data-kind="spacer" data-id="${tb.id}">Spacer Row</button>
+    ${(isStandard && !isContainerOnly) || markNoteHtml ? `<div class="tbl-actions-row">
+      <div class="tbl-actions-left">
+        ${isStandard && !isContainerOnly ? `<div class="kind-picker-wrap">
+          <button class="add-row-btn" data-action="open-kind-picker" data-kind="row" data-id="${tb.id}">+ Row</button>
+          <div class="kind-picker" ${openKindPicker === `row-${tb.id}` ? '' : 'hidden'}>
+            <button data-action="add-row" data-kind="text" data-id="${tb.id}">Text Row</button>
+            <button data-action="add-row" data-kind="general" data-id="${tb.id}">General Row</button>
+            <button data-action="add-row" data-kind="icon" data-id="${tb.id}">Icon Row</button>
+            <button data-action="add-row" data-kind="spacer" data-id="${tb.id}">Spacer Row</button>
+          </div>
         </div>
-      </div>
-      <div class="kind-picker-wrap">
-        <button class="add-row-btn" data-action="open-kind-picker" data-kind="column" data-id="${tb.id}">+ Column</button>
-        <div class="kind-picker" ${openKindPicker === `column-${tb.id}` ? '' : 'hidden'}>
-          <button data-action="add-col" data-kind="spacer" data-id="${tb.id}">Spacer</button>
-          <button data-action="add-col" data-kind="text" data-id="${tb.id}">Text</button>
-          <button data-action="add-col" data-kind="icon" data-id="${tb.id}">Icon</button>
-          <button data-action="add-col" data-kind="general" data-id="${tb.id}">General</button>
+        <div class="kind-picker-wrap">
+          <button class="add-row-btn" data-action="open-kind-picker" data-kind="column" data-id="${tb.id}">+ Column</button>
+          <div class="kind-picker" ${openKindPicker === `column-${tb.id}` ? '' : 'hidden'}>
+            <button data-action="add-col" data-kind="spacer" data-id="${tb.id}">Spacer</button>
+            <button data-action="add-col" data-kind="text" data-id="${tb.id}">Text</button>
+            <button data-action="add-col" data-kind="icon" data-id="${tb.id}">Icon</button>
+            <button data-action="add-col" data-kind="general" data-id="${tb.id}">General</button>
+          </div>
         </div>
+        <div class="kind-picker-wrap">
+          <button class="add-row-btn" data-action="open-kind-picker" data-kind="cell-override" data-id="${tb.id}">+ Cell Override</button>
+          <div class="kind-picker" ${openKindPicker === `cell-override-${tb.id}` ? '' : 'hidden'}>
+            <button data-action="pick-cell-override" data-kind="general" data-id="${tb.id}">General</button>
+            <button data-action="pick-cell-override" data-kind="text" data-id="${tb.id}">Text</button>
+            <button data-action="pick-cell-override" data-kind="icon" data-id="${tb.id}">Icon</button>
+            <button data-action="pick-cell-override" data-kind="spacer" data-id="${tb.id}">Filler</button>
+          </div>
+        </div>` : ''}
       </div>
-      <div class="kind-picker-wrap">
-        <button class="add-row-btn" data-action="open-kind-picker" data-kind="cell-override" data-id="${tb.id}">+ Cell Override</button>
-        <div class="kind-picker" ${openKindPicker === `cell-override-${tb.id}` ? '' : 'hidden'}>
-          <button data-action="pick-cell-override" data-kind="general" data-id="${tb.id}">General</button>
-          <button data-action="pick-cell-override" data-kind="text" data-id="${tb.id}">Text</button>
-          <button data-action="pick-cell-override" data-kind="icon" data-id="${tb.id}">Icon</button>
-          <button data-action="pick-cell-override" data-kind="spacer" data-id="${tb.id}">Filler</button>
-        </div>
-      </div>
+      <div class="tbl-actions-right">${markNoteHtml}</div>
     </div>` : ''}
     ${nestedGroupsHtml}
   </div>`;
@@ -1940,13 +1952,6 @@ function renderSection(sec) {
       <button class="icon-btn" data-action="move-section-down" data-id="${sec.id}" title="Move down">&darr;</button>
       <button class="icon-btn" data-action="duplicate-section" data-id="${sec.id}" title="Duplicate section">&#10697;</button>
       <button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>
-    </div>
-    <div class="section-note-bar">
-      <label class="note-toggle-label">
-        <input type="checkbox" data-action="toggle-section-note" data-id="${sec.id}" ${sec.noteEnabled ? 'checked' : ''}>
-        Note
-      </label>
-      ${sec.noteEnabled ? `<input type="text" class="note-text-input" data-action="section-note-text" data-id="${sec.id}" placeholder="Note shown under the section header" value="${escAttr(sec.noteText || '')}" maxlength="255">` : ''}
     </div>
     <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section"${bodyStyle}>
       ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables yet.</p>'}
@@ -2047,8 +2052,11 @@ function previewRenderTable(tb, groupsEnabled, sectionBg) {
       ${g.tables.map(ctb => previewRenderTable(ctb, groupsEnabled, sectionBg)).join('')}
     </div>`).join('');
 
+  const noteBar = tb.noteEnabled && tb.noteText ? `<p class="tbl-note">* ${esc(tb.noteText)}</p>` : '';
+
   return `<div class="tbl-wrap"${wrapStyle}>
     ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
+    ${noteBar}
     ${blocks}
     ${nestedGroupsHtml}
   </div>`;
@@ -2058,11 +2066,9 @@ function renderPreviewSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
   const headColor = sec.color || meta.color;
   const groupsEnabled = false;
-  const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   const sectionBg = sec.bgColor || '#111827';
   return `<div class="section-card">
     <div class="section-head" style="background:${headColor};">${esc(sec.title)}</div>
-    ${noteBar}
     <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
       ${sec.tables.map(tb => previewRenderTable(tb, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
@@ -2171,15 +2177,16 @@ function discordRenderTable(tb, sectionBg) {
   const block = tb.columns.length ? discordColumnBlock(tb, sectionBg) : '';
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
   const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
+  const noteBar = tb.noteEnabled && tb.noteText ? `<p class="tbl-note">* ${esc(tb.noteText)}</p>` : '';
   return `<div class="tbl-wrap"${wrapStyle}>
     ${tb.title ? `<div class="tbl-title"${titleStyle}>${esc(tb.title)}</div>` : ''}
+    ${noteBar}
     ${block}
   </div>`;
 }
 function renderDiscordSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
   const headColor = sec.color || meta.color;
-  const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   const sectionBg = sec.bgColor || '#111827';
   const flatTables = flattenSectionTables(sec.tables);
   const posts = groupTablesIntoPosts(flatTables);
@@ -2194,7 +2201,6 @@ function renderDiscordSection(sec) {
   }).join('') : '<p class="empty">No tables in this section.</p>';
   return `<div class="section-card">
     <div class="section-head" style="background:${headColor};">${esc(sec.title)}</div>
-    ${noteBar}
     <div class="section-body"${sec.bgColor ? ` style="background:${sec.bgColor};"` : ''}>
       ${postsHtml}
     </div>
@@ -2294,8 +2300,10 @@ function colourRenderTable(tb, sectionBg) {
   const blocks = chunkColumns(tb.columns).map(chunkCols => colourColumnBlock(chunkCols, tb, sectionBg)).join('');
   const titleStyle = tb.headerColor ? ` style="background:${tb.headerColor};color:${contrastText(tb.headerColor)};"` : '';
   const wrapStyle = tb.bgColor ? ` style="background:${tb.bgColor};"` : '';
+  const noteBar = tb.noteEnabled && tb.noteText ? `<p class="tbl-note">* ${esc(tb.noteText)}</p>` : '';
   return `<div class="tbl-wrap"${wrapStyle}>
     ${tb.title ? `<div class="tbl-title paint-table-title" data-action="paint-table-header" data-table-id="${tb.id}"${titleStyle} title="Click to paint this table's title bar">${esc(tb.title)}</div>` : ''}
+    ${noteBar}
     ${blocks}
   </div>`;
 }
@@ -2303,7 +2311,6 @@ function colourRenderTable(tb, sectionBg) {
 function renderColourSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
   const headColor = sec.color || meta.color;
-  const noteBar = sec.noteEnabled && sec.noteText ? `<p class="section-note">* ${esc(sec.noteText)}</p>` : '';
   const sectionBg = sec.bgColor || '#111827';
   const bodyStyle = sec.bgColor ? ` style="background:${sec.bgColor};"` : '';
   return `<div class="section-card">
@@ -2311,7 +2318,6 @@ function renderColourSection(sec) {
       <span class="section-head-title">${esc(sec.title)}</span>
       <button type="button" class="icon-btn" data-action="preview-section" data-id="${sec.id}" title="Preview as it will look on a raid page">&#128065;</button>
     </div>
-    ${noteBar}
     <div class="section-body paint-section-body" data-action="paint-section-bg" data-section-id="${sec.id}"${bodyStyle} title="Click to paint this section's background">
       ${sec.tables.map(tb => colourRenderTable(tb, sectionBg)).join('') || '<p class="empty">No tables in this section.</p>'}
     </div>
