@@ -207,6 +207,8 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .section-body { background: #111827; padding: 14px 16px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 14px; }
     .section-note-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #161f36; border-top: 1px solid rgba(255,255,255,0.06); }
     .note-toggle-label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #a8b4d0; white-space: nowrap; cursor: pointer; }
+    .mark-style-inline { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: #a8b4d0; white-space: nowrap; text-transform: uppercase; letter-spacing: .03em; }
+    .mark-style-inline select { text-transform: none; letter-spacing: normal; font-weight: 600; background: #0a0f1e; border: 1px solid rgba(255,255,255,0.2); color: #e8ecff; font: inherit; font-size: 12px; padding: 4px 7px; border-radius: 6px; }
     .note-text-input { flex: 1; min-width: 0; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: #fff; font: inherit; font-size: 12.5px; padding: 5px 9px; border-radius: 6px; }
     .icon-btn { background: rgba(255,255,255,0.12); border: none; color: #fff; width: 26px; height: 26px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1; flex-shrink: 0; }
     .icon-btn:hover { background: rgba(255,255,255,0.22); }
@@ -1820,7 +1822,7 @@ function swapTableLabel(tableId) {
   return tb ? (tb.title || `Table #${tb.id}`) : `#${tableId}`;
 }
 
-function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg, sectionNoteEnabled) {
+function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
   const isStandard = tb.kind === 'standard';
   const groupsWithTables = (groupsEnabled && isStandard) ? tb.columnGroups.filter(g => g.tables.length > 0) : [];
   const isContainerOnly = tb.columns.length === 0 && groupsWithTables.length > 0;
@@ -1846,24 +1848,14 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg, section
 
   const nestedGroupsHtml = groupsWithTables.map(g => `
     <div class="group-tables" data-drop-kind="table-container" data-drop-parent="${g.id}" data-drop-parent-kind="group">
-      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, groupsEnabled, sectionBg, sectionNoteEnabled)).join('')}
+      ${g.tables.map(ctb => renderTable(ctb, 'group', g.id, groupsEnabled, sectionBg)).join('')}
     </div>`).join('');
-
-  const markStyleHtml = (sectionNoteEnabled && (tb.kind === 'standard' || tb.kind === 'benched'))
-    ? `<div class="tbl-sizing">Mark
-        <select class="width-input" draggable="false" data-action="table-mark-style" data-id="${tb.id}" title="How the cell marker (*) is shown and stored on this table">
-          <option value="star" ${tb.markStyle !== 'number' ? 'selected' : ''}>Star</option>
-          <option value="number" ${tb.markStyle === 'number' ? 'selected' : ''}>Numbers</option>
-        </select>
-      </div>`
-    : '';
 
   return `<div class="tbl-card" data-drop-kind="table" data-drop-id="${tb.id}" data-drop-parent="${parentId}" data-drop-parent-kind="${parentKind}" data-flip-id="table:${tb.id}"${cardStyle}>
     <div class="tbl-head" draggable="true" data-drag-kind="table" data-drag-id="${tb.id}" data-drag-parent="${parentId}" data-drag-parent-kind="${parentKind}" title="Drag to reorder/reposition" style="${headerStyle}">
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
       <div class="tbl-sizing">Col w<input type="number" class="width-input" draggable="false" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
-      ${markStyleHtml}
       <button class="icon-btn" data-action="duplicate-table" data-id="${tb.id}" title="Duplicate table">&#10697;</button>
       <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
     </div>
@@ -1903,12 +1895,32 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg, section
   </div>`;
 }
 
+// Flattens standard/benched tables reachable from a section's top-level tables, including
+// those nested inside column groups -- these are the ones mark_style applies to (swaps/counter
+// tables have no per-cell chip to mark).
+function collectMarkableTables(tables) {
+  const out = [];
+  for (const tb of tables) {
+    if (tb.kind === 'standard' || tb.kind === 'benched') out.push(tb);
+    for (const g of (tb.columnGroups || [])) out.push(...collectMarkableTables(g.tables));
+  }
+  return out;
+}
+
 function renderSection(sec) {
   const meta = KIND_META[sec.kind] || { label: sec.kind, color: '#5865f2' };
   const headColor = sec.color || meta.color;
   const groupsEnabled = false;
   const sectionBg = sec.bgColor || '#111827';
   const bodyStyle = sec.bgColor ? ` style="background:${sec.bgColor};"` : '';
+  const markableTables = sec.noteEnabled ? collectMarkableTables(sec.tables) : [];
+  const markStyleHtml = markableTables.map(tb => `
+      <label class="mark-style-inline">${markableTables.length > 1 ? `${esc(tb.title || 'Table')}&nbsp;` : ''}Mark
+        <select data-action="table-mark-style" data-id="${tb.id}" title="How the cell marker (*) is shown and stored on this table">
+          <option value="star" ${tb.markStyle !== 'number' ? 'selected' : ''}>Star</option>
+          <option value="number" ${tb.markStyle === 'number' ? 'selected' : ''}>Numbers</option>
+        </select>
+      </label>`).join('');
   return `<div class="section-card">
     <div class="section-head" style="background:${headColor};">
       <input class="title-input" data-action="rename-section" data-id="${sec.id}" value="${escAttr(sec.title)}">
@@ -1924,9 +1936,10 @@ function renderSection(sec) {
         Cell markers (*)
       </label>
       ${sec.noteEnabled ? `<input type="text" class="note-text-input" data-action="section-note-text" data-id="${sec.id}" placeholder="Note shown under the section header" value="${escAttr(sec.noteText || '')}" maxlength="255">` : ''}
+      ${markStyleHtml}
     </div>
     <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section"${bodyStyle}>
-      ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg, sec.noteEnabled)).join('') || '<p class="empty">No tables yet.</p>'}
+      ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables yet.</p>'}
       <div class="kind-picker-wrap">
         <button class="btn" data-action="open-kind-picker" data-kind="table" data-id="${sec.id}">+ Table</button>
         <div class="kind-picker" ${openKindPicker === `table-${sec.id}` ? '' : 'hidden'}>
