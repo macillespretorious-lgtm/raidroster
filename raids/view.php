@@ -1602,11 +1602,9 @@ function swapsHeaderRow(chunkCols, tb) {
 
 function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
   const coverage = computeMergeCoverage(tb);
+  const colWidths = chunkCols.map(c => colWidthPx(c, tb));
   const colgroup = `<colgroup>` +
-    chunkCols.map(c => {
-      const w = colWidthPx(c, tb);
-      return `<col${w ? ` style="width:${w}px;"` : ''}>`;
-    }).join('') + `</colgroup>`;
+    colWidths.map(w => `<col${w ? ` style="width:${w}px;"` : ''}>`).join('') + `</colgroup>`;
 
   const bodyRows = tb.rows.map(r => {
     if (r.kind === 'spacer') {
@@ -1618,8 +1616,13 @@ function renderColumnBlock(chunkCols, tb, noteEnabled, sectionBg) {
 
   const groupRow = groupHeaderRow(chunkCols, tb.columnGroups, tb) || swapsHeaderRow(chunkCols, tb);
 
+  // table-layout:fixed only ignores cell content when the table itself has an explicit
+  // width -- left at auto, browsers still fall back to each column's content min-width
+  // (nowrap chip names included) when it's larger than the <col> width, silently widening
+  // the table past every configured Col w. Pinning the sum here removes that ambiguity.
+  const totalWidth = colWidths.reduce((s, w) => s + (w || 0), 0);
   return `<div class="grid-scroll">
-      <table class="grid">
+      <table class="grid" style="width:${totalWidth}px;">
         ${colgroup}
         ${groupRow}
         ${bodyRows}
