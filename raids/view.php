@@ -2017,7 +2017,11 @@ function benchCall(body) {
       sections = groupSectionsByKind(d.sections);
       render();
       return true;
-    });
+    })
+    // A non-JSON response (e.g. a PHP fatal's HTML/blank output) makes r.json() throw --
+    // without this, that rejection was swallowed silently and the row just looked like
+    // nothing happened, with no indication anything had gone wrong server-side.
+    .catch(() => { alert('Bench import failed'); return false; });
 }
 
 function addBenchImportRow(idx) {

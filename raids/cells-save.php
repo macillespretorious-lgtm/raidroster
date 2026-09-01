@@ -129,13 +129,16 @@ function duplicate_player_violation($pdo, $tableId, $toonKind, $toonId, array $e
     if ($playerId === null) return null;
     $tableIds = rostered_table_ids($pdo, $tableId);
     $tablePlaceholders = implode(',', array_fill(0, count($tableIds), '?'));
-    $excludePlaceholders = implode(',', array_fill(0, count($excludeCellIds), '?'));
+    // bench_import has no cell of its own to exclude (it's placing a brand new occupant,
+    // not reassigning one), so it always calls this with an empty array -- "NOT IN ()" is
+    // invalid SQL, so the exclude clause is only added when there's something to exclude.
+    $excludeClause = $excludeCellIds ? 'AND c.id NOT IN (' . implode(',', array_fill(0, count($excludeCellIds), '?')) . ')' : '';
     $stmt = $pdo->prepare(
         "SELECT c.id FROM raid_cells c
          LEFT JOIN toon_alts ta ON c.toon_kind = 'alt' AND ta.id = c.toon_id
          WHERE c.table_id IN ($tablePlaceholders)
            AND ((c.toon_kind = 'main' AND c.toon_id = ?) OR (c.toon_kind = 'alt' AND ta.main_id = ?))
-           AND c.id NOT IN ($excludePlaceholders)
+           $excludeClause
          LIMIT 1"
     );
     $stmt->execute(array_merge($tableIds, [$playerId, $playerId], $excludeCellIds));
