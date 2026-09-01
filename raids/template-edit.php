@@ -105,6 +105,7 @@ function fetch_table_full($pdo, $tb) {
         'markStyle' => $tb['mark_style'],
         'noteEnabled' => (bool)($tb['note_enabled'] ?? 0),
         'noteText' => $tb['note_text'] ?? null,
+        'swapDefault' => (bool)($tb['swap_default'] ?? 0),
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
@@ -1373,7 +1374,7 @@ function render() {
       if (act === 'delete-section') { if (confirm('Delete this section and everything in it?')) call({ action: 'delete_section', id }); }
       if (act === 'move-section-up') call({ action: 'move_section', id, direction: 'up' });
       if (act === 'move-section-down') call({ action: 'move_section', id, direction: 'down' });
-      if (act === 'add-table-kind') { openKindPicker = null; call({ action: 'add_table', sectionId: id, kind: node.dataset.kind }); }
+      if (act === 'add-table-kind') { openKindPicker = null; call({ action: 'add_table', sectionId: id, kind: node.dataset.kind, ...(node.dataset.swapDefault ? { swapDefault: true } : {}) }); }
       if (act === 'open-swaps-modal') { openKindPicker = null; render(); openSwapsModal(id, null); }
       if (act === 'open-counter-modal') { openKindPicker = null; render(); openCounterModal(id, null); }
       if (act === 'add-roster-table') {
@@ -1851,10 +1852,12 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
 
   const kindNote = tb.kind === 'benched'
     ? `<div class="tbl-kind-note">Benched table &mdash; layout is fixed; it grows automatically as it fills up.</div>`
-    : tb.kind === 'swaps'
-      ? `<div class="tbl-kind-note">Swaps table &mdash; Before: <strong>${esc(swapTableLabel(tb.swapBeforeTableId))}</strong>, After: <strong>${esc(swapTableLabel(tb.swapAfterTableId))}</strong>
-          <button type="button" class="btn-link" data-action="edit-swaps-links" data-id="${tb.id}">change&hellip;</button></div>`
-      : tb.kind === 'counter'
+    : tb.kind === 'swaps' && tb.swapDefault
+      ? `<div class="tbl-kind-note">Default Swaps table &mdash; compares the primary roster against every other roster table on this tab, automatically.</div>`
+      : tb.kind === 'swaps'
+        ? `<div class="tbl-kind-note">Swaps table &mdash; Before: <strong>${esc(swapTableLabel(tb.swapBeforeTableId))}</strong>, After: <strong>${esc(swapTableLabel(tb.swapAfterTableId))}</strong>
+            <button type="button" class="btn-link" data-action="edit-swaps-links" data-id="${tb.id}">change&hellip;</button></div>`
+        : tb.kind === 'counter'
         ? `<div class="tbl-kind-note">Counter table &mdash; counts ${esc((tb.countCategories && tb.countCategories.length ? tb.countCategories : ['Tank', 'Healer']).join('/'))} from: <strong>${esc(swapTableLabel(tb.countSourceTableId))}</strong>
             <button type="button" class="btn-link" data-action="edit-counter-link" data-id="${tb.id}">change&hellip;</button></div>`
         : '';
@@ -1964,6 +1967,7 @@ function renderSection(sec) {
         <div class="kind-picker" ${openKindPicker === `table-${sec.id}` ? '' : 'hidden'}>
           <button data-action="add-table-kind" data-kind="standard" data-id="${sec.id}">Standard</button>
           ${allTables().some(t => t.kind === 'benched') ? '' : `<button data-action="add-table-kind" data-kind="benched" data-id="${sec.id}" title="Auto-fills from Raid-Helper Bench signups and grows automatically">Benched</button>`}
+          ${allTables().some(t => t.kind === 'swaps' && t.swapDefault) ? '' : `<button data-action="add-table-kind" data-kind="swaps" data-swap-default="1" data-id="${sec.id}" title="Auto-diffs the primary roster against every other roster table -- no picker needed">Default Swaps</button>`}
           <button data-action="open-swaps-modal" data-id="${sec.id}" title="Auto-diffs two Standard tables">Swaps&hellip;</button>
           <button data-action="open-counter-modal" data-id="${sec.id}" title="Shows a live Tank/Healer count for a Standard table">Counter&hellip;</button>
         </div>

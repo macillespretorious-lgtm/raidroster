@@ -12,19 +12,23 @@ require_once __DIR__ . '/raid_swaps.php';
 // like they draw any other text-kind table. The Before/After pairing itself is never
 // stored; it's recomputed live from the two source tables' current cells on every read.
 function fetch_swaps_table($pdo, $tb, $guildId) {
-    $stmtBt = $pdo->prepare('SELECT * FROM raid_tables WHERE id = ?');
-    $beforeTb = null;
-    $afterTb = null;
-    if ($tb['swap_before_table_id']) {
-        $stmtBt->execute([$tb['swap_before_table_id']]);
-        $beforeTb = $stmtBt->fetch(PDO::FETCH_ASSOC);
+    if (!empty($tb['swap_default'])) {
+        [$beforeFull, $afterFull] = resolve_default_swap_sources($pdo, $tb, $guildId);
+    } else {
+        $stmtBt = $pdo->prepare('SELECT * FROM raid_tables WHERE id = ?');
+        $beforeTb = null;
+        $afterTb = null;
+        if ($tb['swap_before_table_id']) {
+            $stmtBt->execute([$tb['swap_before_table_id']]);
+            $beforeTb = $stmtBt->fetch(PDO::FETCH_ASSOC);
+        }
+        if ($tb['swap_after_table_id']) {
+            $stmtBt->execute([$tb['swap_after_table_id']]);
+            $afterTb = $stmtBt->fetch(PDO::FETCH_ASSOC);
+        }
+        $beforeFull = $beforeTb ? fetch_table_full($pdo, $beforeTb, $guildId) : ['cells' => []];
+        $afterFull  = $afterTb  ? fetch_table_full($pdo, $afterTb, $guildId)  : ['cells' => []];
     }
-    if ($tb['swap_after_table_id']) {
-        $stmtBt->execute([$tb['swap_after_table_id']]);
-        $afterTb = $stmtBt->fetch(PDO::FETCH_ASSOC);
-    }
-    $beforeFull = $beforeTb ? fetch_table_full($pdo, $beforeTb, $guildId) : ['cells' => []];
-    $afterFull  = $afterTb  ? fetch_table_full($pdo, $afterTb, $guildId)  : ['cells' => []];
     $swapRows = compute_swap_rows($pdo, $guildId, (int)$tb['id'], $beforeFull, $afterFull);
 
     $mkCol = fn($id, $label) => ['id' => $id, 'label' => $label, 'kind' => 'text', 'width' => null, 'headerColor' => null, 'bgColor' => null, 'groupId' => null, 'headerColspan' => 1];
@@ -63,11 +67,45 @@ function fetch_swaps_table($pdo, $tb, $guildId) {
         'headerColor' => $tb['header_color'], 'bgColor' => $tb['bg_color'],
         'defaultColumnWidth' => $tb['default_column_width'] !== null ? (int)$tb['default_column_width'] : null,
         'kind' => 'swaps', 'isPrimary' => false,
+        'swapDefault' => (bool)($tb['swap_default'] ?? 0),
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'columns' => $columns, 'rows' => $rows, 'columnGroups' => [], 'cells' => $cells,
         'cellMerges' => [], 'rules' => [],
     ];
+}
+
+// Resolves the dynamic Before/After sources for a "Default Swaps" table: Before is always
+// the raid's primary Starting Roster table; After is the union of every other Standard table
+// living directly in a roster-kind section (nested boss sub-tables are excluded -- "any other
+// roster table on the roster tab" means the top-level roster-shaped tables, not assignment
+// boards). Row/column ids are globally unique auto-increment PKs, so merging multiple tables'
+// cells arrays together is safe -- no key collisions across tables.
+function resolve_default_swap_sources($pdo, $tb, $guildId) {
+    $stmt = $pdo->prepare('SELECT raid_id FROM raid_sections WHERE id = ?');
+    $stmt->execute([$tb['section_id']]);
+    $raidId = $stmt->fetchColumn();
+    if (!$raidId) return [['cells' => []], ['cells' => []]];
+
+    $stmt = $pdo->prepare(
+        "SELECT rt.* FROM raid_tables rt JOIN raid_sections rs ON rs.id = rt.section_id
+         WHERE rs.raid_id = ? AND rt.is_primary = 1 LIMIT 1"
+    );
+    $stmt->execute([$raidId]);
+    $beforeTb = $stmt->fetch(PDO::FETCH_ASSOC);
+    $beforeFull = $beforeTb ? fetch_table_full($pdo, $beforeTb, $guildId) : ['cells' => []];
+
+    $stmt = $pdo->prepare(
+        "SELECT rt.* FROM raid_tables rt JOIN raid_sections rs ON rs.id = rt.section_id
+         WHERE rs.raid_id = ? AND rs.kind = 'roster' AND rt.kind = 'standard' AND rt.is_primary = 0
+         ORDER BY rs.sort_order, rt.sort_order, rt.id"
+    );
+    $stmt->execute([$raidId]);
+    $afterCells = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $afterTb) {
+        $afterCells += fetch_table_full($pdo, $afterTb, $guildId)['cells'];
+    }
+    return [$beforeFull, ['cells' => $afterCells]];
 }
 
 // Synthesizes a Counter table's read shape -- one fixed text-kind column per chosen category

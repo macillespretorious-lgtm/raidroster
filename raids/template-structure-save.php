@@ -332,6 +332,7 @@ function fetch_table_full($pdo, $tb) {
         'markStyle' => $tb['mark_style'],
         'noteEnabled' => (bool)($tb['note_enabled'] ?? 0),
         'noteText' => $tb['note_text'] ?? null,
+        'swapDefault' => (bool)($tb['swap_default'] ?? 0),
         'swapBeforeTableId' => $tb['swap_before_table_id'] !== null ? (int)$tb['swap_before_table_id'] : null,
         'swapAfterTableId' => $tb['swap_after_table_id'] !== null ? (int)$tb['swap_after_table_id'] : null,
         'countSourceTableId' => $tb['count_source_table_id'] !== null ? (int)$tb['count_source_table_id'] : null,
@@ -724,9 +725,27 @@ function template_has_benched_table($pdo, $guildId, $templateId, $excludeTableId
     return false;
 }
 
+// Same one-per-template rationale as template_has_benched_table() above: a Default Swaps
+// table's Before/After are resolved dynamically (the raid's primary roster vs every other
+// roster-tab table), so a second one on the same template would just be a duplicate of the
+// same computed diff.
+function template_has_default_swaps_table($pdo, $guildId, $templateId, $excludeTableId = null) {
+    $stmt = $pdo->prepare("SELECT id FROM raid_template_tables WHERE kind = 'swaps' AND swap_default = 1" . ($excludeTableId ? ' AND id != ?' : ''));
+    $excludeTableId ? $stmt->execute([$excludeTableId]) : $stmt->execute();
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+        if (resolve_table_templateId($pdo, $guildId, (int)$id) === $templateId) return true;
+    }
+    return false;
+}
+
 if ($action === 'add_table') {
     $groupId = (int)($body['groupId'] ?? 0);
     $kind = in_array($body['kind'] ?? 'standard', ['standard', 'benched', 'swaps', 'counter'], true) ? $body['kind'] : 'standard';
+    $swapDefault = $kind === 'swaps' && !empty($body['swapDefault']);
+    // A Default Swaps table's Before/After are resolved dynamically off the raid's section
+    // tree at read time (resolve_default_swap_sources() in raid_fetch.php), which needs a
+    // real section_id to find the raid -- so it can't live nested inside a column group.
+    if ($swapDefault && $groupId) fail(400, 'A Default Swaps table can only be added directly to a section.');
 
     if ($groupId) {
         $grp = fetch_group_owned($pdo, $tenant['id'], $groupId);
@@ -751,14 +770,17 @@ if ($action === 'add_table') {
     if ($kind === 'benched' && template_has_benched_table($pdo, $tenant['id'], $sec['template_id'])) {
         fail(400, 'This template already has a Benched table.');
     }
+    if ($swapDefault && template_has_default_swaps_table($pdo, $tenant['id'], $sec['template_id'])) {
+        fail(400, 'This template already has a Default Swaps table.');
+    }
     // Top-level tables are numbered automatically in the UI, so a title is optional here.
     $title = substr(trim($body['title'] ?? ''), 0, 100);
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
-    [$beforeId, $afterId] = $kind === 'swaps' ? resolve_swap_tables($pdo, $tenant['id'], $sec['template_id'], $body) : [null, null];
+    [$beforeId, $afterId] = ($kind === 'swaps' && !$swapDefault) ? resolve_swap_tables($pdo, $tenant['id'], $sec['template_id'], $body) : [null, null];
     $countSourceId = $kind === 'counter' ? resolve_count_source_table($pdo, $tenant['id'], $sec['template_id'], $body) : null;
     $countCategories = $kind === 'counter' ? (resolve_count_categories($body) ?? 'Tank,Healer') : null;
-    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id, count_source_table_id, count_categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$sec['id'], $title, $order, $kind, $beforeId, $afterId, $countSourceId, $countCategories]);
+    $stmt = $pdo->prepare('INSERT INTO raid_template_tables (section_id, title, sort_order, kind, swap_before_table_id, swap_after_table_id, swap_default, count_source_table_id, count_categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$sec['id'], $title, $order, $kind, $beforeId, $afterId, $swapDefault ? 1 : 0, $countSourceId, $countCategories]);
     if ($kind === 'benched') seed_benched_table($pdo, (int)$pdo->lastInsertId());
     respond_structure($pdo, $sec['template_id']);
 }
@@ -800,7 +822,7 @@ if ($action === 'update_table') {
     $noteText    = array_key_exists('noteText', $body) ? ($body['noteText'] !== null ? substr(trim((string)$body['noteText']), 0, 255) : null) : $tb['note_text'];
     if ($noteText === '') $noteText = null;
 
-    if ($tb['kind'] === 'swaps' && (array_key_exists('beforeTableId', $body) || array_key_exists('afterTableId', $body))) {
+    if ($tb['kind'] === 'swaps' && !$tb['swap_default'] && (array_key_exists('beforeTableId', $body) || array_key_exists('afterTableId', $body))) {
         $mergedBody = ['beforeTableId' => $body['beforeTableId'] ?? $tb['swap_before_table_id'], 'afterTableId' => $body['afterTableId'] ?? $tb['swap_after_table_id']];
         [$beforeId, $afterId] = resolve_swap_tables($pdo, $tenant['id'], $tb['template_id'], $mergedBody);
         $stmt = $pdo->prepare('UPDATE raid_template_tables SET title = ?, header_color = ?, default_column_width = ?, mark_style = ?, mark_enabled = ?, note_enabled = ?, note_text = ?, swap_before_table_id = ?, swap_after_table_id = ? WHERE id = ?');
@@ -864,6 +886,7 @@ if ($action === 'duplicate_table') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
     if ($tb['kind'] === 'benched') fail(400, 'Only one Benched table is allowed per template.');
+    if ($tb['kind'] === 'swaps' && $tb['swap_default']) fail(400, 'Only one Default Swaps table is allowed per template.');
 
     $tableIdMap = []; $swapLinks = []; $countLinks = [];
     clone_template_table_recursive($pdo, $tb, $tb['section_id'], $tb['parent_group_id'], $tableIdMap, $swapLinks, $countLinks);

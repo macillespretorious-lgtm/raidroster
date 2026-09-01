@@ -79,10 +79,10 @@ function clone_template_to_guild($pdo, $sourceTemplateId, $targetGuildId, $newNa
 // invariant enforced elsewhere (see copy_table_recursive() in raid_structure.php).
 function clone_template_table_recursive($pdo, $tb, $newSectionId, $newParentGroupId, &$tableIdMap, &$swapLinks, &$countLinks) {
     $insT = $pdo->prepare(
-        'INSERT INTO raid_template_tables (section_id, parent_group_id, title, header_color, default_column_width, row_label_width, sort_order, bg_color, kind, count_categories, mark_style, mark_enabled, note_enabled, note_text)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO raid_template_tables (section_id, parent_group_id, title, header_color, default_column_width, row_label_width, sort_order, bg_color, kind, swap_default, count_categories, mark_style, mark_enabled, note_enabled, note_text)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['header_color'], $tb['default_column_width'], $tb['row_label_width'], $tb['sort_order'], $tb['bg_color'], $tb['kind'], $tb['count_categories'], $tb['mark_style'] ?? 'star', $tb['mark_enabled'] ?? 0, $tb['note_enabled'] ?? 0, $tb['note_text'] ?? null]);
+    $insT->execute([$newSectionId, $newParentGroupId, $tb['title'], $tb['header_color'], $tb['default_column_width'], $tb['row_label_width'], $tb['sort_order'], $tb['bg_color'], $tb['kind'], $tb['swap_default'] ?? 0, $tb['count_categories'], $tb['mark_style'] ?? 'star', $tb['mark_enabled'] ?? 0, $tb['note_enabled'] ?? 0, $tb['note_text'] ?? null]);
     $newTableId = (int)$pdo->lastInsertId();
     $tableIdMap[$tb['id']] = $newTableId;
     if ($tb['kind'] === 'swaps') {
