@@ -394,7 +394,15 @@ if ($action === 'bench_import') {
         exit;
     }
 
-    $stmtEmpty = $pdo->prepare("SELECT id FROM raid_cells WHERE table_id = ? AND toon_kind = 'main' AND toon_id IS NULL ORDER BY row_id LIMIT 1");
+    // Must exclude the table's fixed kind='text' header row (the static "BENCHED" label row) --
+    // without the row-kind join, this query treated that row's cell as a free slot (it's
+    // toon_kind='main'/toon_id NULL like any empty slot), silently placing a real player's toon
+    // behind the header label where the client's text-row renderer never shows it.
+    $stmtEmpty = $pdo->prepare(
+        "SELECT c.id FROM raid_cells c JOIN raid_rows r ON r.id = c.row_id
+         WHERE c.table_id = ? AND r.kind = 'general' AND c.toon_kind = 'main' AND c.toon_id IS NULL
+         ORDER BY r.sort_order LIMIT 1"
+    );
     $stmtEmpty->execute([$tableId]);
     $cellId = $stmtEmpty->fetchColumn();
     if (!$cellId) {
