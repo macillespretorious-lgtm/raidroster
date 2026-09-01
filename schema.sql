@@ -66,6 +66,7 @@ CREATE TABLE raid_pool (
     pug_class VARCHAR(30) NULL,
     role ENUM('Tank', 'Healer', 'DPS') NULL,
     sort_order INT NOT NULL DEFAULT 0,
+    is_flex TINYINT(1) NOT NULL DEFAULT 0,
     UNIQUE KEY uniq_pool_toon (raid_id, toon_kind, toon_id),
     FOREIGN KEY (raid_id) REFERENCES raids(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

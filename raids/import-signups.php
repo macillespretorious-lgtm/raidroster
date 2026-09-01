@@ -191,6 +191,10 @@ foreach (($data['signups'] ?? []) as $su) {
         // their real class from the toons/toon_alts join below regardless of what Raid-Helper reports.
         'suggestedPugClass' => $isBench ? null : (RH_CLS_MAP[$rawClass] ?? null),
         'isBench' => $isBench,
+        // Flagged regardless of match state, purely informational for the roster maker --
+        // for a matched player it also means switchToon (pool alt-click) is the intended
+        // way to actually act on it, since that already resolves to their real sibling toons.
+        'isFlexSignup' => $rawClass === $flex['flexClass'],
     ];
 
     if ($match) {

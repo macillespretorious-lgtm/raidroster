@@ -259,6 +259,13 @@ function fmtTime($t) {
       line-height: 14px; flex-shrink: 0;
     }
     .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
+    .flex-badge {
+      display: inline-block; padding: 0 4px; margin-left: 4px; border-radius: 3px;
+      font-size: 9px; font-weight: 800; background: #17a2b8; color: #fff;
+      border: 1px solid rgba(0,0,0,0.35); letter-spacing: 0.02em; vertical-align: middle;
+      line-height: 14px; flex-shrink: 0;
+    }
+    .pool-chip.flex { box-shadow: inset 0 0 0 2px #17a2b8; }
     .tbl-note { margin: 4px 0 0; font-size: 11.5px; font-weight: 700; color: #f0c04a; }
     /* Star marker: a hollow, barely-there ring until set, then a solid gold badge with a
        glow ring so an active mark reads at a glance instead of blending into the chip. */
@@ -1796,11 +1803,12 @@ function poolEntryHtml(p) {
     ? `<span class="role-icon-sm role-clickable ${roleKey(p.role)}" title="${esc(roleTitle)}" data-action="cycle-pool-role" data-pool-id="${p.id}"></span>`
     : '';
   const t2 = p.class === 'Priest' && p.fullT2 ? '<span class="t2-badge">T2</span>' : '';
+  const flexTag = p.isFlex ? `<span class="flex-badge" title="Signed up flexible — willing to play any of their toons. Alt-click to switch which one is assigned.">FLEX</span>` : '';
   return `<div class="pool-chip-row">
-    <span class="toon-chip pool-chip" draggable="true" data-source="pool" data-pool-id="${p.id}"
+    <span class="toon-chip pool-chip${p.isFlex ? ' flex' : ''}" draggable="true" data-source="pool" data-pool-id="${p.id}"
       data-toon-kind="${esc(p.toonKind)}" data-toon-id="${esc(p.toonId || '')}"
       data-pug-name="${esc(p.pugName || '')}" data-pug-class="${esc(p.pugClass || '')}" data-role="${esc(p.role || '')}"
-      style="background:${color};color:${contrastText(color)};">${roleIcon}${esc(p.name)}${t2}${tag}</span>
+      style="background:${color};color:${contrastText(color)};">${roleIcon}${esc(p.name)}${t2}${flexTag}${tag}</span>
     <button type="button" class="pool-remove" data-pool-id="${p.id}" title="Remove from pool">&times;</button>
   </div>`;
 }
@@ -2018,8 +2026,8 @@ function wirePoolControls() {
 // into cells, since RR templates have no fixed notion of e.g. "healer slot 2".
 function importItemFor(row) {
   return row.matched
-    ? { toonKind: row.toonKind, toonId: row.toonId, role: row.role }
-    : { toonKind: 'pug', pugName: row.name, pugClass: row.suggestedPugClass || null, role: row.role };
+    ? { toonKind: row.toonKind, toonId: row.toonId, role: row.role, isFlex: !!row.isFlexSignup }
+    : { toonKind: 'pug', pugName: row.name, pugClass: row.suggestedPugClass || null, role: row.role, isFlex: !!row.isFlexSignup };
 }
 
 // Bench signups never go to the pool (pool items were never wired to place into cells) --
@@ -2072,9 +2080,10 @@ function importRowHtml(row, idx) {
   const roleTitle = row.added ? esc(row.role || '') : `${esc(row.role || '')} (suggested — click to change)`;
   const roleIcon = row.role ? `<span class="role-icon-sm${roleClickable} ${roleKey(row.role)}" title="${roleTitle}" ${row.added ? '' : `onclick="cycleImportRole(${idx})"`}></span>` : '';
   const benchBadge = row.isBench ? `<span class="bench-badge" title="${esc(row.rawClass)} signup — adds to the Benched table, not the pool">${esc(row.rawClass)}</span>` : '';
+  const flexBadge = row.isFlexSignup ? `<span class="flex-badge" title="${esc(row.rawClass)} signup — willing to play any of their toons">FLEX</span>` : '';
   const btnLabel = row.pending ? 'Adding…' : (row.isBench ? 'Add to Bench' : (row.matched ? 'Add' : 'Add as PUG'));
   return `<div class="import-row ${state}">
-    <div>${roleIcon}<span class="name">${esc(row.name)}</span> ${benchBadge}<span class="detail">${detail}</span></div>
+    <div>${roleIcon}<span class="name">${esc(row.name)}</span> ${benchBadge}${flexBadge}<span class="detail">${detail}</span></div>
     <div class="status">${status}${row.added ? '' : `<button type="button" data-idx="${idx}" ${row.pending ? 'disabled' : ''}>${btnLabel}</button>`}</div>
   </div>`;
 }

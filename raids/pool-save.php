@@ -43,7 +43,7 @@ if (!$stmt->fetch()) {
 
 function fetch_pool($pdo, $raidId) {
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.toon_kind, p.toon_id, p.pug_name, p.pug_class, p.role, p.sort_order,
+        'SELECT p.id, p.toon_kind, p.toon_id, p.pug_name, p.pug_class, p.role, p.sort_order, p.is_flex,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class,
                 COALESCE(t.main_spec, a.main_spec) AS toon_spec,
@@ -72,6 +72,7 @@ function fetch_pool($pdo, $raidId) {
             'role'          => $p['role'] ?: default_role_for_class($class, $spec),
             'roleConfirmed' => $p['role'] !== null,
             'sortOrder'     => (int)$p['sort_order'],
+            'isFlex'        => (bool)$p['is_flex'],
         ];
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
@@ -97,7 +98,7 @@ function pool_item_spec($pdo, $tenant, $toonKind, $toonId) {
 }
 
 // Validates/inserts a single pool item. Returns null on success, or an error string.
-function add_pool_item($pdo, $tenant, $raidId, $toonKind, $toonId, $pugName, $pugClass, $role = null) {
+function add_pool_item($pdo, $tenant, $raidId, $toonKind, $toonId, $pugName, $pugClass, $role = null, $isFlex = false) {
     if ($toonKind === 'main') {
         $stmt = $pdo->prepare('SELECT id FROM toons WHERE id = ? AND guild_id = ?');
         $stmt->execute([$toonId, $tenant['id']]);
@@ -126,21 +127,21 @@ function add_pool_item($pdo, $tenant, $raidId, $toonKind, $toonId, $pugName, $pu
     $nextOrder = (int)$stmt->fetchColumn();
 
     $stmt = $pdo->prepare(
-        'INSERT INTO raid_pool (raid_id, toon_kind, toon_id, pug_name, pug_class, role, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)
+        'INSERT INTO raid_pool (raid_id, toon_kind, toon_id, pug_name, pug_class, role, sort_order, is_flex) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE id = id'
     );
-    $stmt->execute([$raidId, $toonKind, $toonId, $pugName, $pugClass, $role, $nextOrder]);
+    $stmt->execute([$raidId, $toonKind, $toonId, $pugName, $pugClass, $role, $nextOrder, $isFlex ? 1 : 0]);
     return null;
 }
 
 if ($action === 'add') {
-    $err = add_pool_item($pdo, $tenant, $raidId, $body['toonKind'] ?? '', $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null, $body['role'] ?? null);
+    $err = add_pool_item($pdo, $tenant, $raidId, $body['toonKind'] ?? '', $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null, $body['role'] ?? null, !empty($body['isFlex']));
     if ($err) { http_response_code(400); echo json_encode(['error' => $err]); exit; }
 } elseif ($action === 'bulkAdd') {
     $items = is_array($body['items'] ?? null) ? $body['items'] : [];
     $results = [];
     foreach ($items as $item) {
-        $err = add_pool_item($pdo, $tenant, $raidId, $item['toonKind'] ?? '', $item['toonId'] ?? null, $item['pugName'] ?? null, $item['pugClass'] ?? null, $item['role'] ?? null);
+        $err = add_pool_item($pdo, $tenant, $raidId, $item['toonKind'] ?? '', $item['toonId'] ?? null, $item['pugName'] ?? null, $item['pugClass'] ?? null, $item['role'] ?? null, !empty($item['isFlex']));
         $results[] = ['ok' => $err === null, 'error' => $err];
     }
     echo json_encode(['success' => true, 'results' => $results, 'pool' => fetch_pool($pdo, $raidId)]);
