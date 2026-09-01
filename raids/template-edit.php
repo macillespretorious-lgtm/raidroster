@@ -1896,8 +1896,10 @@ function renderTable(tb, parentKind, parentId, groupsEnabled, sectionBg) {
       <span class="drag-handle" style="color:${titleColor};opacity:.75;">&#10021;</span>
       ${titleHtml}
       <div class="tbl-sizing">Col w<input type="number" class="width-input" draggable="false" data-action="table-col-width" data-id="${tb.id}" value="${pxToUnits(tb.defaultColumnWidth)}" placeholder="${DEFAULT_COL_UNITS}" min="0" title="Default column width in units (1 unit = ${COL_UNIT_PX}px). 0 = shrink to longest content."></div>
-      <button class="icon-btn" data-action="duplicate-table" data-id="${tb.id}" title="Duplicate table">&#10697;</button>
-      <button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>
+      ${tb.kind === 'benched' ? '' : `<button class="icon-btn" data-action="duplicate-table" data-id="${tb.id}" title="Duplicate table">&#10697;</button>`}
+      ${tb.kind === 'benched'
+        ? `<span class="icon-btn" style="opacity:.5;cursor:default;" title="Always enabled — can't be removed">&#128274;</span>`
+        : `<button class="icon-btn danger" data-action="delete-table" data-id="${tb.id}" title="Delete table">&times;</button>`}
     </div>
     ${groupsEnabled && isStandard ? groupStrip(tb) : ''}
     ${blocks}
@@ -1951,7 +1953,9 @@ function renderSection(sec) {
       <button class="icon-btn" data-action="move-section-up" data-id="${sec.id}" title="Move up">&uarr;</button>
       <button class="icon-btn" data-action="move-section-down" data-id="${sec.id}" title="Move down">&darr;</button>
       <button class="icon-btn" data-action="duplicate-section" data-id="${sec.id}" title="Duplicate section">&#10697;</button>
-      <button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>
+      ${sec.locked
+        ? `<span class="icon-btn" style="opacity:.5;cursor:default;" title="Required on every raid — can't be deleted">&#128274;</span>`
+        : `<button class="icon-btn danger" data-action="delete-section" data-id="${sec.id}" title="Delete section">&times;</button>`}
     </div>
     <div class="section-body" data-drop-kind="table-container" data-drop-parent="${sec.id}" data-drop-parent-kind="section"${bodyStyle}>
       ${sec.tables.map(tb => renderTable(tb, 'section', sec.id, groupsEnabled, sectionBg)).join('') || '<p class="empty">No tables yet.</p>'}
@@ -1959,7 +1963,7 @@ function renderSection(sec) {
         <button class="btn" data-action="open-kind-picker" data-kind="table" data-id="${sec.id}">+ Table</button>
         <div class="kind-picker" ${openKindPicker === `table-${sec.id}` ? '' : 'hidden'}>
           <button data-action="add-table-kind" data-kind="standard" data-id="${sec.id}">Standard</button>
-          <button data-action="add-table-kind" data-kind="benched" data-id="${sec.id}" title="Auto-fills from Raid-Helper Bench signups and grows automatically">Benched</button>
+          ${allTables().some(t => t.kind === 'benched') ? '' : `<button data-action="add-table-kind" data-kind="benched" data-id="${sec.id}" title="Auto-fills from Raid-Helper Bench signups and grows automatically">Benched</button>`}
           <button data-action="open-swaps-modal" data-id="${sec.id}" title="Auto-diffs two Standard tables">Swaps&hellip;</button>
           <button data-action="open-counter-modal" data-id="${sec.id}" title="Shows a live Tank/Healer count for a Standard table">Counter&hellip;</button>
         </div>

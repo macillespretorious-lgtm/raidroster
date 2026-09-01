@@ -368,6 +368,12 @@ function fetch_structure($pdo, $templateId) {
             'noteEnabled' => (bool)$sec['note_enabled'],
             'noteText' => $sec['note_text'],
             'mrtExportEnabled' => (bool)$sec['mrt_export_enabled'],
+            // Starting Roster and Raid Admin are required on every raid -- set directly in the
+            // DB (see MEMORY/live migration, no admin-facing "make static" control exists), not
+            // derived from title/kind since both are freely admin-editable and can't be trusted
+            // to keep meaning "the static one". delete_section below is the actual enforcement;
+            // this just lets the client hide the delete affordance instead of offering a 400.
+            'locked' => (bool)$sec['locked'],
         ];
     }
 
@@ -564,7 +570,10 @@ if ($action === 'delete_tab') {
     $template   = fetch_template($pdo, $tenant['id'], $templateId);
     if (!$template) fail(404, 'Template not found');
     if ($kind === '') fail(400, 'Invalid tab');
-    $stmt = $pdo->prepare('DELETE FROM raid_template_sections WHERE template_id = ? AND kind = ?');
+    // Starting Roster and Raid Admin share their tab's kind value with ordinary boss sections
+    // (kind is just the tab-grouping label, not a section type) -- excluding locked rows here
+    // means wiping a tab never takes the two required sections down with it.
+    $stmt = $pdo->prepare('DELETE FROM raid_template_sections WHERE template_id = ? AND kind = ? AND locked = 0');
     $stmt->execute([$templateId, $kind]);
     // Not FK-linked to sections (only by template_id+kind), so it needs its own cleanup;
     // this cascades to raid_template_export_pages via fk_export_page_tab.
@@ -620,6 +629,7 @@ if ($action === 'paint_table') {
 if ($action === 'delete_section') {
     $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$sec) fail(404, 'Section not found');
+    if ($sec['locked']) fail(400, 'This section is required on every raid and can\'t be deleted.');
     $stmt = $pdo->prepare('DELETE FROM raid_template_sections WHERE id = ?');
     $stmt->execute([$sec['id']]);
     respond_structure($pdo, $sec['template_id']);
@@ -701,6 +711,19 @@ function resolve_count_categories($body) {
     return implode(',', $picked);
 }
 
+// cells-save.php's bench_import (the Raid-Helper "Bench"/"Tentative" import target) looks up
+// a raid's Benched table with a bare `ORDER BY rt.id LIMIT 1` -- it assumes exactly one exists.
+// A second Benched table wouldn't error, it would just silently become unreachable via import,
+// so this is enforced at creation time rather than left as an unstated assumption.
+function template_has_benched_table($pdo, $guildId, $templateId, $excludeTableId = null) {
+    $stmt = $pdo->prepare("SELECT id FROM raid_template_tables WHERE kind = 'benched'" . ($excludeTableId ? ' AND id != ?' : ''));
+    $excludeTableId ? $stmt->execute([$excludeTableId]) : $stmt->execute();
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+        if (resolve_table_templateId($pdo, $guildId, (int)$id) === $templateId) return true;
+    }
+    return false;
+}
+
 if ($action === 'add_table') {
     $groupId = (int)($body['groupId'] ?? 0);
     $kind = in_array($body['kind'] ?? 'standard', ['standard', 'benched', 'swaps', 'counter'], true) ? $body['kind'] : 'standard';
@@ -708,6 +731,9 @@ if ($action === 'add_table') {
     if ($groupId) {
         $grp = fetch_group_owned($pdo, $tenant['id'], $groupId);
         if (!$grp) fail(404, 'Group not found');
+        if ($kind === 'benched' && template_has_benched_table($pdo, $tenant['id'], $grp['template_id'])) {
+            fail(400, 'This template already has a Benched table.');
+        }
         $title = substr(trim($body['title'] ?? ''), 0, 100);
         if (!$title) fail(400, 'Title is required');
         $order = next_sort_order($pdo, 'raid_template_tables', 'parent_group_id', $grp['id']);
@@ -722,6 +748,9 @@ if ($action === 'add_table') {
 
     $sec = fetch_section_owned($pdo, $tenant['id'], (int)($body['sectionId'] ?? 0));
     if (!$sec) fail(404, 'Section not found');
+    if ($kind === 'benched' && template_has_benched_table($pdo, $tenant['id'], $sec['template_id'])) {
+        fail(400, 'This template already has a Benched table.');
+    }
     // Top-level tables are numbered automatically in the UI, so a title is optional here.
     $title = substr(trim($body['title'] ?? ''), 0, 100);
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
@@ -793,6 +822,7 @@ if ($action === 'update_table') {
 if ($action === 'delete_table') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
+    if ($tb['kind'] === 'benched') fail(400, 'The Benched table is always enabled and can\'t be removed.');
     $templateId = $tb['template_id'];
     $stmt = $pdo->prepare('SELECT id, title FROM raid_template_tables WHERE swap_before_table_id = ? OR swap_after_table_id = ?');
     $stmt->execute([$tb['id'], $tb['id']]);
@@ -833,6 +863,7 @@ function backfill_duplicate_links($pdo, array $tableIdMap, array $swapLinks, arr
 if ($action === 'duplicate_table') {
     $tb = fetch_table_owned($pdo, $tenant['id'], (int)($body['id'] ?? 0));
     if (!$tb) fail(404, 'Table not found');
+    if ($tb['kind'] === 'benched') fail(400, 'Only one Benched table is allowed per template.');
 
     $tableIdMap = []; $swapLinks = []; $countLinks = [];
     clone_template_table_recursive($pdo, $tb, $tb['section_id'], $tb['parent_group_id'], $tableIdMap, $swapLinks, $countLinks);
@@ -860,6 +891,10 @@ if ($action === 'duplicate_section') {
     $stmtT = $pdo->prepare('SELECT * FROM raid_template_tables WHERE section_id = ? ORDER BY sort_order, id');
     $stmtT->execute([$sec['id']]);
     foreach ($stmtT->fetchAll(PDO::FETCH_ASSOC) as $childTb) {
+        // Skip cloning a Benched table along with its section -- only one is allowed per
+        // template (see template_has_benched_table), so duplicating Starting Roster or Raid
+        // Admin still duplicates everything else, just not the one-per-template Bench.
+        if ($childTb['kind'] === 'benched') continue;
         clone_template_table_recursive($pdo, $childTb, $newSectionId, null, $tableIdMap, $swapLinks, $countLinks);
     }
     backfill_duplicate_links($pdo, $tableIdMap, $swapLinks, $countLinks);
