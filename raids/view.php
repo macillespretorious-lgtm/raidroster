@@ -2026,9 +2026,16 @@ function benchCall(body) {
 
 function addBenchImportRow(idx) {
   const row = importRows[idx];
-  if (!row || row.added) return;
+  // row.pending guards against a fast double-click firing two bench_import calls for the
+  // same row before the first's response lands -- the first would succeed and seat the
+  // player, the second would then correctly reject as a duplicate, surfacing a scary
+  // "already assigned" alert right after the add had actually worked.
+  if (!row || row.added || row.pending) return;
+  row.pending = true;
+  renderImportRows();
   benchCall(importItemFor(row)).then(ok => {
-    if (!ok) return;
+    row.pending = false;
+    if (!ok) { renderImportRows(); return; }
     row.added = true;
     renderImportRows();
   });
@@ -2051,10 +2058,10 @@ function importRowHtml(row, idx) {
   const roleTitle = row.added ? esc(row.role || '') : `${esc(row.role || '')} (suggested — click to change)`;
   const roleIcon = row.role ? `<span class="role-icon-sm${roleClickable} ${roleKey(row.role)}" title="${roleTitle}" ${row.added ? '' : `onclick="cycleImportRole(${idx})"`}></span>` : '';
   const benchBadge = row.isBench ? `<span class="bench-badge" title="${esc(row.rawClass)} signup — adds to the Benched table, not the pool">${esc(row.rawClass)}</span>` : '';
-  const btnLabel = row.isBench ? 'Add to Bench' : (row.matched ? 'Add' : 'Add as PUG');
+  const btnLabel = row.pending ? 'Adding…' : (row.isBench ? 'Add to Bench' : (row.matched ? 'Add' : 'Add as PUG'));
   return `<div class="import-row ${state}">
     <div>${roleIcon}<span class="name">${esc(row.name)}</span> ${benchBadge}<span class="detail">${detail}</span></div>
-    <div class="status">${status}${row.added ? '' : `<button type="button" data-idx="${idx}">${btnLabel}</button>`}</div>
+    <div class="status">${status}${row.added ? '' : `<button type="button" data-idx="${idx}" ${row.pending ? 'disabled' : ''}>${btnLabel}</button>`}</div>
   </div>`;
 }
 
