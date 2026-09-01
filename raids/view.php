@@ -261,7 +261,7 @@ function fmtTime($t) {
     }
     .section-note { margin: 6px 18px 0; font-size: 12px; font-weight: 700; color: #f0c04a; }
     .flex-badge {
-      display: inline-block; padding: 0 4px; margin-left: 4px; border-radius: 3px;
+      display: inline-block; padding: 0 4px; margin-left: auto; border-radius: 3px;
       font-size: 9px; font-weight: 800; background: #17a2b8; color: #fff;
       border: 1px solid rgba(0,0,0,0.35); letter-spacing: 0.02em; vertical-align: middle;
       line-height: 14px; flex-shrink: 0;
@@ -591,7 +591,7 @@ function fmtTime($t) {
       <button type="button" id="pugAddBtn">Add</button>
     </div>
     <div class="pool-list" id="poolList"></div>
-    <p class="pool-hint">Drag a toon onto a slot to assign it. Alt+Click an assigned toon to see its alts. Ctrl/Cmd+Click a pool toon to stamp it repeatedly onto empty slots.</p>
+    <p class="pool-hint">Drag a toon onto a slot to assign it. Alt+Click an assigned toon to see its alts. Ctrl/Cmd+Click a pool toon to stamp it repeatedly onto empty slots. A <span class="flex-badge" style="margin-left:0;">FLEX</span> badge means that player signed up as their faction's flex class (Shaman/Paladin) — they're willing to play any of their toons, so feel free to Alt+Click and swap them onto whichever one you actually need.</p>
   </div>
   <button type="button" id="poolReopenTab" title="Open the Available Toons sidebar">&laquo; Available Toons</button>
   <?php endif; ?>
