@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/roles.php';
 require_once __DIR__ . '/../includes/raid_structure.php';
+require_once __DIR__ . '/../includes/raid_bosses.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -44,6 +45,7 @@ function raid_to_json($r) {
         'status'          => $r['status'],
         'createdVia'      => $r['created_via'],
         'size'            => $r['size'],
+        'zone'            => $r['zone'],
     ];
 }
 
@@ -62,6 +64,8 @@ if ($action === 'save') {
     $desc   = isset($body['description']) ? substr(trim($body['description']), 0, 65000) : null;
     $tmplId = isset($body['templateId']) && $body['templateId'] ? (int)$body['templateId'] : null;
     $size   = ($body['size'] ?? '40') === '20' ? '20' : '40';
+    $zone   = $body['zone'] ?? null;
+    if ($zone !== null && !array_key_exists($zone, RAID_ZONE_LABELS)) $zone = null;
 
     if ($start !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) $start = null;
     if ($desc === '') $desc = null;
@@ -73,12 +77,12 @@ if ($action === 'save') {
     }
 
     if ($tmplId !== null) {
-        // The template's own stored size is authoritative once a template is picked -- never
-        // trust the client's separately-sent size for the numCols math below.
-        $stmt = $pdo->prepare('SELECT id, size FROM raid_templates WHERE id = ? AND guild_id = ?');
+        // The template's own stored size/zone are authoritative once a template is picked --
+        // never trust the client's separately-sent values for these.
+        $stmt = $pdo->prepare('SELECT id, size, zone FROM raid_templates WHERE id = ? AND guild_id = ?');
         $stmt->execute([$tmplId, $tenant['id']]);
         $tpl = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$tpl) { $tmplId = null; } else { $size = $tpl['size']; }
+        if (!$tpl) { $tmplId = null; } else { $size = $tpl['size']; $zone = $tpl['zone']; }
     }
 
     if ($id) {
@@ -88,14 +92,14 @@ if ($action === 'save') {
             echo json_encode(['error' => 'Raid not found']);
             exit;
         }
-        $stmt = $pdo->prepare('UPDATE raids SET name = ?, start_time = ?, duration_minutes = ?, description = ? WHERE id = ? AND guild_id = ?');
-        $stmt->execute([$name, $start, $dur, $desc, $id, $tenant['id']]);
+        $stmt = $pdo->prepare('UPDATE raids SET name = ?, start_time = ?, duration_minutes = ?, description = ?, zone = ? WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$name, $start, $dur, $desc, $zone, $id, $tenant['id']]);
     } else {
         $stmt = $pdo->prepare(
-            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size)
-             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\', ?)'
+            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size, zone)
+             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\', ?, ?)'
         );
-        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc, $size]);
+        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc, $size, $zone]);
         $id = (int)$pdo->lastInsertId();
         if ($tmplId) {
             copy_template_structure_to_raid($pdo, $tmplId, $id);

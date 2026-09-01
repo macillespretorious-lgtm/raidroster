@@ -28,7 +28,7 @@ $endStr   = $rangeEnd->format('Y-m-d');
 
 // Lazy auto-population: for each date in range whose day-of-week has an active
 // recurring slot and has no existing raid row at all, insert one from the template.
-$stmt = $pdo->prepare('SELECT rs.day_of_week, rs.template_id, rs.start_time, rs.duration_minutes, t.name, t.description, t.size
+$stmt = $pdo->prepare('SELECT rs.day_of_week, rs.template_id, rs.start_time, rs.duration_minutes, t.name, t.description, t.size, t.zone
                         FROM raid_recurring_slots rs
                         JOIN raid_templates t ON t.id = rs.template_id
                         WHERE rs.guild_id = ? AND rs.active = 1');
@@ -44,8 +44,8 @@ if ($slotsByDow) {
     $existingDates = array_flip($stmt->fetchAll(PDO::FETCH_COLUMN));
 
     $insAuto = $pdo->prepare(
-        'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size)
-         VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'auto\', ?)'
+        'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size, zone)
+         VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'auto\', ?, ?)'
     );
 
     $cursor = clone $rangeStart;
@@ -63,6 +63,7 @@ if ($slotsByDow) {
                 $s['name'],
                 $s['description'],
                 $s['size'],
+                $s['zone'],
             ]);
             $newRaidId = (int)$pdo->lastInsertId();
             copy_template_structure_to_raid($pdo, $s['template_id'], $newRaidId);
@@ -87,10 +88,11 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'status'          => $r['status'],
         'createdVia'      => $r['created_via'],
         'size'            => $r['size'],
+        'zone'            => $r['zone'],
     ];
 }
 
-$stmt = $pdo->prepare('SELECT id, name, description, size FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, size, zone FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $templates = array_map(function ($t) {
     return [
@@ -98,6 +100,7 @@ $templates = array_map(function ($t) {
         'name'        => $t['name'],
         'description' => $t['description'],
         'size'        => $t['size'],
+        'zone'        => $t['zone'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
@@ -249,6 +252,21 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         </div>
 
         <div class="form-group">
+          <label for="raidZone">Raid zone</label>
+          <select id="raidZone">
+            <option value="">&mdash; none &mdash;</option>
+            <option value="zg">Zul'Gurub</option>
+            <option value="aq20">Ruins of Ahn'Qiraj</option>
+            <option value="mc">Molten Core</option>
+            <option value="bwl">Blackwing Lair</option>
+            <option value="aq40">Temple of Ahn'Qiraj</option>
+            <option value="naxx">Naxxramas</option>
+            <option value="bwl_mc">BWL + MC</option>
+            <option value="world_tour">World Tour (BWL + MC + AQ40)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
           <label for="raidName">Name</label>
           <input type="text" id="raidName" placeholder="Raid name">
         </div>
@@ -358,6 +376,7 @@ function applyTemplate(id) {
   if (!t) return;
   document.getElementById('raidName').value = t.name;
   document.getElementById('raidDesc').value = t.description || '';
+  document.getElementById('raidZone').value = t.zone || '';
 }
 
 function clearModalMsg() { document.getElementById('modalMessage').classList.add('hidden'); }
@@ -390,6 +409,7 @@ function openNewRaid(date) {
     document.getElementById('raidTime').value = '';
     document.getElementById('raidDuration').value = '';
     document.getElementById('raidDesc').value = '';
+    document.getElementById('raidZone').value = '';
   }
   clearModalMsg();
   openModal();
@@ -411,6 +431,7 @@ function openRaid(id) {
   document.getElementById('raidTime').value = (raid.startTime || '').slice(0, 5);
   document.getElementById('raidDuration').value = raid.durationMinutes || '';
   document.getElementById('raidDesc').value = raid.description || '';
+  document.getElementById('raidZone').value = raid.zone || '';
   const cancelled = raid.status === 'cancelled';
   document.getElementById('cancelledNote').classList.toggle('hidden', !cancelled);
   document.getElementById('modalSaveBtn').classList.toggle('hidden', cancelled);
@@ -456,6 +477,7 @@ document.getElementById('modalSaveBtn').addEventListener('click', function () {
     description: document.getElementById('raidDesc').value.trim() || null,
     templateId: (!modalRaidId && currentMode() === 'template' && document.getElementById('templateSelect').value) ? parseInt(document.getElementById('templateSelect').value, 10) : null,
     size: document.getElementById('raidSize').value,
+    zone: document.getElementById('raidZone').value || null,
   };
   persist(payload).then(d => { upsertLocal(d.raid); renderCalendar(); closeModal(); }).catch(e => setModalMsg(e.message));
 });

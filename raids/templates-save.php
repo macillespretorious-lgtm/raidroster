@@ -32,6 +32,7 @@ $action = is_array($body) ? ($body['action'] ?? '') : '';
 $pdo    = db_connect();
 require_once __DIR__ . '/../includes/template_clone.php';
 require_once __DIR__ . '/../includes/raid_structure.php';
+require_once __DIR__ . '/../includes/raid_bosses.php';
 
 function template_to_json($t) {
     return [
@@ -39,6 +40,7 @@ function template_to_json($t) {
         'name'        => $t['name'],
         'description' => $t['description'],
         'size'        => $t['size'],
+        'zone'        => $t['zone'],
     ];
 }
 
@@ -47,6 +49,8 @@ if ($action === 'save') {
     $name   = substr(trim($body['name'] ?? ''), 0, 100);
     $desc   = isset($body['description']) ? substr(trim($body['description']), 0, 65000) : null;
     $size   = ($body['size'] ?? '40') === '20' ? '20' : '40';
+    $zone   = $body['zone'] ?? null;
+    if ($zone !== null && !array_key_exists($zone, RAID_ZONE_LABELS)) $zone = null;
 
     if ($desc === '') $desc = null;
 
@@ -64,11 +68,11 @@ if ($action === 'save') {
             echo json_encode(['error' => 'Template not found']);
             exit;
         }
-        $stmt = $pdo->prepare('UPDATE raid_templates SET name = ?, description = ?, size = ? WHERE id = ? AND guild_id = ?');
-        $stmt->execute([$name, $desc, $size, $id, $tenant['id']]);
+        $stmt = $pdo->prepare('UPDATE raid_templates SET name = ?, description = ?, size = ?, zone = ? WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$name, $desc, $size, $zone, $id, $tenant['id']]);
     } else {
-        $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, size) VALUES (?, ?, ?, ?)');
-        $stmt->execute([$tenant['id'], $name, $desc, $size]);
+        $stmt = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, size, zone) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$tenant['id'], $name, $desc, $size, $zone]);
         $id = (int)$pdo->lastInsertId();
         seed_starting_template_roster($pdo, $id, $size);
     }

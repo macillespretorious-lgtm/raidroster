@@ -15,7 +15,7 @@ $role = require_role($tenant, 'admin');
 $user = auth_user();
 $pdo  = db_connect();
 
-$stmt = $pdo->prepare('SELECT id, name, description, size FROM raid_templates WHERE guild_id = ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, size, zone FROM raid_templates WHERE guild_id = ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $raidTemplates = array_map(function ($t) {
     return [
@@ -23,13 +23,14 @@ $raidTemplates = array_map(function ($t) {
         'name'        => $t['name'],
         'description' => $t['description'],
         'size'        => $t['size'],
+        'zone'        => $t['zone'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
 // is_starter templates are explicitly public (any tenant may read/clone them) -- excluding this
 // tenant's own guild_id here is just to hide the "clone your own template" affordance, not a
 // security boundary (clone_starter re-checks is_starter server-side regardless).
-$stmt = $pdo->prepare('SELECT id, name, description, size FROM raid_templates WHERE is_starter = 1 AND guild_id != ? ORDER BY name');
+$stmt = $pdo->prepare('SELECT id, name, description, size, zone FROM raid_templates WHERE is_starter = 1 AND guild_id != ? ORDER BY name');
 $stmt->execute([$tenant['id']]);
 $starterTemplates = array_map(function ($t) {
     return [
@@ -37,6 +38,7 @@ $starterTemplates = array_map(function ($t) {
         'name'        => $t['name'],
         'description' => $t['description'],
         'size'        => $t['size'],
+        'zone'        => $t['zone'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
@@ -133,9 +135,23 @@ function h($s) { return htmlspecialchars($s ?? ''); }
             </select>
           </div>
           <div class="form-group">
-            <label for="tplDesc">Description</label>
-            <input type="text" id="tplDesc" placeholder="Optional notes">
+            <label for="tplZone">Raid zone</label>
+            <select id="tplZone">
+              <option value="">&mdash; none &mdash;</option>
+              <option value="zg">Zul'Gurub</option>
+              <option value="aq20">Ruins of Ahn'Qiraj</option>
+              <option value="mc">Molten Core</option>
+              <option value="bwl">Blackwing Lair</option>
+              <option value="aq40">Temple of Ahn'Qiraj</option>
+              <option value="naxx">Naxxramas</option>
+              <option value="bwl_mc">BWL + MC</option>
+              <option value="world_tour">World Tour (BWL + MC + AQ40)</option>
+            </select>
           </div>
+        </div>
+        <div class="form-group">
+          <label for="tplDesc">Description</label>
+          <input type="text" id="tplDesc" placeholder="Optional notes">
         </div>
         <div class="form-buttons" style="display:flex;gap:8px;margin-top:10px;">
           <button class="btn" id="tplSaveBtn">Save template</button>
@@ -153,12 +169,18 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     const starterTemplates = <?= json_encode($starterTemplates) ?>;
     let editingTplId = null;
 
+    const ZONE_LABELS = {
+      zg: "Zul'Gurub", aq20: "Ruins of Ahn'Qiraj", mc: 'Molten Core', bwl: 'Blackwing Lair',
+      aq40: "Temple of Ahn'Qiraj", naxx: 'Naxxramas', bwl_mc: 'BWL + MC',
+      world_tour: 'World Tour (BWL + MC + AQ40)',
+    };
+
     function renderStarterList() {
       const el = document.getElementById('starterList');
       const section = document.getElementById('starterSection');
       if (!starterTemplates.length) { section.classList.add('hidden'); return; }
       el.innerHTML = starterTemplates.map(t => `<div class="card row">
-        <div class="name">${escH(t.name)} <span class="tpl-meta">(${t.size}-man)</span>${t.description ? ' <span class="tpl-meta">&mdash; ' + escH(t.description) + '</span>' : ''}</div>
+        <div class="name">${escH(t.name)} <span class="tpl-meta">(${t.size}-man${t.zone ? ', ' + escH(ZONE_LABELS[t.zone] || t.zone) : ''})</span>${t.description ? ' <span class="tpl-meta">&mdash; ' + escH(t.description) + '</span>' : ''}</div>
         <div class="tpl-actions">
           <button class="btn" style="padding:5px 12px;font-size:12px;" onclick="useStarter(${t.id})">Use this</button>
         </div>
@@ -184,6 +206,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       if (!templates.length) { el.innerHTML = '<p class="empty">No templates yet — add one below.</p>'; return; }
       el.innerHTML = templates.map(t => {
         const meta = [t.size + '-man'];
+        if (t.zone) meta.push(ZONE_LABELS[t.zone] || t.zone);
         return `<div class="card row tpl-item">
           <div class="name" onclick="editTemplate(${t.id})">${escH(t.name)}${meta.length ? ' <span class="tpl-meta">(' + meta.join(', ') + ')</span>' : ''}</div>
           <div class="tpl-actions">
@@ -201,6 +224,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       editingTplId = id;
       document.getElementById('tplName').value = t.name;
       document.getElementById('tplSize').value = t.size;
+      document.getElementById('tplZone').value = t.zone || '';
       document.getElementById('tplDesc').value = t.description || '';
       document.getElementById('tplCancelEditBtn').classList.remove('hidden');
       const structBtn = document.getElementById('tplEditStructureBtn');
@@ -212,6 +236,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
       editingTplId = null;
       document.getElementById('tplName').value = '';
       document.getElementById('tplSize').value = '40';
+      document.getElementById('tplZone').value = '';
       document.getElementById('tplDesc').value = '';
       document.getElementById('tplCancelEditBtn').classList.add('hidden');
       document.getElementById('tplEditStructureBtn').classList.add('hidden');
@@ -226,6 +251,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         id: editingTplId,
         name,
         size: document.getElementById('tplSize').value,
+        zone: document.getElementById('tplZone').value || null,
         description: document.getElementById('tplDesc').value.trim() || null,
       };
       fetch(TPL_SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })

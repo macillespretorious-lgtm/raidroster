@@ -11,8 +11,8 @@ function clone_template_to_guild($pdo, $sourceTemplateId, $targetGuildId, $newNa
     $src = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$src) return null;
 
-    $ins = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, size) VALUES (?, ?, ?, ?)');
-    $ins->execute([$targetGuildId, $newName, $src['description'], $src['size']]);
+    $ins = $pdo->prepare('INSERT INTO raid_templates (guild_id, name, description, size, zone) VALUES (?, ?, ?, ?, ?)');
+    $ins->execute([$targetGuildId, $newName, $src['description'], $src['size'], $src['zone']]);
     $newTemplateId = (int)$pdo->lastInsertId();
 
     // Swaps tables link to sibling *template* tables by id, which only exist once every table

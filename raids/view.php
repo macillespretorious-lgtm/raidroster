@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/roles.php';
 require_once __DIR__ . '/../includes/nav.php';
 require_once __DIR__ . '/../includes/raid_fetch.php';
 require_once __DIR__ . '/../includes/class_roles.php';
+require_once __DIR__ . '/../includes/raid_bosses.php';
 
 $slug   = $_GET['slug'] ?? '';
 $tenant = guild_by_slug($slug);
@@ -596,6 +597,7 @@ const IS_ADMIN = <?= json_encode($isAdmin) ?>;
 const TEMPLATE_ID = <?= json_encode($templateId) ?>;
 const PUSH_TEMPLATE_URL = <?= json_encode('/raids/push-template.php?slug=' . $slug) ?>;
 const RAID_ID = <?= json_encode($raidId) ?>;
+const RAID_BOSSES = <?= json_encode(raid_zone_bosses($raid['zone'] ?? null)) ?>;
 const USER_ID = <?= json_encode($user['id']) ?>;
 let sections = groupSectionsByKind(<?= json_encode($sections) ?>);
 const roster = <?= json_encode($roster) ?>;
@@ -1347,6 +1349,18 @@ function showSwapNotePopup(td) {
   const bossCell = tb.cells[row.id + '_-5'];
 
   const currentWhen = noteCell ? (noteCell.textContent || '') : '';
+  const bossValue = bossCell ? (bossCell.textContent || '') : '';
+
+  // RAID_BOSSES is derived from the raid's zone (set when the raid was created); raids created
+  // before the zone field existed, or with no zone chosen, fall back to a free-text Boss field.
+  const bossOptions = RAID_BOSSES.slice();
+  if (bossValue && !bossOptions.includes(bossValue)) bossOptions.unshift(bossValue);
+  const bossFieldHtml = bossOptions.length
+    ? `<select class="swap-boss-input">
+         <option value=""${bossValue === '' ? ' selected' : ''}>&mdash;</option>
+         ${bossOptions.map(b => `<option value="${esc(b)}"${b === bossValue ? ' selected' : ''}>${esc(b)}</option>`).join('')}
+       </select>`
+    : `<input type="text" class="swap-boss-input" maxlength="60" value="${esc(bossValue)}">`;
 
   const popup = document.createElement('div');
   popup.className = 'swap-note-popup';
@@ -1358,7 +1372,7 @@ function showSwapNotePopup(td) {
       <option value="After"${currentWhen === 'After' ? ' selected' : ''}>After</option>
     </select>
     <label>Boss</label>
-    <input type="text" class="swap-boss-input" maxlength="60" value="${esc(bossCell ? (bossCell.textContent || '') : '')}">
+    ${bossFieldHtml}
     <div class="swap-note-actions">
       <button type="button" class="swap-note-cancel">Cancel</button>
       <button type="button" class="swap-note-save">Save</button>
