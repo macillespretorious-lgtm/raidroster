@@ -773,8 +773,11 @@ if ($action === 'add_table') {
     if ($swapDefault && template_has_default_swaps_table($pdo, $tenant['id'], $sec['template_id'])) {
         fail(400, 'This template already has a Default Swaps table.');
     }
-    // Top-level tables are numbered automatically in the UI, so a title is optional here.
+    // Top-level tables are numbered automatically in the UI, so a title is optional here --
+    // except a Default Swaps table, which has no manual naming step at all, so it needs a
+    // sensible header supplied automatically or it renders with no title bar.
     $title = substr(trim($body['title'] ?? ''), 0, 100);
+    if ($swapDefault && !$title) $title = 'Required Swaps';
     $order = next_sort_order($pdo, 'raid_template_tables', 'section_id', $sec['id']);
     [$beforeId, $afterId] = ($kind === 'swaps' && !$swapDefault) ? resolve_swap_tables($pdo, $tenant['id'], $sec['template_id'], $body) : [null, null];
     $countSourceId = $kind === 'counter' ? resolve_count_source_table($pdo, $tenant['id'], $sec['template_id'], $body) : null;
