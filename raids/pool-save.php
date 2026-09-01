@@ -126,9 +126,13 @@ function add_pool_item($pdo, $tenant, $raidId, $toonKind, $toonId, $pugName, $pu
     $stmt->execute([$raidId]);
     $nextOrder = (int)$stmt->fetchColumn();
 
+    // A re-import (or a manual re-add) of a toon already in the pool is otherwise a total
+    // no-op, which used to silently swallow a freshly-detected is_flex flag on a pool row
+    // created before this feature (or before a player's signup carried it). Only ever
+    // raise the flag on conflict, never clear one an earlier import already set.
     $stmt = $pdo->prepare(
         'INSERT INTO raid_pool (raid_id, toon_kind, toon_id, pug_name, pug_class, role, sort_order, is_flex) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE id = id'
+         ON DUPLICATE KEY UPDATE is_flex = GREATEST(is_flex, VALUES(is_flex))'
     );
     $stmt->execute([$raidId, $toonKind, $toonId, $pugName, $pugClass, $role, $nextOrder, $isFlex ? 1 : 0]);
     return null;
