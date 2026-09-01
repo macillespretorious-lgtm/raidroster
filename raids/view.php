@@ -77,7 +77,7 @@ if ($canManage) {
     ], $mains);
 
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.toon_kind, p.toon_id, p.pug_name, p.pug_class, p.role, p.sort_order,
+        'SELECT p.id, p.toon_kind, p.toon_id, p.pug_name, p.pug_class, p.role, p.sort_order, p.is_flex,
                 COALESCE(t.main_name, a.name) AS toon_name,
                 COALESCE(t.class, a.class) AS toon_class,
                 COALESCE(t.main_spec, a.main_spec) AS toon_spec,
@@ -103,6 +103,7 @@ if ($canManage) {
             'role' => $p['role'] ?: default_role_for_class($class, $spec),
             'roleConfirmed' => $p['role'] !== null,
             'sortOrder' => (int)$p['sort_order'],
+            'isFlex' => (bool)$p['is_flex'],
         ];
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
