@@ -2100,7 +2100,14 @@ function fetchImportSignups() {
   fetch(IMPORT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raidId: RAID_ID, action: 'fetch', eventUrl: url }) })
     .then(r => r.json()).then(d => {
       if (!d.success) { statusEl.textContent = d.error || 'Import failed'; return; }
-      importRows = d.rows.map(r => ({ ...r, added: false }));
+      // Re-fetching an event already imported earlier would otherwise re-offer everyone who's
+      // since landed on the Bench/Starting Roster -- pre-mark those as added (server also
+      // rejects the duplicate, but this avoids a wall of "already assigned" alerts on Add All).
+      const rosterOccupants = rosterOccupantPlayerIds();
+      importRows = d.rows.map(r => {
+        const pid = r.matched ? resolvePlayerId(r.toonKind, r.toonId) : null;
+        return { ...r, added: r.isBench && pid !== null && rosterOccupants.has(pid) };
+      });
       const matched = importRows.filter(r => r.matched).length;
       statusEl.textContent = importRows.length
         ? `${importRows.length} signup(s) found — ${matched} matched, ${importRows.length - matched} unmatched.`

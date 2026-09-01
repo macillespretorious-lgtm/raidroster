@@ -379,6 +379,18 @@ if ($action === 'bench_import') {
     }
     $tableId = (int)$tableId;
 
+    // Unlike the pool (ON DUPLICATE KEY UPDATE on a unique key), a benched slot is a real
+    // raid_cells row with no identity key of its own -- without this check, re-importing the
+    // same Raid-Helper event (or a signup for someone already elsewhere in the roster pool)
+    // would just find another empty cell and duplicate them onto a second bench slot.
+    $resolved = resolve_toon_fields($pdo, $tenant['id'], $body['toonKind'] ?? null, $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null);
+    $dup = duplicate_player_violation($pdo, $tableId, $resolved['toon_kind'], $resolved['toon_id'], []);
+    if ($dup) {
+        http_response_code(422);
+        echo json_encode(['error' => $dup]);
+        exit;
+    }
+
     $stmtEmpty = $pdo->prepare("SELECT id FROM raid_cells WHERE table_id = ? AND toon_kind = 'main' AND toon_id IS NULL ORDER BY row_id LIMIT 1");
     $stmtEmpty->execute([$tableId]);
     $cellId = $stmtEmpty->fetchColumn();
@@ -394,7 +406,6 @@ if ($action === 'bench_import') {
     }
     $cellId = (int)$cellId;
 
-    $resolved = resolve_toon_fields($pdo, $tenant['id'], $body['toonKind'] ?? null, $body['toonId'] ?? null, $body['pugName'] ?? null, $body['pugClass'] ?? null);
     $toonClass = toon_class_for($pdo, $tenant['id'], $resolved['toon_kind'], $resolved['toon_id'], $resolved['pug_class']);
     $role = array_key_exists('role', $body) ? $body['role'] : null;
     if (!valid_role_for_class($toonClass, $role)) $role = null;
