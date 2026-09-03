@@ -51,10 +51,14 @@ function slugify($name) {
     return $slug !== '' ? $slug : 'guild';
 }
 
+// Top-level routes .htaccess reserves outside the ^([a-z0-9-]+)/?$ guild catch-all
+// (e.g. pugs.php, the public cross-guild PUG calendar) must never be claimable as a slug.
+const RESERVED_SLUGS = ['pugs'];
+
 function unique_slug($base) {
     $slug = $base;
     $i = 2;
-    while (guild_by_slug($slug)) {
+    while (guild_by_slug($slug) || in_array($slug, RESERVED_SLUGS, true)) {
         $slug = $base . '-' . $i;
         $i++;
     }

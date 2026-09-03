@@ -46,6 +46,8 @@ function raid_to_json($r) {
         'createdVia'      => $r['created_via'],
         'size'            => $r['size'],
         'zone'            => $r['zone'],
+        'advertisePug'    => (bool)$r['advertise_pug'],
+        'pugSignupUrl'    => $r['pug_signup_url'],
     ];
 }
 
@@ -66,6 +68,13 @@ if ($action === 'save') {
     $size   = ($body['size'] ?? '40') === '20' ? '20' : '40';
     $zone   = $body['zone'] ?? null;
     if ($zone !== null && !array_key_exists($zone, RAID_ZONE_LABELS)) $zone = null;
+
+    // Advertising to PUGs is per-raid (not a per-guild toggle) so a guild can opt individual
+    // raids into the shared cross-guild calendar (pugs.php) while keeping others private.
+    $advertisePug = !empty($body['advertisePug']);
+    $pugSignupUrl = isset($body['pugSignupUrl']) ? trim((string)$body['pugSignupUrl']) : '';
+    $pugSignupUrl = $pugSignupUrl !== '' ? substr($pugSignupUrl, 0, 500) : null;
+    if (!$advertisePug) $pugSignupUrl = null;
 
     if ($start !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) $start = null;
     if ($desc === '') $desc = null;
@@ -92,14 +101,14 @@ if ($action === 'save') {
             echo json_encode(['error' => 'Raid not found']);
             exit;
         }
-        $stmt = $pdo->prepare('UPDATE raids SET name = ?, start_time = ?, duration_minutes = ?, description = ?, zone = ? WHERE id = ? AND guild_id = ?');
-        $stmt->execute([$name, $start, $dur, $desc, $zone, $id, $tenant['id']]);
+        $stmt = $pdo->prepare('UPDATE raids SET name = ?, start_time = ?, duration_minutes = ?, description = ?, zone = ?, advertise_pug = ?, pug_signup_url = ? WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$name, $start, $dur, $desc, $zone, $advertisePug ? 1 : 0, $pugSignupUrl, $id, $tenant['id']]);
     } else {
         $stmt = $pdo->prepare(
-            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size, zone)
-             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\', ?, ?)'
+            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size, zone, advertise_pug, pug_signup_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\', ?, ?, ?, ?)'
         );
-        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc, $size, $zone]);
+        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc, $size, $zone, $advertisePug ? 1 : 0, $pugSignupUrl]);
         $id = (int)$pdo->lastInsertId();
         if ($tmplId) {
             copy_template_structure_to_raid($pdo, $tmplId, $id);

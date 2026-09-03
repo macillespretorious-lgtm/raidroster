@@ -20,4 +20,8 @@ RewriteRule ^([a-z0-9-]+)/design/?$ design.php?slug=$1 [L,QSA]
 
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^pugs/?$ pugs.php [L,QSA]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^([a-z0-9-]+)/?$ guild.php?slug=$1 [L,QSA]

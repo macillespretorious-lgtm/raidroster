@@ -89,6 +89,8 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'createdVia'      => $r['created_via'],
         'size'            => $r['size'],
         'zone'            => $r['zone'],
+        'advertisePug'    => (bool)$r['advertise_pug'],
+        'pugSignupUrl'    => $r['pug_signup_url'],
     ];
 }
 
@@ -158,6 +160,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     }
     .cal-chip.cancelled { background: rgba(255,255,255,0.05); color: #55607a; text-decoration: line-through; }
     .cal-chip.auto { border-left: 2px solid rgba(88,101,242,0.5); }
+    .cal-chip.pug-advertised::after { content: '\1F4E3'; margin-left: 4px; font-size: 9px; vertical-align: middle; }
 
     .week-label { font-size: 11px; color: #55607a; margin-top: 6px; }
 
@@ -180,6 +183,10 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .mode-tab.active { background: rgba(88,101,242,0.15); border-color: rgba(88,101,242,0.4); color: #a3adfa; }
     .form-group { margin-bottom: 12px; display: flex; flex-direction: column; gap: 5px; }
     .form-group label { font-size: 11px; color: #7f8bad; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+    .checkbox-label { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; font-size: 13px; color: #e8ecff; cursor: pointer; }
+    .checkbox-label input { width: 15px; height: 15px; cursor: pointer; }
+    .field-hint { font-size: 11px; color: #7f8bad; line-height: 1.4; }
+    .field-hint a { color: #a3adfa; }
     .form-group input, .form-group select, .form-group textarea {
       padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px;
       background: #0a0f1e; color: #e8ecff; font-size: 13px; font: inherit;
@@ -285,6 +292,15 @@ function h($s) { return htmlspecialchars($s ?? ''); }
           <textarea id="raidDesc" placeholder="Optional notes"></textarea>
         </div>
 
+        <div class="form-group">
+          <label class="checkbox-label"><input type="checkbox" id="raidAdvertisePug"> Advertise to PUGs</label>
+          <p class="field-hint">Lists this raid on the public, cross-guild <a href="/pugs.php" target="_blank" rel="noopener">PUG calendar</a> so players from other guilds can find it. No RaidRoster account needed to view it.</p>
+        </div>
+        <div class="form-group hidden" id="pugSignupUrlGroup">
+          <label for="pugSignupUrl">Raid-Helper signup link</label>
+          <input type="url" id="pugSignupUrl" placeholder="https://raid-helper.dev/event/...">
+        </div>
+
         <div id="cancelledNote" class="cancelled-note hidden">This raid is cancelled. Restore it or leave it as-is.</div>
 
         <div class="form-buttons">
@@ -329,6 +345,7 @@ function renderCalendar() {
         const chipCls = ['cal-chip'];
         if (r.status === 'cancelled') chipCls.push('cancelled');
         if (r.createdVia === 'auto') chipCls.push('auto');
+        if (r.advertisePug) chipCls.push('pug-advertised');
         const label = (r.startTime ? fmtTime(r.startTime) + ' ' : '') + esc(r.name);
         return `<div class="${chipCls.join(' ')}" onclick="event.stopPropagation(); openRaid(${r.id})">${label}</div>`;
       }).join('');
@@ -370,6 +387,9 @@ function setMode(mode) {
 document.querySelectorAll('.mode-tab').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 document.getElementById('templateSelect').addEventListener('change', function () { applyTemplate(this.value); });
 document.getElementById('raidSize').addEventListener('change', function () { setMode(currentMode()); });
+document.getElementById('raidAdvertisePug').addEventListener('change', function () {
+  document.getElementById('pugSignupUrlGroup').classList.toggle('hidden', !this.checked);
+});
 
 function applyTemplate(id) {
   const t = templates.find(x => String(x.id) === String(id));
@@ -411,6 +431,9 @@ function openNewRaid(date) {
     document.getElementById('raidDesc').value = '';
     document.getElementById('raidZone').value = '';
   }
+  document.getElementById('raidAdvertisePug').checked = false;
+  document.getElementById('pugSignupUrl').value = '';
+  document.getElementById('pugSignupUrlGroup').classList.add('hidden');
   clearModalMsg();
   openModal();
 }
@@ -432,6 +455,9 @@ function openRaid(id) {
   document.getElementById('raidDuration').value = raid.durationMinutes || '';
   document.getElementById('raidDesc').value = raid.description || '';
   document.getElementById('raidZone').value = raid.zone || '';
+  document.getElementById('raidAdvertisePug').checked = !!raid.advertisePug;
+  document.getElementById('pugSignupUrl').value = raid.pugSignupUrl || '';
+  document.getElementById('pugSignupUrlGroup').classList.toggle('hidden', !raid.advertisePug);
   const cancelled = raid.status === 'cancelled';
   document.getElementById('cancelledNote').classList.toggle('hidden', !cancelled);
   document.getElementById('modalSaveBtn').classList.toggle('hidden', cancelled);
@@ -478,6 +504,8 @@ document.getElementById('modalSaveBtn').addEventListener('click', function () {
     templateId: (!modalRaidId && currentMode() === 'template' && document.getElementById('templateSelect').value) ? parseInt(document.getElementById('templateSelect').value, 10) : null,
     size: document.getElementById('raidSize').value,
     zone: document.getElementById('raidZone').value || null,
+    advertisePug: document.getElementById('raidAdvertisePug').checked,
+    pugSignupUrl: document.getElementById('pugSignupUrl').value.trim() || null,
   };
   persist(payload).then(d => { upsertLocal(d.raid); renderCalendar(); closeModal(); }).catch(e => setModalMsg(e.message));
 });

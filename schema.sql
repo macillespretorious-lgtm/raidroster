@@ -72,6 +72,33 @@ CREATE TABLE raid_pool (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Live production table, not previously documented here -- reconstructed from
+-- `SHOW CREATE TABLE raids` against the live DB (2026-09-03). One row per scheduled raid
+-- occurrence, see raids.php / raids/save.php. advertise_pug + pug_signup_url (added
+-- 2026-09-03) are a per-raid opt-in into the public cross-guild calendar at /pugs.php --
+-- no realm field/filter needed since all RR-hosted guilds' toons share one merged realm
+-- environment, so faction alone determines whether a PUG could actually join.
+CREATE TABLE raids (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    guild_id INT NOT NULL,
+    raid_date DATE NOT NULL,
+    start_time TIME NULL,
+    duration_minutes INT NULL,
+    template_id INT NULL,
+    size ENUM('20', '40') NOT NULL DEFAULT '40',
+    zone VARCHAR(20) NULL,
+    name VARCHAR(100) NOT NULL,
+    description MEDIUMTEXT NULL,
+    status ENUM('scheduled', 'cancelled') NOT NULL DEFAULT 'scheduled',
+    created_via ENUM('manual', 'auto') NOT NULL DEFAULT 'manual',
+    advertise_pug TINYINT(1) NOT NULL DEFAULT 0,
+    pug_signup_url VARCHAR(500) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY guild_id (guild_id, raid_date),
+    FOREIGN KEY (template_id) REFERENCES raid_templates(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Live production table, not previously documented here -- reconstructed from
 -- `DESCRIBE raid_cells` against the live DB (2026-08-28). One row per grid slot;
 -- independent of raid_pool (no FK between them), see includes/raid_fetch.php.
 CREATE TABLE raid_cells (
