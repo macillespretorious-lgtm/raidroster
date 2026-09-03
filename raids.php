@@ -297,8 +297,9 @@ function h($s) { return htmlspecialchars($s ?? ''); }
           <p class="field-hint">Lists this raid on the public, cross-guild <a href="/pugs.php" target="_blank" rel="noopener">PUG calendar</a> so players from other guilds can find it. No RaidRoster account needed to view it.</p>
         </div>
         <div class="form-group hidden" id="pugSignupUrlGroup">
-          <label for="pugSignupUrl">Raid-Helper signup link</label>
-          <input type="url" id="pugSignupUrl" placeholder="https://raid-helper.dev/event/...">
+          <label for="pugSignupUrl">Discord invite link</label>
+          <input type="url" id="pugSignupUrl" placeholder="https://discord.gg/...">
+          <p class="field-hint">Signing up happens on the Raid-Helper bot's post in your signup channel, not on a raid-helper.dev page &mdash; so paste an invite generated <em>from that channel</em> (right-click the channel &rarr; Invite People &rarr; Edit invite link), not a generic server invite or channel URL. A channel invite joins a non-member to your server and drops them right there; a plain channel link does nothing for anyone who isn't already a member.</p>
         </div>
 
         <div id="cancelledNote" class="cancelled-note hidden">This raid is cancelled. Restore it or leave it as-is.</div>

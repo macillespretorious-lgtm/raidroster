@@ -83,7 +83,7 @@ function fmt_time($t) {
 <body>
   <div class="wrap">
     <h1>PUG Calendar</h1>
-    <p class="sub">Upcoming raids from RaidRoster.net guilds that are open to pick-up players. No account needed &mdash; find one that fits and sign up via its Raid-Helper link.</p>
+    <p class="sub">Upcoming raids from RaidRoster.net guilds that are open to pick-up players. No account needed &mdash; find one that fits and hit Sign up, which opens the guild's Discord (joining you if you're not already a member) and drops you in the raid's signup channel to sign up via its Raid-Helper post.</p>
 
     <div class="factions">
       <div class="faction-col alliance">
