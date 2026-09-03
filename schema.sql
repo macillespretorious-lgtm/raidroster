@@ -92,6 +92,7 @@ CREATE TABLE raids (
     created_via ENUM('manual', 'auto') NOT NULL DEFAULT 'manual',
     advertise_pug TINYINT(1) NOT NULL DEFAULT 0,
     pug_signup_url VARCHAR(500) NULL,
+    raid_helper_url VARCHAR(500) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY guild_id (guild_id, raid_date),

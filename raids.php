@@ -91,6 +91,7 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'zone'            => $r['zone'],
         'advertisePug'    => (bool)$r['advertise_pug'],
         'pugSignupUrl'    => $r['pug_signup_url'],
+        'raidHelperUrl'   => $r['raid_helper_url'],
     ];
 }
 
@@ -187,6 +188,7 @@ function h($s) { return htmlspecialchars($s ?? ''); }
     .checkbox-label input { width: 15px; height: 15px; cursor: pointer; }
     .field-hint { font-size: 11px; color: #7f8bad; line-height: 1.4; }
     .field-hint a { color: #a3adfa; }
+    .optional-tag { text-transform: none; font-weight: 400; color: #55607a; letter-spacing: normal; }
     .form-group input, .form-group select, .form-group textarea {
       padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px;
       background: #0a0f1e; color: #e8ecff; font-size: 13px; font: inherit;
@@ -290,6 +292,12 @@ function h($s) { return htmlspecialchars($s ?? ''); }
         <div class="form-group">
           <label for="raidDesc">Description</label>
           <textarea id="raidDesc" placeholder="Optional notes"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="raidHelperUrl">Raid-Helper event URL <span class="optional-tag">(optional)</span></label>
+          <input type="url" id="raidHelperUrl" placeholder="https://raid-helper.dev/event/...">
+          <p class="field-hint">Stores this raid's Raid-Helper event so you don't have to re-paste it every time you hit "Import Raid" on the roster page &mdash; and lets a future nightly job re-import signups automatically (e.g. 7pm the night before) without you doing it by hand.</p>
         </div>
 
         <div class="form-group">
@@ -432,6 +440,7 @@ function openNewRaid(date) {
     document.getElementById('raidDesc').value = '';
     document.getElementById('raidZone').value = '';
   }
+  document.getElementById('raidHelperUrl').value = '';
   document.getElementById('raidAdvertisePug').checked = false;
   document.getElementById('pugSignupUrl').value = '';
   document.getElementById('pugSignupUrlGroup').classList.add('hidden');
@@ -456,6 +465,7 @@ function openRaid(id) {
   document.getElementById('raidDuration').value = raid.durationMinutes || '';
   document.getElementById('raidDesc').value = raid.description || '';
   document.getElementById('raidZone').value = raid.zone || '';
+  document.getElementById('raidHelperUrl').value = raid.raidHelperUrl || '';
   document.getElementById('raidAdvertisePug').checked = !!raid.advertisePug;
   document.getElementById('pugSignupUrl').value = raid.pugSignupUrl || '';
   document.getElementById('pugSignupUrlGroup').classList.toggle('hidden', !raid.advertisePug);
@@ -505,6 +515,7 @@ document.getElementById('modalSaveBtn').addEventListener('click', function () {
     templateId: (!modalRaidId && currentMode() === 'template' && document.getElementById('templateSelect').value) ? parseInt(document.getElementById('templateSelect').value, 10) : null,
     size: document.getElementById('raidSize').value,
     zone: document.getElementById('raidZone').value || null,
+    raidHelperUrl: document.getElementById('raidHelperUrl').value.trim() || null,
     advertisePug: document.getElementById('raidAdvertisePug').checked,
     pugSignupUrl: document.getElementById('pugSignupUrl').value.trim() || null,
   };

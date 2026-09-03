@@ -48,6 +48,7 @@ function raid_to_json($r) {
         'zone'            => $r['zone'],
         'advertisePug'    => (bool)$r['advertise_pug'],
         'pugSignupUrl'    => $r['pug_signup_url'],
+        'raidHelperUrl'   => $r['raid_helper_url'],
     ];
 }
 
@@ -76,6 +77,12 @@ if ($action === 'save') {
     $pugSignupUrl = $pugSignupUrl !== '' ? substr($pugSignupUrl, 0, 500) : null;
     if (!$advertisePug) $pugSignupUrl = null;
 
+    // Optional, general-purpose (independent of PUG advertising) -- storing the event URL
+    // here so it doesn't need re-pasting on every manual import, and so a future nightly
+    // cron job can re-run the import unattended without a human in the loop.
+    $raidHelperUrl = isset($body['raidHelperUrl']) ? trim((string)$body['raidHelperUrl']) : '';
+    $raidHelperUrl = $raidHelperUrl !== '' ? substr($raidHelperUrl, 0, 500) : null;
+
     if ($start !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) $start = null;
     if ($desc === '') $desc = null;
 
@@ -101,14 +108,14 @@ if ($action === 'save') {
             echo json_encode(['error' => 'Raid not found']);
             exit;
         }
-        $stmt = $pdo->prepare('UPDATE raids SET name = ?, start_time = ?, duration_minutes = ?, description = ?, zone = ?, advertise_pug = ?, pug_signup_url = ? WHERE id = ? AND guild_id = ?');
-        $stmt->execute([$name, $start, $dur, $desc, $zone, $advertisePug ? 1 : 0, $pugSignupUrl, $id, $tenant['id']]);
+        $stmt = $pdo->prepare('UPDATE raids SET name = ?, start_time = ?, duration_minutes = ?, description = ?, zone = ?, advertise_pug = ?, pug_signup_url = ?, raid_helper_url = ? WHERE id = ? AND guild_id = ?');
+        $stmt->execute([$name, $start, $dur, $desc, $zone, $advertisePug ? 1 : 0, $pugSignupUrl, $raidHelperUrl, $id, $tenant['id']]);
     } else {
         $stmt = $pdo->prepare(
-            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size, zone, advertise_pug, pug_signup_url)
-             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\', ?, ?, ?, ?)'
+            'INSERT INTO raids (guild_id, raid_date, start_time, duration_minutes, template_id, name, description, status, created_via, size, zone, advertise_pug, pug_signup_url, raid_helper_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?, \'scheduled\', \'manual\', ?, ?, ?, ?, ?)'
         );
-        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc, $size, $zone, $advertisePug ? 1 : 0, $pugSignupUrl]);
+        $stmt->execute([$tenant['id'], $date, $start, $dur, $tmplId, $name, $desc, $size, $zone, $advertisePug ? 1 : 0, $pugSignupUrl, $raidHelperUrl]);
         $id = (int)$pdo->lastInsertId();
         if ($tmplId) {
             copy_template_structure_to_raid($pdo, $tmplId, $id);

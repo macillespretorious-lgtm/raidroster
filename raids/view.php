@@ -606,6 +606,7 @@ const TEMPLATE_ID = <?= json_encode($templateId) ?>;
 const PUSH_TEMPLATE_URL = <?= json_encode('/raids/push-template.php?slug=' . $slug) ?>;
 const RAID_ID = <?= json_encode($raidId) ?>;
 const RAID_BOSSES = <?= json_encode(raid_zone_bosses($raid['zone'] ?? null)) ?>;
+const RAID_HELPER_URL = <?= json_encode($raid['raid_helper_url'] ?? '') ?>;
 const USER_ID = <?= json_encode($user['id']) ?>;
 let sections = groupSectionsByKind(<?= json_encode($sections) ?>);
 const roster = <?= json_encode($roster) ?>;
@@ -2158,7 +2159,13 @@ function wireImportControls() {
   const closeBtn = document.getElementById('importCloseBtn');
   const fetchBtn = document.getElementById('importFetchBtn');
   const allBtn = document.getElementById('importAllBtn');
-  if (toggleBtn && backdrop) toggleBtn.addEventListener('click', () => backdrop.classList.add('open'));
+  if (toggleBtn && backdrop) toggleBtn.addEventListener('click', () => {
+    const urlInput = document.getElementById('importUrlInput');
+    // Only prefill when the box is empty -- never clobber something the raid leader is
+    // mid-typing (e.g. a one-off event different from the raid's saved default).
+    if (urlInput && !urlInput.value && RAID_HELPER_URL) urlInput.value = RAID_HELPER_URL;
+    backdrop.classList.add('open');
+  });
   if (closeBtn && backdrop) closeBtn.addEventListener('click', () => backdrop.classList.remove('open'));
   if (backdrop) backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.classList.remove('open'); });
   if (fetchBtn) fetchBtn.addEventListener('click', fetchImportSignups);
